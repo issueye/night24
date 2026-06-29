@@ -14,3 +14,5 @@ rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+anyhow.workspace = true
+chrono.workspace = true

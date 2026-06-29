@@ -1143,6 +1143,8 @@ dependencies = [
 name = "night24-mcp"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
  "night24-core",
  "rmcp",
  "serde",

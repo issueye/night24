@@ -345,6 +345,39 @@ fn resolve_within_workdir(working_dir: &Path, user_path: &str) -> anyhow::Result
     Ok(candidate)
 }
 
+/// Convert a raw HTML string into plain text by stripping tags and collapsing
+/// whitespace. This is a pure function so it can be unit-tested without any
+/// network access.
+fn html_to_text(html: &str) -> String {
+    let text = html
+        .replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<p>", "\n")
+        .replace("</p>", "\n")
+        .replace("<div>", "\n")
+        .replace("</div>", "\n");
+
+    let mut cleaned = String::new();
+    let mut in_tag = false;
+    for ch in text.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' {
+            in_tag = false;
+            cleaned.push('\n');
+        } else if !in_tag {
+            cleaned.push(ch);
+        }
+    }
+
+    let lines: Vec<&str> = cleaned
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    lines.join("\n")
+}
+
 pub async fn execute_tool(
     name: &str,
     arguments: &serde_json::Value,
@@ -660,33 +693,7 @@ pub async fn execute_tool(
                 let response = client.get(url).send().await?;
                 let html = response.text().await?;
 
-                let text = html
-                    .replace("<br>", "\n")
-                    .replace("<br/>", "\n")
-                    .replace("<p>", "\n")
-                    .replace("</p>", "\n")
-                    .replace("<div>", "\n")
-                    .replace("</div>", "\n");
-
-                let mut cleaned = String::new();
-                let mut in_tag = false;
-                for ch in text.chars() {
-                    if ch == '<' {
-                        in_tag = true;
-                    } else if ch == '>' {
-                        in_tag = false;
-                        cleaned.push('\n');
-                    } else if !in_tag {
-                        cleaned.push(ch);
-                    }
-                }
-
-                let lines: Vec<&str> = cleaned
-                    .lines()
-                    .map(|l| l.trim())
-                    .filter(|l| !l.is_empty())
-                    .collect();
-                Ok(lines.join("\n"))
+                Ok(html_to_text(&html))
             }
             "developer__code_interpreter" => {
                 let code = arguments
@@ -843,12 +850,35 @@ mod tests {
         assert!(output.contains("tool_executor.rs"));
     }
 
-    #[tokio::test]
-    async fn test_web_scraper_tool() {
-        let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
-        let args = serde_json::json!({"url": "https://example.com"});
-        let result = execute_tool("developer__web_scraper", &args, PathBuf::from(".").as_path(), &security).await;
-        assert!(result.unwrap().contains("Example Domain"));
+    #[test]
+    fn test_html_to_text_strips_tags() {
+        // Mirrors the structure of example.com without any network access.
+        let html = r#"<!doctype html>
+<html>
+<head><title>Example Domain</title></head>
+<body>
+<div>
+    <h1>Example Domain</h1>
+    <p>This domain is for use in illustrative examples.</p>
+    <p><a href="https://example.com">More information...</a></p>
+</div>
+</body>
+</html>"#;
+        let text = html_to_text(html);
+        assert!(text.contains("Example Domain"));
+        assert!(text.contains("illustrative examples"));
+        assert!(!text.contains("<h1>"));
+        assert!(!text.contains("<p>"));
+    }
+
+    #[test]
+    fn test_html_to_text_collapses_whitespace() {
+        let html = "<div>  one  </div><p>  two  </p><br>three";
+        let text = html_to_text(html);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines.contains(&"one"));
+        assert!(lines.contains(&"two"));
+        assert!(lines.contains(&"three"));
     }
 
     #[tokio::test]

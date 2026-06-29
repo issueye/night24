@@ -53,6 +53,22 @@ impl Agent {
         }
     }
 
+    /// Build the agent with an explicit permission policy. Useful for the
+    /// server layer, which selects between strict/permissive presets based on
+    /// configuration.
+    pub fn with_permission_manager(
+        config: AgentConfig,
+        provider: Arc<dyn Provider>,
+        permission_manager: std::sync::Arc<PermissionManager>,
+    ) -> Self {
+        Self {
+            config,
+            provider,
+            context_manager: ContextManager::default(),
+            security: SecurityInspector::new(permission_manager),
+        }
+    }
+
     pub fn with_context_manager(mut self, context_manager: ContextManager) -> Self {
         self.context_manager = context_manager;
         self

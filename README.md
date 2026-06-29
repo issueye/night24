@@ -54,6 +54,17 @@ GET /api-docs/openapi.json
 
 - `NIGHT24_DATABASE_URL`: SQLite database URL (e.g., `sqlite:file:/data/night24.db?mode=rwc`)
 - `OPENAI_API_KEY`: OpenAI API key for the OpenAI provider
+- `OPENAI_BASE_URL` / `OPENAI_MODEL`: override the OpenAI-compatible endpoint and default model
+- `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL`: Anthropic provider (registered only if key is set)
+- `STEPFUN_API_KEY` / `STEPFUN_BASE_URL` / `STEPFUN_MODEL`: StepFun provider (registered only if key is set)
+- `OLLAMA_BASE_URL` / `OLLAMA_MODEL`: Ollama provider (defaults to `http://localhost:11434` / `llama3.2`)
+- `NIGHT24_API_KEY`: when set, all routes (except `/healthz`, `/swagger-ui`, `/api-docs`) require
+  `Authorization: Bearer <key>` or `X-API-Key: <key>`. When unset, the server is open.
+- `NIGHT24_PERMISSION_MODE`: tool permission policy — `strict` (default, confirm all),
+  `permissive` (auto-allow read-only tools), `allow_all`, or `deny_all`.
+
+> Providers are registered lazily: only those whose API key is present in the
+> environment are enabled. No secrets are hard-coded in the source.
 
 ## License
 
