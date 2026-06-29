@@ -1,0 +1,8 @@
+*.db
+*.exe
+*.log
+
+bin/*
+target/*
+tauri-app/target/*
+$null

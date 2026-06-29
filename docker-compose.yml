@@ -1,0 +1,13 @@
+services:
+  night24:
+    build: .
+    ports:
+      - "17787:17787"
+    environment:
+      - NIGHT24_DATABASE_URL=sqlite:file:/data/night24.db?mode=rwc
+    volumes:
+      - night24-data:/data
+    restart: unless-stopped
+
+volumes:
+  night24-data:

@@ -1,0 +1,32 @@
+[package]
+name = "night24-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core domain layer for Night24 AI Agent"
+
+[dependencies]
+tokio.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# sqlx is optional until DB layer is implemented
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "chrono", "uuid", "macros"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+utoipa.workspace = true
+rmcp.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+meval = { version = "0.2", default-features = false }
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1"

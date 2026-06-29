@@ -1,0 +1,10 @@
+target
+Cargo.lock
+*.db
+*.sqlite
+.git
+.gitignore
+README.md
+docs
+.vscode
+.idea

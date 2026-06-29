@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.91.1"
+authors = ["night24"]
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
+async-stream = { version = "0.3", default-features = false }
+
+# Web
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "tokio", "query"] }
+tower-http = { version = "0.5", default-features = false, features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+# Database
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled", "buildtime-bindgen"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "json", "fmt", "env-filter"] }
+
+# Async traits
+async-trait = { version = "0.1", default-features = false }
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# Utils
+uuid = { version = "1", default-features = false, features = ["v4", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
+anyhow = { version = "1", default-features = false, features = ["std"] }
+thiserror = "2"
+utoipa = { version = "5", default-features = false, features = ["macros", "chrono"] }
+utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
+
+# MCP
+rmcp = { version = "=1.4.0", default-features = false }
+
+# CLI
+clap = { version = "4", default-features = false, features = ["derive", "std"] }
