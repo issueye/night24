@@ -74,6 +74,12 @@ struct WorkspacePathQuery {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+struct WorkspaceDiffQuery {
+    #[serde(default)]
+    staged: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 struct CancelAgentRequest {
     #[schema(example = "run-123")]
     run_id: Option<String>,
@@ -170,6 +176,39 @@ struct WorkspaceFileResponse {
     is_binary: bool,
     content: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+struct WorkspaceStatusResponse {
+    workspace: WorkspaceInfo,
+    is_git_repo: bool,
+    branch: Option<String>,
+    files: Vec<WorkspaceStatusFile>,
+    has_changes: bool,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+struct WorkspaceStatusFile {
+    path: String,
+    index_status: String,
+    worktree_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+struct WorkspaceDiffResponse {
+    workspace: WorkspaceInfo,
+    staged: bool,
+    diff: String,
+    files_changed: usize,
+    insertions: usize,
+    deletions: usize,
+    has_changes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceChangeSnapshot {
+    status: String,
+    diff: String,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -591,7 +630,17 @@ fn locate_agent_core_bin() -> PathBuf {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(healthz, reply, list_sessions, get_session_history, create_session, rename_session, fork_session),
+    paths(
+        healthz,
+        reply,
+        list_sessions,
+        get_session_history,
+        create_session,
+        rename_session,
+        fork_session,
+        workspace_status,
+        workspace_diff
+    ),
     components(schemas(ReplyRequest, CreateSessionRequest, RenameSessionRequest, ForkSessionRequest, SessionSummary)),
     tags(
         (name = "night24", description = "Night24 AI Agent API")
@@ -669,6 +718,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/workspaces/recent", get(recent_workspaces))
         .route("/workspace/tree", get(workspace_tree))
         .route("/workspace/file", get(workspace_file))
+        .route("/workspace/status", get(workspace_status))
+        .route("/workspace/diff", get(workspace_diff))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{id}", delete(delete_session))
         .route("/sessions/{id}/history", get(get_session_history))
@@ -1100,6 +1151,121 @@ fn is_binary_bytes(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|byte| *byte == 0)
 }
 
+fn run_git(root: &FsPath, args: &[&str]) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to run git"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            "git command failed".to_string()
+        } else {
+            stderr
+        };
+        return Err(json_error(StatusCode::BAD_REQUEST, message));
+    }
+
+    String::from_utf8(output.stdout)
+        .map_err(|_| json_error(StatusCode::INTERNAL_SERVER_ERROR, "git output is not utf-8"))
+}
+
+fn ensure_git_workspace(root: &FsPath) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let inside = run_git(root, &["rev-parse", "--is-inside-work-tree"])?;
+    if inside.trim() == "true" {
+        Ok(())
+    } else {
+        Err(json_error(
+            StatusCode::BAD_REQUEST,
+            "workspace is not a git repository",
+        ))
+    }
+}
+
+fn parse_git_status(raw: &str) -> Vec<WorkspaceStatusFile> {
+    raw.lines()
+        .filter_map(|line| {
+            if line.len() < 4 {
+                return None;
+            }
+            let index_status = line.chars().next().unwrap_or(' ').to_string();
+            let worktree_status = line.chars().nth(1).unwrap_or(' ').to_string();
+            let path = line[3..].split(" -> ").last().unwrap_or("").to_string();
+            if path.is_empty() {
+                None
+            } else {
+                Some(WorkspaceStatusFile {
+                    path,
+                    index_status,
+                    worktree_status,
+                })
+            }
+        })
+        .collect()
+}
+
+fn diff_stats(diff: &str) -> (usize, usize, usize) {
+    let mut files_changed = 0;
+    let mut insertions = 0;
+    let mut deletions = 0;
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            files_changed += 1;
+        } else if line.starts_with('+') && !line.starts_with("+++") {
+            insertions += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            deletions += 1;
+        }
+    }
+
+    (files_changed, insertions, deletions)
+}
+
+fn workspace_change_snapshot(
+    root: &FsPath,
+) -> Result<WorkspaceChangeSnapshot, (StatusCode, Json<serde_json::Value>)> {
+    ensure_git_workspace(root)?;
+    Ok(WorkspaceChangeSnapshot {
+        status: run_git(root, &["status", "--porcelain=v1"])?,
+        diff: run_git(root, &["diff", "--no-ext-diff"])?,
+    })
+}
+
+fn build_diff_ready_event(
+    run_id: &str,
+    seq: u64,
+    root: &FsPath,
+    baseline: Option<&WorkspaceChangeSnapshot>,
+) -> Option<serde_json::Value> {
+    let current = workspace_change_snapshot(root).ok()?;
+    if baseline.is_some_and(|baseline| baseline == &current) {
+        return None;
+    }
+    if current.status.trim().is_empty() && current.diff.trim().is_empty() {
+        return None;
+    }
+
+    let (diff_files, insertions, deletions) = diff_stats(&current.diff);
+    let status_files = parse_git_status(&current.status).len();
+    let files_changed = diff_files.max(status_files);
+    Some(serde_json::json!({
+        "type": "diff_ready",
+        "run_id": run_id,
+        "seq": seq,
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "payload": {
+            "files_changed": files_changed,
+            "insertions": insertions,
+            "deletions": deletions,
+            "summary": format!("{} files changed (+{} / -{})", files_changed, insertions, deletions)
+        }
+    }))
+}
+
 #[utoipa::path(
     get,
     path = "/healthz",
@@ -1510,6 +1676,76 @@ async fn workspace_file(
 
 #[utoipa::path(
     get,
+    path = "/workspace/status",
+    tag = "night24",
+    responses(
+        (status = 200, description = "Workspace git status", body = WorkspaceStatusResponse),
+        (status = 409, description = "No workspace is open")
+    )
+)]
+async fn workspace_status(
+    State(state): State<AppState>,
+) -> Result<Json<WorkspaceStatusResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let workspace = current_workspace_info(&state).await?;
+    let root = PathBuf::from(&workspace.root_path);
+    ensure_git_workspace(&root)?;
+
+    let branch = run_git(&root, &["branch", "--show-current"])
+        .ok()
+        .map(|branch| branch.trim().to_string())
+        .filter(|branch| !branch.is_empty());
+    let raw = run_git(&root, &["status", "--porcelain=v1"])?;
+    let files = parse_git_status(&raw);
+    Ok(Json(WorkspaceStatusResponse {
+        workspace,
+        is_git_repo: true,
+        branch,
+        has_changes: !files.is_empty(),
+        files,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/workspace/diff",
+    tag = "night24",
+    params(
+        ("staged" = Option<bool>, Query, description = "Return staged diff instead of worktree diff")
+    ),
+    responses(
+        (status = 200, description = "Workspace git diff", body = WorkspaceDiffResponse),
+        (status = 409, description = "No workspace is open")
+    )
+)]
+async fn workspace_diff(
+    State(state): State<AppState>,
+    Query(query): Query<WorkspaceDiffQuery>,
+) -> Result<Json<WorkspaceDiffResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let workspace = current_workspace_info(&state).await?;
+    let root = PathBuf::from(&workspace.root_path);
+    ensure_git_workspace(&root)?;
+
+    let staged = query.staged.unwrap_or(false);
+    let diff = if staged {
+        run_git(&root, &["diff", "--cached", "--no-ext-diff"])?
+    } else {
+        run_git(&root, &["diff", "--no-ext-diff"])?
+    };
+    let (files_changed, insertions, deletions) = diff_stats(&diff);
+
+    Ok(Json(WorkspaceDiffResponse {
+        workspace,
+        staged,
+        has_changes: !diff.trim().is_empty(),
+        diff,
+        files_changed,
+        insertions,
+        deletions,
+    }))
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions",
     tag = "night24",
     responses(
@@ -1774,6 +2010,8 @@ async fn reply_core(State(state): State<AppState>, Json(req): Json<ReplyRequest>
     let (tx, rx) = mpsc::channel::<Result<String, std::convert::Infallible>>(64);
     let session_manager = state.session_manager.clone();
     let run_id_for_task = run_id.clone();
+    let diff_root = session.working_dir.clone();
+    let diff_baseline = workspace_change_snapshot(&diff_root).ok();
     tokio::spawn(async move {
         let mut session_for_task = session;
         session_for_task.conversation.push(user_message);
@@ -1794,7 +2032,29 @@ async fn reply_core(State(state): State<AppState>, Json(req): Json<ReplyRequest>
                 .unwrap_or("message")
                 .to_string();
             let is_terminal = event_type == "finish" || event_type == "error";
-            if tx.send(Ok(sse_format_event(&event))).await.is_err() {
+
+            let mut event_to_send = event.clone();
+            if is_terminal {
+                let seq = event
+                    .get("seq")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                if let Some(diff_event) = build_diff_ready_event(
+                    &run_id_for_task,
+                    seq,
+                    &diff_root,
+                    diff_baseline.as_ref(),
+                ) {
+                    if let Some(object) = event_to_send.as_object_mut() {
+                        object.insert("seq".to_string(), serde_json::json!(seq + 1));
+                    }
+                    if tx.send(Ok(sse_format_event(&diff_event))).await.is_err() {
+                        break;
+                    }
+                }
+            }
+
+            if tx.send(Ok(sse_format_event(&event_to_send))).await.is_err() {
                 break;
             }
             if is_terminal {
@@ -2129,5 +2389,24 @@ mod tests {
         let file = root.join("src").join("main.rs");
         assert_eq!(workspace_relative_path(&root, &file), "src/main.rs");
         assert_eq!(workspace_relative_path(&root, &root), ".");
+    }
+
+    #[test]
+    fn test_parse_git_status() {
+        let files = parse_git_status(" M src/main.rs\nA  README.md\nR  old.txt -> new.txt\n");
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].path, "src/main.rs");
+        assert_eq!(files[0].index_status, " ");
+        assert_eq!(files[0].worktree_status, "M");
+        assert_eq!(files[2].path, "new.txt");
+    }
+
+    #[test]
+    fn test_diff_stats() {
+        let diff = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@\n-old\n+new\n+line\n";
+        let (files, insertions, deletions) = diff_stats(diff);
+        assert_eq!(files, 1);
+        assert_eq!(insertions, 2);
+        assert_eq!(deletions, 1);
     }
 }

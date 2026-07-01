@@ -90,6 +90,10 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [rightTab, setRightTab] = useState('files');
   const [contextOpen, setContextOpen] = useState(false);
+  const [workspaceStatus, setWorkspaceStatus] = useState(null);
+  const [workspaceDiff, setWorkspaceDiff] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState('');
 
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
@@ -213,6 +217,26 @@ export default function App() {
     }
   }, [apiJson]);
 
+  const loadWorkspaceDiff = useCallback(async () => {
+    if (!workspace) return;
+    setDiffLoading(true);
+    setDiffError('');
+    try {
+      const [status, diff] = await Promise.all([
+        apiJson('/workspace/status'),
+        apiJson('/workspace/diff'),
+      ]);
+      setWorkspaceStatus(status);
+      setWorkspaceDiff(diff);
+    } catch (error) {
+      setWorkspaceStatus(null);
+      setWorkspaceDiff(null);
+      setDiffError(normalizeError(error));
+    } finally {
+      setDiffLoading(false);
+    }
+  }, [apiJson, workspace]);
+
   useEffect(() => {
     writeSetting(STORAGE_KEYS.apiBase, apiBase);
   }, [apiBase]);
@@ -267,6 +291,9 @@ export default function App() {
       });
       setWorkspace(opened);
       setSelectedFile(null);
+      setWorkspaceStatus(null);
+      setWorkspaceDiff(null);
+      setDiffError('');
       const data = await apiJson('/workspace/tree');
       setTree(data?.root || null);
       await loadWorkspace();
@@ -286,6 +313,12 @@ export default function App() {
     } catch (error) {
       showError(`读取文件失败：${normalizeError(error)}`);
     }
+  }
+
+  function openContextTab(tab) {
+    setRightTab(tab);
+    setContextOpen(true);
+    if (tab === 'diff') loadWorkspaceDiff();
   }
 
   async function createSession() {
@@ -405,6 +438,8 @@ export default function App() {
         arguments: eventPayload?.arguments || eventPayload?.params,
       };
       setPendingPermissions((items) => [permission, ...items.filter((item) => item.permission_id !== permission.permission_id)]);
+      setRightTab('permissions');
+      setContextOpen(true);
       addTimeline(eventType, '等待权限确认', `${permission.tool_name} · ${permission.summary}`, 'warning');
       return;
     }
@@ -435,6 +470,9 @@ export default function App() {
     }
 
     if (eventType === 'diff_ready') {
+      setRightTab('diff');
+      setContextOpen(true);
+      loadWorkspaceDiff();
       addTimeline(eventType, '变更已生成', eventPayload?.summary || safeText(eventPayload), 'success');
       return;
     }
@@ -457,6 +495,10 @@ export default function App() {
       setIsRunning(false);
       const finishStatus = eventPayload?.status || 'completed';
       setActiveRun((run) => (run ? { ...run, status: finishStatus } : null));
+      if (runId) {
+        setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
+      }
+      loadWorkspaceDiff();
       addTimeline(eventType, '任务结束', finishStatus, finishStatus === 'failed' ? 'error' : finishStatus === 'cancelled' ? 'warning' : 'success');
       loadSessions();
       return;
@@ -465,6 +507,9 @@ export default function App() {
     if (eventType === 'error') {
       const detail = eventPayload?.message || eventPayload?.error || safeText(eventPayload);
       addTimeline(eventType, '任务错误', detail, 'error');
+      if (runId) {
+        setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
+      }
       showError(detail);
       return;
     }
@@ -594,6 +639,10 @@ export default function App() {
       } else {
         addTimeline('cancel', '已请求取消', result?.run_id || activeRun?.run_id || '当前任务', 'warning');
       }
+      const cancelledRunId = result?.run_id || activeRun?.run_id;
+      if (cancelledRunId) {
+        setPendingPermissions((items) => items.filter((item) => item.run_id !== cancelledRunId));
+      }
     } catch (error) {
       addTimeline('cancel', '本地已停止，取消接口不可用', normalizeError(error), 'warning');
     } finally {
@@ -681,8 +730,7 @@ export default function App() {
           onSendTask={sendTask}
           onCancelRun={cancelRun}
           onOpenContext={(tab) => {
-            setRightTab(tab);
-            setContextOpen(true);
+            openContextTab(tab);
           }}
         />
 
@@ -690,9 +738,14 @@ export default function App() {
           open={contextOpen}
           rightTab={rightTab}
           selectedFile={selectedFile}
+          diff={workspaceDiff}
+          status={workspaceStatus}
+          diffLoading={diffLoading}
+          diffError={diffError}
           pendingPermissions={pendingPermissions}
-          onTabChange={setRightTab}
+          onTabChange={openContextTab}
           onClose={() => setContextOpen(false)}
+          onRefreshDiff={loadWorkspaceDiff}
           onResolvePermission={resolvePermission}
         />
       </main>

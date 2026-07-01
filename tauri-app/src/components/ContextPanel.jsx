@@ -1,5 +1,6 @@
 import { Code2, FileCode2, GitCompare, ShieldAlert, X } from 'lucide-react';
 import { safeText } from '../utils/format.js';
+import { DiffPanel } from './DiffPanel.jsx';
 import { FilePreview } from './FilePreview.jsx';
 import { Placeholder } from './Placeholder.jsx';
 
@@ -7,9 +8,14 @@ export function ContextPanel({
   open,
   rightTab,
   selectedFile,
+  diff,
+  status,
+  diffLoading,
+  diffError,
   pendingPermissions,
   onTabChange,
   onClose,
+  onRefreshDiff,
   onResolvePermission,
 }) {
   if (!open) return null;
@@ -29,7 +35,7 @@ export function ContextPanel({
       </div>
 
       {rightTab === 'files' && <FilePreview file={selectedFile} />}
-      {rightTab === 'diff' && <Placeholder title="当前任务尚未产生可审阅变更" detail="后续接入 workspace diff API 后会在这里显示修改。" />}
+      {rightTab === 'diff' && <DiffPanel diff={diff} status={status} loading={diffLoading} error={diffError} onRefresh={onRefreshDiff} />}
       {rightTab === 'preview' && <Placeholder title="尚未启动预览" detail="后续接入进程管理后会在这里显示本地预览地址。" />}
       {rightTab === 'permissions' && <section className="permissions">
         <div className="section-title">

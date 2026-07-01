@@ -1,22 +1,30 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 use chrono::Utc;
-use night24_core::agent::{Agent, AgentConfig};
+use futures::StreamExt;
 use night24_core::model::{ContentBlock, Message, Role};
+use night24_core::permission::{PermissionLevel, PermissionManager, ToolCategory};
 use night24_core::provider::{
     AnthropicProvider, EchoProvider, ModelConfig, OpenAIProvider, Provider,
 };
+use night24_core::security::SecurityInspector;
+use night24_core::tool_executor::execute_tool;
 use night24_core::OllamaProvider;
-use night24_core::session::{Session, SessionType};
 use night24_protocol::{
     AcceptedResult, AgentEvent, AgentEventKind, AgentToolsParams, AgentToolsResult, CancelParams,
-    Capability, FinishStatus, InitializeParams, InitializeResult, JsonRpcError, JsonRpcId,
-    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, PeerInfo, PingParams, PingResult,
-    ProviderConfig, ReplyAccepted, ReplyParams, ShutdownParams, PROTOCOL_VERSION,
+    Capability, EventError, FinishStatus, InitializeParams, InitializeResult, JsonRpcError,
+    JsonRpcId, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, PeerInfo, PermissionDecision,
+    PermissionResolution, PingParams, PingResult, ProviderConfig, ReplyAccepted, ReplyParams,
+    RiskLevel, ShutdownParams, PROTOCOL_VERSION,
 };
 use serde::de::DeserializeOwned;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::time::Instant;
 
 const SERVER_NAME: &str = "night24-agent-core";
 
@@ -27,11 +35,71 @@ enum CoreState {
     Draining,
 }
 
+#[derive(Clone)]
+struct RunHandle {
+    cancelled: Arc<AtomicBool>,
+}
+
+struct PermissionHandle {
+    run_id: String,
+    sender: oneshot::Sender<PermissionDecision>,
+}
+
+#[derive(Clone)]
+struct RunContext {
+    run_id: String,
+    emit_tool_events: bool,
+    cancelled: Arc<AtomicBool>,
+    seq: Arc<AtomicU64>,
+    output: Option<UnboundedSender<String>>,
+    collected: Option<Arc<Mutex<Vec<String>>>>,
+    permissions: Arc<Mutex<HashMap<String, PermissionHandle>>>,
+}
+
+impl RunContext {
+    fn next_seq(&self) -> u64 {
+        self.seq.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn emit(&self, kind: AgentEventKind) -> String {
+        agent_event_notification(AgentEvent::new(self.run_id.clone(), self.next_seq(), kind))
+    }
+
+    fn send(&self, kind: AgentEventKind) {
+        let message = self.emit(kind);
+        if let Some(output) = &self.output {
+            let _ = output.send(message);
+        } else if let Some(collected) = &self.collected {
+            if let Ok(mut collected) = collected.lock() {
+                collected.push(message);
+            }
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    fn drain_collected(&self) -> Vec<String> {
+        self.collected
+            .as_ref()
+            .and_then(|collected| {
+                collected
+                    .lock()
+                    .ok()
+                    .map(|mut values| values.drain(..).collect())
+            })
+            .unwrap_or_default()
+    }
+}
+
 pub struct AgentCore {
     state: CoreState,
     exit_after_flush: bool,
     default_provider: String,
     output: Option<UnboundedSender<String>>,
+    runs: Arc<Mutex<HashMap<String, RunHandle>>>,
+    permissions: Arc<Mutex<HashMap<String, PermissionHandle>>>,
 }
 
 impl Default for AgentCore {
@@ -41,6 +109,8 @@ impl Default for AgentCore {
             exit_after_flush: false,
             default_provider: "echo".to_string(),
             output: None,
+            runs: Arc::new(Mutex::new(HashMap::new())),
+            permissions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -102,7 +172,10 @@ impl AgentCore {
                 self.agent_cancel(id, request.params)
             }
             "permission.resolve" => {
-                vec![self.success_response(id, AcceptedResult { accepted: true })]
+                if !self.is_initialized() {
+                    return vec![self.error_response(id, JsonRpcError::core_not_initialized())];
+                }
+                self.permission_resolve(id, request.params)
             }
             method => vec![self.error_response(id, JsonRpcError::method_not_found(method))],
         }
@@ -190,78 +263,285 @@ impl AgentCore {
             Ok(params) => params,
             Err(err) => return vec![self.error_response(id, err)],
         };
+        let run_id = params.run_id.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Ok(mut runs) = self.runs.lock() {
+            runs.insert(
+                run_id.clone(),
+                RunHandle {
+                    cancelled: cancelled.clone(),
+                },
+            );
+        } else {
+            return vec![
+                self.error_response(id, JsonRpcError::internal_error("run state lock poisoned"))
+            ];
+        }
 
         let accepted = self.success_response(
             id,
             ReplyAccepted {
                 accepted: true,
-                run_id: params.run_id.clone(),
+                run_id: run_id.clone(),
             },
         );
 
+        let context = RunContext {
+            run_id: run_id.clone(),
+            emit_tool_events: params.options.emit_tool_events,
+            cancelled,
+            seq: Arc::new(AtomicU64::new(1)),
+            output: self.output.clone(),
+            collected: if self.output.is_none() {
+                Some(Arc::new(Mutex::new(Vec::new())))
+            } else {
+                None
+            },
+            permissions: self.permissions.clone(),
+        };
+        let runs = self.runs.clone();
+        let permissions = self.permissions.clone();
+        let default_provider = self.default_provider.clone();
+
         if let Some(output) = self.output.clone() {
-            let default_provider = self.default_provider.clone();
             tokio::spawn(async move {
-                for message in reply_events(params, default_provider).await {
+                let events = reply_events(params, default_provider, context).await;
+                for message in events {
                     let _ = output.send(message);
                 }
+                cleanup_run(&runs, &permissions, &run_id);
             });
             return vec![accepted];
         }
 
         let mut output = vec![accepted];
-        output.extend(reply_events(params, self.default_provider.clone()).await);
+        output.extend(reply_events(params, default_provider, context).await);
+        cleanup_run(&runs, &permissions, &run_id);
         output
     }
 
     fn agent_cancel(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {
-        if let Err(err) = decode_params::<CancelParams>(params) {
-            return vec![self.error_response(id, err)];
-        }
+        let params = match decode_params::<CancelParams>(params) {
+            Ok(params) => params,
+            Err(err) => return vec![self.error_response(id, err)],
+        };
+
+        let Some(handle) = self
+            .runs
+            .lock()
+            .ok()
+            .and_then(|runs| runs.get(&params.run_id).cloned())
+        else {
+            return vec![self.error_response(
+                id,
+                JsonRpcError::new(night24_protocol::RUN_NOT_FOUND, "run not found"),
+            )];
+        };
+
+        handle.cancelled.store(true, Ordering::SeqCst);
+        deny_pending_permissions_for_run(&self.permissions, &params.run_id);
 
         vec![self.success_response(id, AcceptedResult { accepted: true })]
     }
 
-    async fn run_agent(params: &ReplyParams, default_provider: &str) -> anyhow::Result<Vec<Message>> {
+    fn permission_resolve(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {
+        let params = match decode_params::<PermissionResolution>(params) {
+            Ok(params) => params,
+            Err(err) => return vec![self.error_response(id, err)],
+        };
+
+        let permission = self
+            .permissions
+            .lock()
+            .ok()
+            .and_then(|mut permissions| permissions.remove(&params.permission_id));
+
+        let Some(permission) = permission else {
+            return vec![self.error_response(
+                id,
+                JsonRpcError::new(
+                    night24_protocol::PERMISSION_REQUEST_NOT_FOUND,
+                    "permission request not found",
+                ),
+            )];
+        };
+
+        if permission.run_id != params.run_id {
+            return vec![self.error_response(
+                id,
+                JsonRpcError::new(
+                    night24_protocol::PERMISSION_REQUEST_NOT_FOUND,
+                    "permission request does not belong to run",
+                ),
+            )];
+        }
+
+        let _ = permission.sender.send(params.decision);
+        vec![self.success_response(id, AcceptedResult { accepted: true })]
+    }
+
+    async fn run_agent_with_events(
+        params: &ReplyParams,
+        default_provider: &str,
+        context: &RunContext,
+    ) -> anyhow::Result<Vec<Message>> {
         let provider_config = effective_provider(&params.provider, default_provider);
         let model = effective_model(&provider_config);
         let provider = create_provider(&provider_config)?;
+        let permission_manager =
+            permission_manager_for_mode(params.options.permission_mode.as_deref());
+        let security = SecurityInspector::new(Arc::new(permission_manager));
 
-        let config = AgentConfig {
-            model_config: ModelConfig {
-                model,
-                temperature: None,
-                max_tokens: None,
-            },
-            system_prompt: "You are Night24 Agent Core.".to_string(),
-            max_turns: params.limits.max_turns.max(1),
-            turn_timeout: Duration::from_millis(params.limits.turn_timeout_ms.max(1)),
-            tool_timeout: Duration::from_millis(params.limits.tool_timeout_ms.max(1)),
-            total_timeout: Duration::from_millis(params.limits.total_timeout_ms.max(1)),
-        };
-
-        let agent = Agent::new(config, provider);
-        let now = Utc::now();
-        let mut session = Session {
-            id: params.session.id.clone(),
-            name: params.session.name.clone(),
-            session_type: SessionType::User,
-            working_dir: params.session.working_dir.clone(),
-            conversation: params.session.conversation.clone(),
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
-        };
-        let user_message = Message {
+        let system = "You are Night24 Agent Core.".to_string();
+        let tools = night24_core::tool_executor::builtin_tools();
+        let mut messages = params.session.conversation.clone();
+        messages.push(Message {
             id: format!("{}-input", params.run_id),
             role: Role::User,
             content: vec![ContentBlock::Text {
                 text: params.input.text.clone(),
             }],
             created_at: Utc::now(),
-        };
+        });
 
-        agent.run(&mut session, user_message).await
+        let mut final_messages = Vec::new();
+        let total_deadline = tokio::time::timeout(
+            Duration::from_millis(params.limits.total_timeout_ms.max(1)),
+            async {
+                for _turn in 0..params.limits.max_turns.max(1) {
+                    if context.is_cancelled() {
+                        anyhow::bail!("cancelled");
+                    }
+
+                    let model_config = ModelConfig {
+                        model: model.clone(),
+                        temperature: None,
+                        max_tokens: None,
+                    };
+                    let turn_result = tokio::time::timeout(
+                        Duration::from_millis(params.limits.turn_timeout_ms.max(1)),
+                        async {
+                            let mut stream = provider
+                                .stream(&model_config, &system, &messages, &tools)
+                                .await?;
+                            let mut turn_messages = Vec::new();
+                            let mut has_tool_requests = false;
+                            while let Some(result) = stream.next().await {
+                                if context.is_cancelled() {
+                                    anyhow::bail!("cancelled");
+                                }
+                                let (message, _usage) = result?;
+                                if let Some(message) = message {
+                                    has_tool_requests |= message.content.iter().any(|block| {
+                                        matches!(block, ContentBlock::ToolRequest { .. })
+                                    });
+                                    context.send(AgentEventKind::Message {
+                                        message: message.clone(),
+                                    });
+                                    turn_messages.push(message);
+                                }
+                            }
+
+                            anyhow::Ok((turn_messages, has_tool_requests))
+                        },
+                    )
+                    .await
+                    .map_err(|_| anyhow::anyhow!("agent turn timed out"))??;
+                    let (turn_messages, has_tool_requests) = turn_result;
+
+                    if turn_messages.is_empty() {
+                        break;
+                    }
+
+                    let mut executed_messages = Vec::new();
+                    for message in &turn_messages {
+                        let mut had_tool_request = false;
+                        let mut blocks = Vec::new();
+                        for block in &message.content {
+                            match block {
+                                ContentBlock::ToolRequest {
+                                    id,
+                                    name,
+                                    arguments,
+                                } => {
+                                    had_tool_request = true;
+                                    let started = Instant::now();
+                                    let result = execute_tool_with_events(
+                                        context,
+                                        &security,
+                                        id,
+                                        name,
+                                        arguments,
+                                        &params.session.working_dir,
+                                        Duration::from_millis(params.limits.tool_timeout_ms.max(1)),
+                                    )
+                                    .await;
+                                    match result {
+                                        Ok(content) => {
+                                            blocks.push(ContentBlock::ToolResponse {
+                                                id: id.clone(),
+                                                content,
+                                                is_error: false,
+                                            });
+                                        }
+                                        Err(err) => {
+                                            let content = format!("error: {err}");
+                                            if context.emit_tool_events {
+                                                context.send(AgentEventKind::ToolFailed {
+                                                    tool_call_id: id.clone(),
+                                                    tool_name: name.clone(),
+                                                    duration_ms: started.elapsed().as_millis()
+                                                        as u64,
+                                                    error: EventError {
+                                                        code: if context.is_cancelled() {
+                                                            "cancelled".to_string()
+                                                        } else {
+                                                            "tool_execution_failed".to_string()
+                                                        },
+                                                        message: err.to_string(),
+                                                    },
+                                                });
+                                            }
+                                            blocks.push(ContentBlock::ToolResponse {
+                                                id: id.clone(),
+                                                content,
+                                                is_error: true,
+                                            });
+                                        }
+                                    }
+                                }
+                                other => blocks.push(other.clone()),
+                            }
+                        }
+                        if had_tool_request && !blocks.is_empty() {
+                            executed_messages.push(Message {
+                                id: message.id.clone(),
+                                role: message.role,
+                                content: blocks,
+                                created_at: message.created_at,
+                            });
+                        }
+                    }
+
+                    messages.extend(turn_messages.clone());
+                    messages.extend(executed_messages.clone());
+                    final_messages.extend(turn_messages);
+                    final_messages.extend(executed_messages);
+
+                    if !has_tool_requests {
+                        break;
+                    }
+                }
+                anyhow::Ok(())
+            },
+        )
+        .await;
+
+        match total_deadline {
+            Ok(Ok(())) => Ok(final_messages),
+            Ok(Err(err)) => Err(err),
+            Err(_) => anyhow::bail!("agent run timed out"),
+        }
     }
 
     fn is_initialized(&self) -> bool {
@@ -290,44 +570,244 @@ fn core_capabilities() -> Vec<Capability> {
         Capability::new("agent.tools", 1),
         Capability::new("agent.cancel", 1),
         Capability::new("agent.event", 1),
+        Capability::new("permission.resolve", 1),
     ]
 }
 
-async fn reply_events(params: ReplyParams, default_provider: String) -> Vec<String> {
-    match AgentCore::run_agent(&params, &default_provider).await {
+async fn reply_events(
+    params: ReplyParams,
+    default_provider: String,
+    context: RunContext,
+) -> Vec<String> {
+    match AgentCore::run_agent_with_events(&params, &default_provider, &context).await {
         Ok(messages) => {
-            let mut output = Vec::with_capacity(messages.len() + 1);
-            let mut seq = 1;
-            for message in &messages {
-                output.push(agent_event_notification(AgentEvent::new(
-                    params.run_id.clone(),
-                    seq,
-                    AgentEventKind::Message {
-                        message: message.clone(),
-                    },
-                )));
-                seq += 1;
-            }
+            let mut output = context.drain_collected();
             output.push(agent_event_notification(AgentEvent::new(
-                params.run_id,
-                seq,
+                params.run_id.clone(),
+                context.next_seq(),
                 AgentEventKind::Finish {
-                    status: FinishStatus::Completed,
+                    status: if context.is_cancelled() {
+                        FinishStatus::Cancelled
+                    } else {
+                        FinishStatus::Completed
+                    },
                     messages,
                     usage: None,
                 },
             )));
             output
         }
-        Err(err) => vec![agent_event_notification(AgentEvent::new(
-            params.run_id,
-            1,
-            AgentEventKind::Error {
-                code: "internal_error".to_string(),
-                message: err.to_string(),
-                recoverable: false,
-            },
-        ))],
+        Err(err) => {
+            let message = err.to_string();
+            let mut output = context.drain_collected();
+            if context.is_cancelled() || message.contains("cancelled") {
+                output.push(agent_event_notification(AgentEvent::new(
+                    params.run_id,
+                    context.next_seq(),
+                    AgentEventKind::Finish {
+                        status: FinishStatus::Cancelled,
+                        messages: Vec::new(),
+                        usage: None,
+                    },
+                )));
+                output
+            } else {
+                output.push(agent_event_notification(AgentEvent::new(
+                    params.run_id,
+                    context.next_seq(),
+                    AgentEventKind::Error {
+                        code: "internal_error".to_string(),
+                        message,
+                        recoverable: false,
+                    },
+                )));
+                output
+            }
+        }
+    }
+}
+
+async fn execute_tool_with_events(
+    context: &RunContext,
+    security: &SecurityInspector,
+    tool_call_id: &str,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+    working_dir: &std::path::Path,
+    tool_timeout: Duration,
+) -> anyhow::Result<String> {
+    if context.is_cancelled() {
+        anyhow::bail!("cancelled");
+    }
+
+    match security.require_permission(tool_name).await {
+        PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
+        PermissionLevel::Confirm => {
+            let permission_id = format!("perm-{}", uuid::Uuid::new_v4());
+            let (tx, rx) = oneshot::channel();
+            context
+                .permissions
+                .lock()
+                .map_err(|_| anyhow::anyhow!("permission state lock poisoned"))?
+                .insert(
+                    permission_id.clone(),
+                    PermissionHandle {
+                        run_id: context.run_id.clone(),
+                        sender: tx,
+                    },
+                );
+
+            context.send(AgentEventKind::PermissionRequired {
+                permission_id,
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                risk: risk_for_tool(tool_name),
+                summary: summarize_tool_call(tool_name, arguments),
+                arguments: arguments.clone(),
+                timeout_ms: 300_000,
+            });
+
+            let decision = tokio::time::timeout(Duration::from_secs(300), rx)
+                .await
+                .map_err(|_| anyhow::anyhow!("permission request timed out"))?
+                .map_err(|_| anyhow::anyhow!("permission request closed"))?;
+
+            if matches!(decision, PermissionDecision::Deny) {
+                anyhow::bail!("permission denied for {tool_name}");
+            }
+        }
+        PermissionLevel::Allow => {}
+    }
+
+    if context.is_cancelled() {
+        anyhow::bail!("cancelled");
+    }
+
+    if context.emit_tool_events {
+        context.send(AgentEventKind::ToolStarted {
+            tool_call_id: tool_call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            summary: summarize_tool_call(tool_name, arguments),
+            arguments: arguments.clone(),
+        });
+    }
+
+    let started = Instant::now();
+    let result = tokio::time::timeout(
+        tool_timeout,
+        execute_tool(tool_name, arguments, working_dir, security),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("tool timed out after {:?}", tool_timeout))??;
+
+    if context.is_cancelled() {
+        anyhow::bail!("cancelled");
+    }
+
+    if context.emit_tool_events {
+        context.send(AgentEventKind::ToolFinished {
+            tool_call_id: tool_call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            duration_ms: started.elapsed().as_millis() as u64,
+            summary: format!("{} completed", tool_name),
+            result_preview: preview(&result),
+            is_error: false,
+        });
+    }
+
+    Ok(result)
+}
+
+fn permission_manager_for_mode(mode: Option<&str>) -> PermissionManager {
+    match mode
+        .unwrap_or("strict")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "allow_all" => PermissionManager::new(PermissionLevel::Allow),
+        "deny_all" => PermissionManager::new(PermissionLevel::Deny),
+        "permissive" => PermissionManager::permissive_local(),
+        _ => PermissionManager::default(),
+    }
+}
+
+fn risk_for_tool(tool_name: &str) -> RiskLevel {
+    match ToolCategory::from_tool_name(tool_name) {
+        ToolCategory::Shell | ToolCategory::Write => RiskLevel::High,
+        ToolCategory::Network => RiskLevel::Medium,
+        ToolCategory::Read | ToolCategory::Other => RiskLevel::Low,
+    }
+}
+
+fn summarize_tool_call(tool_name: &str, arguments: &serde_json::Value) -> String {
+    match tool_name {
+        "developer__shell" => arguments
+            .get("command")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("Run shell command: {}", value))
+            .unwrap_or_else(|| "Run shell command".to_string()),
+        "developer__write_file" => arguments
+            .get("path")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("Write file: {}", value))
+            .unwrap_or_else(|| "Write file".to_string()),
+        "developer__read_file" => arguments
+            .get("path")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("Read file: {}", value))
+            .unwrap_or_else(|| "Read file".to_string()),
+        _ => format!("Call {}", tool_name),
+    }
+}
+
+fn preview(text: &str) -> String {
+    const MAX_PREVIEW: usize = 500;
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= MAX_PREVIEW {
+        compact
+    } else {
+        compact.chars().take(MAX_PREVIEW).collect::<String>() + "..."
+    }
+}
+
+fn cleanup_run(
+    runs: &Arc<Mutex<HashMap<String, RunHandle>>>,
+    permissions: &Arc<Mutex<HashMap<String, PermissionHandle>>>,
+    run_id: &str,
+) {
+    if let Ok(mut runs) = runs.lock() {
+        runs.remove(run_id);
+    }
+    deny_pending_permissions_for_run(permissions, run_id);
+}
+
+fn deny_pending_permissions_for_run(
+    permissions: &Arc<Mutex<HashMap<String, PermissionHandle>>>,
+    run_id: &str,
+) {
+    let pending = permissions
+        .lock()
+        .ok()
+        .map(|mut permissions| {
+            let ids = permissions
+                .iter()
+                .filter_map(|(id, handle)| {
+                    if handle.run_id == run_id {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|id| permissions.remove(&id))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    for permission in pending {
+        let _ = permission.sender.send(PermissionDecision::Deny);
     }
 }
 
@@ -373,11 +853,7 @@ fn create_provider(config: &ProviderConfig) -> anyhow::Result<Arc<dyn Provider>>
         "echo" => Ok(Arc::new(EchoProvider)),
         "openai" | "openai-responses" => {
             let api_key = resolve_api_key(config, "OPENAI_API_KEY")?;
-            let base_url = resolve_base_url(
-                config,
-                "OPENAI_BASE_URL",
-                "https://api.openai.com/v1",
-            );
+            let base_url = resolve_base_url(config, "OPENAI_BASE_URL", "https://api.openai.com/v1");
             Ok(Arc::new(
                 OpenAIProvider::new(api_key)
                     .with_base_url(base_url)
@@ -615,6 +1091,129 @@ mod tests {
         assert_eq!(finish["params"]["payload"]["status"], "completed");
     }
 
+    #[tokio::test]
+    async fn strict_tool_call_waits_for_permission_and_continues_after_approve() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut core = AgentCore::with_output(tx);
+        initialize_core(&mut core).await;
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": "rpc-reply",
+            "method": "agent.reply",
+            "params": {
+                "run_id": "run-permission",
+                "session": {
+                    "id": "session-1",
+                    "name": "test",
+                    "working_dir": ".",
+                    "conversation": []
+                },
+                "input": { "text": "tool:datetime:" },
+                "provider": { "provider": "echo", "model": "echo-v1" },
+                "limits": {
+                    "max_turns": 1,
+                    "turn_timeout_ms": 10000,
+                    "tool_timeout_ms": 10000,
+                    "total_timeout_ms": 30000
+                },
+                "options": {
+                    "stream_message_delta": false,
+                    "emit_tool_events": true,
+                    "permission_mode": "strict"
+                }
+            }
+        });
+
+        let accepted = core.handle_line(&request.to_string()).await;
+        let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+        assert_eq!(accepted["result"]["accepted"], true);
+
+        let permission = next_event_of_type(&mut rx, "permission_required").await;
+        let permission_id = permission["params"]["payload"]["permission_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let resolve = json!({
+            "jsonrpc": "2.0",
+            "id": "rpc-permission",
+            "method": "permission.resolve",
+            "params": {
+                "run_id": "run-permission",
+                "permission_id": permission_id,
+                "decision": "approve"
+            }
+        });
+        let resolved = core.handle_line(&resolve.to_string()).await;
+        let resolved: serde_json::Value = serde_json::from_str(&resolved[0]).unwrap();
+        assert_eq!(resolved["result"]["accepted"], true);
+
+        let tool_started = next_event_of_type(&mut rx, "tool_started").await;
+        assert_eq!(
+            tool_started["params"]["payload"]["tool_name"],
+            "developer__datetime"
+        );
+        let finish = next_event_of_type(&mut rx, "finish").await;
+        assert_eq!(finish["params"]["payload"]["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn cancel_unblocks_pending_permission_and_finishes_cancelled() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut core = AgentCore::with_output(tx);
+        initialize_core(&mut core).await;
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": "rpc-reply",
+            "method": "agent.reply",
+            "params": {
+                "run_id": "run-cancel",
+                "session": {
+                    "id": "session-1",
+                    "name": "test",
+                    "working_dir": ".",
+                    "conversation": []
+                },
+                "input": { "text": "tool:datetime:" },
+                "provider": { "provider": "echo", "model": "echo-v1" },
+                "limits": {
+                    "max_turns": 1,
+                    "turn_timeout_ms": 10000,
+                    "tool_timeout_ms": 10000,
+                    "total_timeout_ms": 30000
+                },
+                "options": {
+                    "stream_message_delta": false,
+                    "emit_tool_events": true,
+                    "permission_mode": "strict"
+                }
+            }
+        });
+
+        let accepted = core.handle_line(&request.to_string()).await;
+        let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+        assert_eq!(accepted["result"]["accepted"], true);
+        let _permission = next_event_of_type(&mut rx, "permission_required").await;
+
+        let cancel = json!({
+            "jsonrpc": "2.0",
+            "id": "rpc-cancel",
+            "method": "agent.cancel",
+            "params": {
+                "run_id": "run-cancel",
+                "reason": "test"
+            }
+        });
+        let cancelled = core.handle_line(&cancel.to_string()).await;
+        let cancelled: serde_json::Value = serde_json::from_str(&cancelled[0]).unwrap();
+        assert_eq!(cancelled["result"]["accepted"], true);
+
+        let finish = next_event_of_type(&mut rx, "finish").await;
+        assert_eq!(finish["params"]["payload"]["status"], "cancelled");
+    }
+
     #[test]
     fn stepfun_provider_requires_key_without_falling_back_to_echo() {
         let config = ProviderConfig {
@@ -648,6 +1247,11 @@ mod tests {
 
     async fn initialized_core() -> AgentCore {
         let mut core = AgentCore::default();
+        initialize_core(&mut core).await;
+        core
+    }
+
+    async fn initialize_core(core: &mut AgentCore) {
         let output = core
             .handle_line(
                 r#"{"jsonrpc":"2.0","id":"rpc-init","method":"core.initialize","params":{"protocol_version":"2026-07-01","client":{"name":"night24-server","version":"0.1.0"},"capabilities":[]}}"#,
@@ -655,6 +1259,22 @@ mod tests {
             .await;
         let value: serde_json::Value = serde_json::from_str(&output[0]).unwrap();
         assert_eq!(value["result"]["protocol_version"], "2026-07-01");
-        core
+    }
+
+    async fn next_event_of_type(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+        event_type: &str,
+    ) -> serde_json::Value {
+        for _ in 0..20 {
+            let raw = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("timed out waiting for agent event")
+                .expect("agent event channel closed");
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            if value["params"]["type"] == event_type {
+                return value;
+            }
+        }
+        panic!("event type {event_type} was not emitted");
     }
 }

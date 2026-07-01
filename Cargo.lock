@@ -1120,6 +1120,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "futures",
  "night24-core",
  "night24-protocol",
  "serde",
@@ -1127,6 +1128,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
