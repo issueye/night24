@@ -2,8 +2,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use async_stream::try_stream;
+use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
 use reqwest::Client;
@@ -12,9 +12,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::model::{ContentBlock, Message, Role};
-use crate::provider::{
-    MessageStream, ModelConfig, Provider, ProviderError, ProviderUsage,
-};
+use crate::provider::{MessageStream, ModelConfig, Provider, ProviderError, ProviderUsage};
 
 #[derive(Debug, Clone)]
 pub struct OpenAIProvider {
@@ -235,7 +233,8 @@ impl AccumulatedMessage {
             blocks.push(ContentBlock::ToolRequest {
                 id: tc.id,
                 name: tc.function.name,
-                arguments: serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({})),
+                arguments: serde_json::from_str(&tc.function.arguments)
+                    .unwrap_or(serde_json::json!({})),
             });
         }
 
@@ -374,7 +373,11 @@ fn openai_message_from_goose(msg: &Message) -> OpenAiMessage {
             ContentBlock::Text { text } => {
                 content = Some(OpenAiContent::Text(text.clone()));
             }
-            ContentBlock::ToolRequest { id, name, arguments } => {
+            ContentBlock::ToolRequest {
+                id,
+                name,
+                arguments,
+            } => {
                 tool_calls.push(OpenAiToolCall {
                     id: id.clone(),
                     tool_type: "function".to_string(),
@@ -384,13 +387,21 @@ fn openai_message_from_goose(msg: &Message) -> OpenAiMessage {
                     },
                 });
             }
-            ContentBlock::ToolResponse { id: _, content: resp_content, is_error: _ } => {
+            ContentBlock::ToolResponse {
+                id: _,
+                content: resp_content,
+                is_error: _,
+            } => {
                 if tool_calls.is_empty() {
                     content = match content {
-                        Some(OpenAiContent::Text(existing)) => {
-                            Some(OpenAiContent::Text(format!("{}\n[tool result] {}", existing, resp_content)))
-                        }
-                        _ => Some(OpenAiContent::Text(format!("[tool result] {}", resp_content))),
+                        Some(OpenAiContent::Text(existing)) => Some(OpenAiContent::Text(format!(
+                            "{}\n[tool result] {}",
+                            existing, resp_content
+                        ))),
+                        _ => Some(OpenAiContent::Text(format!(
+                            "[tool result] {}",
+                            resp_content
+                        ))),
                     };
                 }
             }

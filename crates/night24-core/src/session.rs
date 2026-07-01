@@ -87,7 +87,10 @@ impl Session {
                     if trimmed.is_empty() {
                         continue;
                     }
-                    let single = trimmed.chars().flat_map(|c| c.to_lowercase()).collect::<String>();
+                    let single = trimmed
+                        .chars()
+                        .flat_map(|c| c.to_lowercase())
+                        .collect::<String>();
                     let oneline = single.split_whitespace().collect::<Vec<_>>().join(" ");
                     let title: String = oneline.chars().take(48).collect();
                     return if oneline.chars().count() > 48 {
@@ -123,7 +126,13 @@ impl SessionManager {
     }
 
     pub async fn with_sqlite(database_url: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
-        let store = SessionStore::new(database_url.as_ref().to_str().unwrap_or("sqlite:night24.db")).await?;
+        let store = SessionStore::new(
+            database_url
+                .as_ref()
+                .to_str()
+                .unwrap_or("sqlite:night24.db"),
+        )
+        .await?;
         Ok(Self {
             store: Some(store),
             memory: Arc::new(RwLock::new(HashMap::new())),
@@ -187,11 +196,7 @@ impl SessionManager {
     /// Fork an existing session. Returns the new session's id, or an error if
     /// the source session does not exist. `at_index` optionally limits the
     /// copied history to the first N messages.
-    pub async fn fork(
-        &self,
-        source_id: &str,
-        at_index: Option<usize>,
-    ) -> anyhow::Result<Session> {
+    pub async fn fork(&self, source_id: &str, at_index: Option<usize>) -> anyhow::Result<Session> {
         let source = self
             .get(source_id)
             .await?
@@ -203,11 +208,7 @@ impl SessionManager {
 
     /// Rename an existing session. Returns the updated session, or an error if
     /// the session does not exist.
-    pub async fn rename(
-        &self,
-        id: &str,
-        new_name: impl Into<String>,
-    ) -> anyhow::Result<Session> {
+    pub async fn rename(&self, id: &str, new_name: impl Into<String>) -> anyhow::Result<Session> {
         let mut session = self
             .get(id)
             .await?
@@ -240,7 +241,9 @@ mod tests {
     #[tokio::test]
     async fn test_session_manager_create_without_store() {
         let manager = SessionManager::new();
-        let session = manager.create("test", PathBuf::from("/tmp"), SessionType::User).await;
+        let session = manager
+            .create("test", PathBuf::from("/tmp"), SessionType::User)
+            .await;
         assert!(session.is_ok());
         assert_eq!(session.unwrap().name, "test");
     }
@@ -248,8 +251,12 @@ mod tests {
     #[test]
     fn test_session_fork_copies_history() {
         let mut session = Session::new("orig", PathBuf::from("/tmp"), SessionType::User);
-        session.conversation.push(crate::model::Message::user("hello"));
-        session.conversation.push(crate::model::Message::assistant("hi"));
+        session
+            .conversation
+            .push(crate::model::Message::user("hello"));
+        session
+            .conversation
+            .push(crate::model::Message::assistant("hi"));
         let forked = session.fork(None);
         assert_ne!(forked.id, session.id);
         assert_eq!(forked.conversation.len(), 2);
@@ -259,9 +266,15 @@ mod tests {
     #[test]
     fn test_session_fork_truncates_at_index() {
         let mut session = Session::new("orig", PathBuf::from("/tmp"), SessionType::User);
-        session.conversation.push(crate::model::Message::user("one"));
-        session.conversation.push(crate::model::Message::assistant("two"));
-        session.conversation.push(crate::model::Message::user("three"));
+        session
+            .conversation
+            .push(crate::model::Message::user("one"));
+        session
+            .conversation
+            .push(crate::model::Message::assistant("two"));
+        session
+            .conversation
+            .push(crate::model::Message::user("three"));
         let forked = session.fork(Some(2));
         assert_eq!(forked.conversation.len(), 2);
         // Only the first two messages are kept.
@@ -271,7 +284,9 @@ mod tests {
     #[test]
     fn test_session_derived_name_from_first_user_message() {
         let mut session = Session::new("orig", PathBuf::from("/tmp"), SessionType::User);
-        session.conversation.push(crate::model::Message::user("  Help me debug Rust code  "));
+        session
+            .conversation
+            .push(crate::model::Message::user("  Help me debug Rust code  "));
         assert_eq!(session.derived_name(), "help me debug rust code");
     }
 

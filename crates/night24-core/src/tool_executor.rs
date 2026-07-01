@@ -5,8 +5,8 @@ use sqlx::{Column, Row};
 use tokio::time::timeout;
 
 use crate::model::Tool;
-use crate::security::SecurityInspector;
 use crate::permission::PermissionLevel;
+use crate::security::SecurityInspector;
 
 pub fn builtin_tools() -> Vec<Tool> {
     vec![
@@ -262,8 +262,8 @@ async fn run_shell_command(command: &str, working_dir: &Path) -> anyhow::Result<
     #[cfg(not(target_os = "windows"))]
     cmd.args(["-c", command]);
 
-    let output = tokio::task::spawn_blocking(move || cmd.current_dir(&working_dir).output())
-        .await??;
+    let output =
+        tokio::task::spawn_blocking(move || cmd.current_dir(&working_dir).output()).await??;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -282,7 +282,10 @@ async fn run_shell_command(command: &str, working_dir: &Path) -> anyhow::Result<
 
 fn should_skip_dir(path: &std::path::Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        matches!(name, "target" | ".git" | "node_modules" | ".venv" | "venv" | "__pycache__")
+        matches!(
+            name,
+            "target" | ".git" | "node_modules" | ".venv" | "venv" | "__pycache__"
+        )
     } else {
         false
     }
@@ -297,7 +300,10 @@ fn glob_match(pattern: &str, name: &str) -> bool {
             '*' => {
                 pattern_chars.next();
                 while text_chars.peek().is_some() {
-                    if glob_match(pattern_chars.clone().collect::<String>().as_str(), text_chars.clone().collect::<String>().as_str()) {
+                    if glob_match(
+                        pattern_chars.clone().collect::<String>().as_str(),
+                        text_chars.clone().collect::<String>().as_str(),
+                    ) {
                         return true;
                     }
                     text_chars.next();
@@ -329,11 +335,16 @@ fn resolve_within_workdir(working_dir: &Path, user_path: &str) -> anyhow::Result
         working_dir.join(user_path)
     };
 
-    let canonical_workdir = working_dir.canonicalize().unwrap_or_else(|_| working_dir.to_path_buf());
+    let canonical_workdir = working_dir
+        .canonicalize()
+        .unwrap_or_else(|_| working_dir.to_path_buf());
 
     // For non-existent files, canonicalize the parent directory instead.
     let canonical_candidate = candidate.canonicalize().unwrap_or_else(|_| {
-        let parent = candidate.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+        let parent = candidate
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
         let canonical_parent = parent.canonicalize().unwrap_or_else(|_| parent.clone());
         canonical_parent.join(candidate.file_name().unwrap_or_default())
     });
@@ -789,7 +800,13 @@ mod tests {
     async fn test_echo_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"text": "hello"});
-        let result = execute_tool("developer__echo", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__echo",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert_eq!(result.unwrap(), "hello");
     }
 
@@ -797,7 +814,13 @@ mod tests {
     async fn test_datetime_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({});
-        let result = execute_tool("developer__datetime", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__datetime",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert!(result.unwrap().starts_with("utc=20"));
     }
 
@@ -805,7 +828,13 @@ mod tests {
     async fn test_calculator_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"expression": "2 + 3 * 4"});
-        let result = execute_tool("developer__calculator", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__calculator",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert_eq!(result.unwrap(), "14");
     }
 
@@ -813,7 +842,13 @@ mod tests {
     async fn test_jq_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"data": "{\"a\":1,\"b\":2}", "query": "keys"});
-        let result = execute_tool("developer__jq", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__jq",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert!(result.unwrap().contains("a"));
     }
 
@@ -821,7 +856,13 @@ mod tests {
     async fn test_web_search_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"query": "rust"});
-        let result = execute_tool("developer__web_search", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__web_search",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert!(result.unwrap().contains("rust"));
     }
 
@@ -829,7 +870,13 @@ mod tests {
     async fn test_shell_security_inspection() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"command": "rm -rf /"});
-        let result = execute_tool("developer__shell", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__shell",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert!(result.unwrap().contains("security inspection"));
     }
 
@@ -837,7 +884,13 @@ mod tests {
     async fn test_unknown_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({});
-        let result = execute_tool("developer__unknown", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__unknown",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         assert!(result.unwrap_err().to_string().contains("unknown tool"));
     }
 
@@ -845,7 +898,13 @@ mod tests {
     async fn test_file_search_tool() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"query": "developer__echo", "path": "."});
-        let result = execute_tool("developer__file_search", &args, PathBuf::from(".").as_path(), &security).await;
+        let result = execute_tool(
+            "developer__file_search",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
         let output = result.unwrap();
         assert!(output.contains("tool_executor.rs"));
     }
@@ -885,15 +944,33 @@ mod tests {
     async fn test_code_interpreter_language_validation() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"code": "print('hello')", "language": "unsupported"});
-        let result = execute_tool("developer__code_interpreter", &args, PathBuf::from(".").as_path(), &security).await;
-        assert!(result.unwrap_err().to_string().contains("unsupported language"));
+        let result = execute_tool(
+            "developer__code_interpreter",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported language"));
     }
 
     #[tokio::test]
     async fn test_database_query_tool_requires_db() {
         let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let args = serde_json::json!({"query": "SELECT 1 AS num"});
-        let result = execute_tool("developer__database_query", &args, PathBuf::from(".").as_path(), &security).await;
-        assert!(result.unwrap_err().to_string().contains("database not found"));
+        let result = execute_tool(
+            "developer__database_query",
+            &args,
+            PathBuf::from(".").as_path(),
+            &security,
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("database not found"));
     }
 }

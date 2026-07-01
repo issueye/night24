@@ -31,9 +31,9 @@ impl ToolCategory {
                 ToolCategory::Read
             }
             "developer__write_file" => ToolCategory::Write,
-            "developer__http_request"
-            | "developer__web_search"
-            | "developer__web_scraper" => ToolCategory::Network,
+            "developer__http_request" | "developer__web_search" | "developer__web_scraper" => {
+                ToolCategory::Network
+            }
             _ => ToolCategory::Other,
         }
     }
@@ -85,7 +85,10 @@ impl PermissionManager {
         policies.insert("developer__datetime".to_string(), PermissionLevel::Allow);
         policies.insert("developer__calculator".to_string(), PermissionLevel::Allow);
         policies.insert("developer__jq".to_string(), PermissionLevel::Allow);
-        policies.insert("developer__database_query".to_string(), PermissionLevel::Allow);
+        policies.insert(
+            "developer__database_query".to_string(),
+            PermissionLevel::Allow,
+        );
         Self {
             default_level: PermissionLevel::Confirm,
             policies: RwLock::new(policies),
@@ -132,7 +135,10 @@ mod tests {
     async fn test_explicit_policy_overrides_default() {
         let pm = PermissionManager::new(PermissionLevel::Confirm);
         pm.set("developer__read_file", PermissionLevel::Allow);
-        assert_eq!(pm.check("developer__read_file").await, PermissionLevel::Allow);
+        assert_eq!(
+            pm.check("developer__read_file").await,
+            PermissionLevel::Allow
+        );
         // Unmapped tool falls back to default.
         assert_eq!(pm.check("developer__other").await, PermissionLevel::Confirm);
     }
@@ -141,16 +147,25 @@ mod tests {
     async fn test_permissive_local_preset() {
         let pm = PermissionManager::permissive_local();
         // Read-only tools are allowed.
-        assert_eq!(pm.check("developer__read_file").await, PermissionLevel::Allow);
+        assert_eq!(
+            pm.check("developer__read_file").await,
+            PermissionLevel::Allow
+        );
         assert_eq!(pm.check("developer__echo").await, PermissionLevel::Allow);
         // Sensitive tools still require confirmation.
         assert_eq!(pm.check("developer__shell").await, PermissionLevel::Confirm);
-        assert_eq!(pm.check("developer__write_file").await, PermissionLevel::Confirm);
+        assert_eq!(
+            pm.check("developer__write_file").await,
+            PermissionLevel::Confirm
+        );
     }
 
     #[test]
     fn test_tool_category_mapping() {
-        assert_eq!(ToolCategory::from_tool_name("developer__shell"), ToolCategory::Shell);
+        assert_eq!(
+            ToolCategory::from_tool_name("developer__shell"),
+            ToolCategory::Shell
+        );
         assert_eq!(
             ToolCategory::from_tool_name("developer__code_interpreter"),
             ToolCategory::Shell

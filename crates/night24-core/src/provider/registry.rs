@@ -1,6 +1,6 @@
 use super::factory::{
-    AnthropicProviderFactory, EchoProviderFactory, OpenAIProviderFactory, OpenAIResponsesProviderFactory,
-    StepFunProviderFactory, OllamaProviderFactory, ProviderFactory,
+    AnthropicProviderFactory, EchoProviderFactory, OllamaProviderFactory, OpenAIProviderFactory,
+    OpenAIResponsesProviderFactory, ProviderFactory, StepFunProviderFactory,
 };
 use super::{ModelConfig, Provider};
 use std::collections::HashMap;
@@ -31,7 +31,12 @@ impl ProviderRegistry {
         self
     }
 
-    pub fn with_openai(mut self, api_key: impl Into<String>, base_url: impl Into<String>, default_model: impl Into<String>) -> Self {
+    pub fn with_openai(
+        mut self,
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
         self.factories.insert(
             "openai".to_string(),
             Box::new(OpenAIProviderFactory {
@@ -43,7 +48,12 @@ impl ProviderRegistry {
         self
     }
 
-    pub fn with_openai_responses(mut self, api_key: impl Into<String>, base_url: impl Into<String>, default_model: impl Into<String>) -> Self {
+    pub fn with_openai_responses(
+        mut self,
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
         self.factories.insert(
             "openai-responses".to_string(),
             Box::new(OpenAIResponsesProviderFactory {
@@ -55,7 +65,12 @@ impl ProviderRegistry {
         self
     }
 
-    pub fn with_anthropic(mut self, api_key: impl Into<String>, base_url: impl Into<String>, default_model: impl Into<String>) -> Self {
+    pub fn with_anthropic(
+        mut self,
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
         self.factories.insert(
             "anthropic".to_string(),
             Box::new(AnthropicProviderFactory {
@@ -67,7 +82,12 @@ impl ProviderRegistry {
         self
     }
 
-    pub fn with_stepfun(mut self, api_key: impl Into<String>, base_url: impl Into<String>, default_model: impl Into<String>) -> Self {
+    pub fn with_stepfun(
+        mut self,
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
         self.factories.insert(
             "stepfun".to_string(),
             Box::new(StepFunProviderFactory {
@@ -79,7 +99,11 @@ impl ProviderRegistry {
         self
     }
 
-    pub fn with_ollama(mut self, base_url: impl Into<String>, default_model: impl Into<String>) -> Self {
+    pub fn with_ollama(
+        mut self,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
         self.factories.insert(
             "ollama".to_string(),
             Box::new(OllamaProviderFactory {
@@ -97,7 +121,11 @@ impl ProviderRegistry {
             .map(|f| f.create(ModelConfig::default()))
     }
 
-    pub fn get_with_model(&self, name: &str, model: impl Into<String>) -> Option<Arc<dyn Provider>> {
+    pub fn get_with_model(
+        &self,
+        name: &str,
+        model: impl Into<String>,
+    ) -> Option<Arc<dyn Provider>> {
         let model_config = ModelConfig {
             model: model.into(),
             ..Default::default()

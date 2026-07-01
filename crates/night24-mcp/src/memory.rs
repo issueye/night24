@@ -137,7 +137,8 @@ pub fn memory_tool_definitions() -> Vec<night24_core::model::Tool> {
         },
         Tool {
             name: "memory__search".to_string(),
-            description: "Search stored memories by a text query across keys, values, and tags.".to_string(),
+            description: "Search stored memories by a text query across keys, values, and tags."
+                .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -231,9 +232,7 @@ mod tests {
     #[test]
     fn test_store_and_recall() {
         let store = InMemoryStore::new();
-        store
-            .store("lang", "rust", &["pl".to_string()])
-            .unwrap();
+        store.store("lang", "rust", &["pl".to_string()]).unwrap();
         let entry = store.recall("lang").unwrap().unwrap();
         assert_eq!(entry.value, "rust");
         assert_eq!(entry.tags, vec!["pl".to_string()]);

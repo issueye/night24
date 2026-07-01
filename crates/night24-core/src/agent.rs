@@ -5,13 +5,13 @@ use futures::StreamExt;
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
-use crate::provider::{ModelConfig, Provider};
-use crate::session::Session;
-use crate::model::Message;
-use crate::tool_executor::execute_tool;
 use crate::context_mgmt::{CompactionResult, ContextManager};
+use crate::model::Message;
 use crate::permission::PermissionManager;
+use crate::provider::{ModelConfig, Provider};
 use crate::security::SecurityInspector;
+use crate::session::Session;
+use crate::tool_executor::execute_tool;
 
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -129,7 +129,9 @@ impl Agent {
                     anyhow::Ok((turn_messages, has_tool_requests))
                 })
                 .await
-                .map_err(|_| anyhow::anyhow!("agent turn timed out after {:?}", self.config.turn_timeout))??;
+                .map_err(|_| {
+                    anyhow::anyhow!("agent turn timed out after {:?}", self.config.turn_timeout)
+                })??;
 
                 let (turn_messages, has_tool_requests) = turn_result;
 
@@ -144,9 +146,20 @@ impl Agent {
                     let mut blocks = vec![];
                     for block in &msg.content {
                         match block {
-                            crate::model::ContentBlock::ToolRequest { id, name, arguments } => {
+                            crate::model::ContentBlock::ToolRequest {
+                                id,
+                                name,
+                                arguments,
+                            } => {
                                 had_tool_request = true;
-                                match execute_tool(name, arguments, &session.working_dir, &self.security).await {
+                                match execute_tool(
+                                    name,
+                                    arguments,
+                                    &session.working_dir,
+                                    &self.security,
+                                )
+                                .await
+                                {
                                     Ok(result) => {
                                         blocks.push(crate::model::ContentBlock::ToolResponse {
                                             id: id.clone(),
@@ -203,7 +216,9 @@ impl Agent {
             anyhow::Ok(final_messages)
         })
         .await
-        .map_err(|_| anyhow::anyhow!("agent run timed out after {:?}", self.config.total_timeout))??;
+        .map_err(|_| {
+            anyhow::anyhow!("agent run timed out after {:?}", self.config.total_timeout)
+        })??;
 
         Ok(total_deadline)
     }
@@ -212,11 +227,11 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{ContentBlock, Role};
     use crate::provider::EchoProvider;
     use crate::session::SessionType;
-    use crate::model::{ContentBlock, Role};
-    use std::path::PathBuf;
     use chrono::Utc;
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_agent_run_echo_provider() {
@@ -238,7 +253,9 @@ mod tests {
         let user_message = Message {
             id: "test-msg".to_string(),
             role: Role::User,
-            content: vec![ContentBlock::Text { text: "hello".to_string() }],
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
             created_at: Utc::now(),
         };
 
@@ -269,7 +286,9 @@ mod tests {
         let user_message = Message {
             id: "test-tool".to_string(),
             role: Role::User,
-            content: vec![ContentBlock::Text { text: "tool:datetime".to_string() }],
+            content: vec![ContentBlock::Text {
+                text: "tool:datetime".to_string(),
+            }],
             created_at: Utc::now(),
         };
 
@@ -299,7 +318,9 @@ mod tests {
         let user_message = Message {
             id: "test-timeout".to_string(),
             role: Role::User,
-            content: vec![ContentBlock::Text { text: "hello".to_string() }],
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
             created_at: Utc::now(),
         };
 

@@ -1,8 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use async_trait::async_trait;
 use async_stream::try_stream;
+use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
 use reqwest::Client;
@@ -242,7 +242,11 @@ fn ollama_message_from_goose(msg: &Message) -> OllamaMessage {
     for block in &msg.content {
         match block {
             ContentBlock::Text { text } => text_parts.push(text.clone()),
-            ContentBlock::ToolRequest { id: _, name, arguments } => {
+            ContentBlock::ToolRequest {
+                id: _,
+                name,
+                arguments,
+            } => {
                 tool_calls.push(OllamaToolCall {
                     function: Some(OllamaFunction {
                         name: name.clone(),
@@ -250,7 +254,11 @@ fn ollama_message_from_goose(msg: &Message) -> OllamaMessage {
                     }),
                 });
             }
-            ContentBlock::ToolResponse { id: _, content, is_error: _ } => {
+            ContentBlock::ToolResponse {
+                id: _,
+                content,
+                is_error: _,
+            } => {
                 text_parts.push(format!("[tool result] {}", content));
             }
             ContentBlock::Thinking { text } => {
@@ -268,6 +276,10 @@ fn ollama_message_from_goose(msg: &Message) -> OllamaMessage {
     OllamaMessage {
         role: role.to_string(),
         content,
-        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
     }
 }

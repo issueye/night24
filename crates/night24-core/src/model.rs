@@ -26,10 +26,22 @@ impl std::fmt::Display for Role {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
-    Text { text: String },
-    ToolRequest { id: String, name: String, arguments: serde_json::Value },
-    ToolResponse { id: String, content: String, is_error: bool },
-    Thinking { text: String },
+    Text {
+        text: String,
+    },
+    ToolRequest {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolResponse {
+        id: String,
+        content: String,
+        is_error: bool,
+    },
+    Thinking {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -68,7 +80,11 @@ impl Message {
         }
     }
 
-    pub fn tool(id: impl Into<String>, name: impl Into<String>, arguments: serde_json::Value) -> Self {
+    pub fn tool(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+    ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             role: Role::Tool,
@@ -81,7 +97,11 @@ impl Message {
         }
     }
 
-    pub fn tool_response(id: impl Into<String>, content: impl Into<String>, is_error: bool) -> Self {
+    pub fn tool_response(
+        id: impl Into<String>,
+        content: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             role: Role::Tool,

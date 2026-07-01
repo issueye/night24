@@ -69,7 +69,9 @@ impl ContextManager {
                     ContentBlock::Text { text } => {
                         total = total.saturating_add(text.len().saturating_add(4) / 4);
                     }
-                    ContentBlock::ToolRequest { name, arguments, .. } => {
+                    ContentBlock::ToolRequest {
+                        name, arguments, ..
+                    } => {
                         total = total.saturating_add(name.len().saturating_add(4) / 4);
                         total = total.saturating_add(
                             serde_json::to_string(arguments)
@@ -77,7 +79,9 @@ impl ContextManager {
                                 .unwrap_or(0),
                         );
                     }
-                    ContentBlock::ToolResponse { content, is_error, .. } => {
+                    ContentBlock::ToolResponse {
+                        content, is_error, ..
+                    } => {
                         total = total.saturating_add(content.len().saturating_add(4) / 4);
                         if *is_error {
                             total = total.saturating_add(10);
@@ -150,13 +154,15 @@ impl ContextManager {
                 .iter()
                 .filter_map(|block| match block {
                     ContentBlock::Text { text } => Some(text.clone()),
-                    ContentBlock::ToolResponse { content, is_error, .. } => {
+                    ContentBlock::ToolResponse {
+                        content, is_error, ..
+                    } => {
                         let prefix = if *is_error { "tool-error" } else { "tool" };
                         Some(format!("{}({})", prefix, content))
                     }
-                    ContentBlock::ToolRequest { name, arguments, .. } => {
-                        Some(format!("{}({})", name, arguments))
-                    }
+                    ContentBlock::ToolRequest {
+                        name, arguments, ..
+                    } => Some(format!("{}({})", name, arguments)),
                     ContentBlock::Thinking { text } => Some(format!("thinking: {}", text)),
                 })
                 .collect::<Vec<_>>()

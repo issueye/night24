@@ -1,0 +1,19 @@
+[package]
+name = "night24-agent-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Night24 Agent Core process over stdio JSON-RPC"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+night24-core = { path = "../night24-core" }
+night24-protocol = { path = "../night24-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

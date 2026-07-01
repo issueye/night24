@@ -151,7 +151,11 @@ impl TryInto<Session> for SessionRow {
             conversation,
             created_at: DateTime::parse_from_rfc3339(&self.created_at)?.with_timezone(&Utc),
             updated_at: DateTime::parse_from_rfc3339(&self.updated_at)?.with_timezone(&Utc),
-            archived_at: self.archived_at.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+            archived_at: self.archived_at.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
         })
     }
 }

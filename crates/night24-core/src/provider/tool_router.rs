@@ -50,7 +50,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("list_files:") {
-        let rest = tool_input.trim_start_matches("list_files:").trim().to_string();
+        let rest = tool_input
+            .trim_start_matches("list_files:")
+            .trim()
+            .to_string();
         let mut parts = rest.splitn(2, ' ');
         let path = parts.next().unwrap_or(".").to_string();
         let recursive = parts.next().map(|v| v == "true").unwrap_or(false);
@@ -80,7 +83,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("calculator:") {
-        let expression = tool_input.trim_start_matches("calculator:").trim().to_string();
+        let expression = tool_input
+            .trim_start_matches("calculator:")
+            .trim()
+            .to_string();
         return Some(Message {
             id: Uuid::new_v4().to_string(),
             role: Role::Assistant,
@@ -108,7 +114,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("web_search:") {
-        let query = tool_input.trim_start_matches("web_search:").trim().to_string();
+        let query = tool_input
+            .trim_start_matches("web_search:")
+            .trim()
+            .to_string();
         return Some(Message {
             id: Uuid::new_v4().to_string(),
             role: Role::Assistant,
@@ -137,7 +146,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("file_search:") {
-        let query = tool_input.trim_start_matches("file_search:").trim().to_string();
+        let query = tool_input
+            .trim_start_matches("file_search:")
+            .trim()
+            .to_string();
         return Some(Message {
             id: Uuid::new_v4().to_string(),
             role: Role::Assistant,
@@ -151,7 +163,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("web_scraper:") {
-        let url = tool_input.trim_start_matches("web_scraper:").trim().to_string();
+        let url = tool_input
+            .trim_start_matches("web_scraper:")
+            .trim()
+            .to_string();
         return Some(Message {
             id: Uuid::new_v4().to_string(),
             role: Role::Assistant,
@@ -165,7 +180,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("code_interpreter:") {
-        let rest = tool_input.trim_start_matches("code_interpreter:").trim().to_string();
+        let rest = tool_input
+            .trim_start_matches("code_interpreter:")
+            .trim()
+            .to_string();
         let mut parts = rest.splitn(2, ' ');
         let language = parts.next().unwrap_or("python").to_string();
         let code = parts.next().unwrap_or("").to_string();
@@ -182,7 +200,10 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
     }
 
     if tool_input.starts_with("database_query:") {
-        let query = tool_input.trim_start_matches("database_query:").trim().to_string();
+        let query = tool_input
+            .trim_start_matches("database_query:")
+            .trim()
+            .to_string();
         return Some(Message {
             id: Uuid::new_v4().to_string(),
             role: Role::Assistant,
@@ -199,7 +220,9 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
 }
 
 pub async fn execute_echo_tool(tool_input: &str, _security: &SecurityInspector) -> Option<Message> {
-    let security = SecurityInspector::new(std::sync::Arc::new(crate::permission::PermissionManager::default()));
+    let security = SecurityInspector::new(std::sync::Arc::new(
+        crate::permission::PermissionManager::default(),
+    ));
     let result = execute_tool(
         "developer__echo",
         &serde_json::json!({"text": tool_input}),
@@ -212,7 +235,9 @@ pub async fn execute_echo_tool(tool_input: &str, _security: &SecurityInspector) 
     Some(Message {
         id: Uuid::new_v4().to_string(),
         role: Role::Assistant,
-        content: vec![ContentBlock::Text { text: format!("[echo] {}", content) }],
+        content: vec![ContentBlock::Text {
+            text: format!("[echo] {}", content),
+        }],
         created_at: chrono::Utc::now(),
     })
 }

@@ -55,8 +55,8 @@ impl ProviderFactory for OpenAIResponsesProviderFactory {
     }
 
     fn create(&self, model_config: ModelConfig) -> Arc<dyn Provider> {
-        let mut provider =
-            crate::provider::OpenAIResponsesProvider::new(self.api_key.clone()).with_base_url(self.base_url.clone());
+        let mut provider = crate::provider::OpenAIResponsesProvider::new(self.api_key.clone())
+            .with_base_url(self.base_url.clone());
         if !model_config.model.is_empty() {
             provider = provider.with_model(model_config.model);
         } else if !self.default_model.is_empty() {
@@ -101,8 +101,8 @@ impl ProviderFactory for StepFunProviderFactory {
     }
 
     fn create(&self, model_config: ModelConfig) -> Arc<dyn Provider> {
-        let mut provider =
-            crate::provider::OpenAIProvider::new(self.api_key.clone()).with_base_url(self.base_url.clone());
+        let mut provider = crate::provider::OpenAIProvider::new(self.api_key.clone())
+            .with_base_url(self.base_url.clone());
         if !model_config.model.is_empty() {
             provider = provider.with_model(model_config.model);
         } else if !self.default_model.is_empty() {

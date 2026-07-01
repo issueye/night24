@@ -133,6 +133,12 @@ async fn get_session_history(
     }
 }
 
+#[tauri::command]
+fn select_directory() -> Result<Option<String>, String> {
+    let folder = tauri::api::dialog::blocking::FileDialogBuilder::new().pick_folder();
+    Ok(folder.map(|path| path.to_string_lossy().to_string()))
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState {
@@ -143,7 +149,8 @@ fn main() {
             send_message,
             create_session,
             list_sessions,
-            get_session_history
+            get_session_history,
+            select_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,0 +1,14 @@
+[package]
+name = "night24-protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "JSON-RPC protocol types for Night24 server and agent core"
+
+[dependencies]
+chrono.workspace = true
+night24-core = { path = "../night24-core" }
+serde.workspace = true
+serde_json.workspace = true

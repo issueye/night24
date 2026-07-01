@@ -1115,6 +1115,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "night24-agent-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "night24-core",
+ "night24-protocol",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "night24-core"
 version = "0.1.0"
 dependencies = [
@@ -1154,6 +1169,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "night24-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "night24-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "night24-server"
 version = "0.1.0"
 dependencies = [
@@ -1162,6 +1187,7 @@ dependencies = [
  "chrono",
  "futures",
  "night24-core",
+ "night24-protocol",
  "serde",
  "serde_json",
  "tokio",

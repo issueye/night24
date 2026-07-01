@@ -213,7 +213,8 @@ impl AccumulatedMessage {
             blocks.push(ContentBlock::Text { text: self.content });
         }
         for tc in self.tool_calls {
-            let args: serde_json::Value = serde_json::from_str(&tc.arguments).unwrap_or(serde_json::json!({}));
+            let args: serde_json::Value =
+                serde_json::from_str(&tc.arguments).unwrap_or(serde_json::json!({}));
             blocks.push(ContentBlock::ToolRequest {
                 id: tc.call_id,
                 name: tc.name,
@@ -315,10 +316,18 @@ fn goose_content_to_string(blocks: &[ContentBlock]) -> String {
         .iter()
         .map(|block| match block {
             ContentBlock::Text { text } => text.clone(),
-            ContentBlock::ToolRequest { id: _, name, arguments } => {
+            ContentBlock::ToolRequest {
+                id: _,
+                name,
+                arguments,
+            } => {
                 format!("[tool request] {}: {}", name, arguments)
             }
-            ContentBlock::ToolResponse { id: _, content, is_error: _ } => {
+            ContentBlock::ToolResponse {
+                id: _,
+                content,
+                is_error: _,
+            } => {
                 format!("[tool result] {}", content)
             }
             ContentBlock::Thinking { text } => format!("[thinking] {}", text),

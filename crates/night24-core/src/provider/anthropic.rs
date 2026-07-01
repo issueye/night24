@@ -80,9 +80,17 @@ impl Provider for AnthropicProvider {
 
             let body = AnthropicChatRequest {
                 model,
-                system: if system.is_empty() { None } else { Some(system.to_string()) },
+                system: if system.is_empty() {
+                    None
+                } else {
+                    Some(system.to_string())
+                },
                 messages: anthropic_messages,
-                tools: if anthropic_tools.is_empty() { None } else { Some(anthropic_tools) },
+                tools: if anthropic_tools.is_empty() {
+                    None
+                } else {
+                    Some(anthropic_tools)
+                },
                 max_tokens: model_config.max_tokens.unwrap_or(1024),
                 temperature: model_config.temperature,
                 stream: true,
@@ -245,9 +253,18 @@ struct AnthropicMessage {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicContentPart {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: serde_json::Value },
-    ToolResult { tool_use_id: String, content: String },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -307,14 +324,22 @@ fn anthropic_message_from_goose(msg: &Message) -> AnthropicMessage {
             ContentBlock::Text { text } => {
                 parts.push(AnthropicContentPart::Text { text: text.clone() });
             }
-            ContentBlock::ToolRequest { id, name, arguments } => {
+            ContentBlock::ToolRequest {
+                id,
+                name,
+                arguments,
+            } => {
                 parts.push(AnthropicContentPart::ToolUse {
                     id: id.clone(),
                     name: name.clone(),
                     input: arguments.clone(),
                 });
             }
-            ContentBlock::ToolResponse { id, content, is_error: _ } => {
+            ContentBlock::ToolResponse {
+                id,
+                content,
+                is_error: _,
+            } => {
                 parts.push(AnthropicContentPart::ToolResult {
                     tool_use_id: id.clone(),
                     content: content.clone(),

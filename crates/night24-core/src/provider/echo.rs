@@ -1,16 +1,14 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use async_trait::async_trait;
 use async_stream::try_stream;
+use async_trait::async_trait;
 use chrono::Utc;
 use serde_json;
 use uuid::Uuid;
 
 use crate::model::{ContentBlock, Message, Role};
-use crate::provider::{
-    MessageStream, ModelConfig, Provider, ProviderError, ProviderUsage,
-};
+use crate::provider::{MessageStream, ModelConfig, Provider, ProviderError, ProviderUsage};
 
 #[derive(Debug, Default)]
 pub struct EchoProvider;

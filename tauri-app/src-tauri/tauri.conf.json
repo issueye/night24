@@ -1,12 +1,12 @@
 {
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
-    "devPath": "../web",
-    "distDir": "../web"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://127.0.0.1:1420",
+    "distDir": "../dist"
   },
   "package": {
-    "productName": "Night24 Chat",
+    "productName": "Night24",
     "version": "0.1.0"
   },
   "tauri": {
@@ -42,9 +42,9 @@
     },
     "windows": [
       {
-        "title": "Night24 Chat",
-        "width": 1200,
-        "height": 800,
+        "title": "Night24",
+        "width": 1440,
+        "height": 920,
         "resizable": true,
         "fullscreen": false
       }

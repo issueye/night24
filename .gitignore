@@ -6,3 +6,5 @@ bin/*
 target/*
 tauri-app/target/*
 $null
+tauri-app/node_modules/*
+tauri-app/dist/*
