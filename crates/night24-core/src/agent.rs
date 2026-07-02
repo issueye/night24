@@ -6,7 +6,7 @@ use tokio::time::timeout;
 use tracing::{debug, warn};
 
 use crate::context_mgmt::{CompactionResult, ContextManager};
-use crate::model::Message;
+use crate::model::{Message, Role};
 use crate::permission::PermissionManager;
 use crate::provider::{ModelConfig, Provider};
 use crate::security::SecurityInspector;
@@ -97,6 +97,7 @@ impl Agent {
             let tools = crate::tool_executor::builtin_tools();
             let mut final_messages = vec![];
 
+            let mut awaiting_tool_followup = false;
             for turn in 0..self.config.max_turns {
                 debug!(turn = turn + 1, "agent turn");
 
@@ -136,6 +137,11 @@ impl Agent {
                 let (turn_messages, has_tool_requests) = turn_result;
 
                 if turn_messages.is_empty() {
+                    if awaiting_tool_followup {
+                        anyhow::bail!(
+                            "模型在工具结果返回后没有继续生成回复。可能是模型服务未接受工具结果，或返回了空响应。"
+                        );
+                    }
                     break;
                 }
 
@@ -176,13 +182,13 @@ impl Agent {
                                     }
                                 }
                             }
-                            other => blocks.push(other.clone()),
+                            _ => {}
                         }
                     }
                     if had_tool_request && !blocks.is_empty() {
                         executed_messages.push(Message {
                             id: msg.id.clone(),
-                            role: msg.role,
+                            role: Role::Tool,
                             content: blocks,
                             created_at: msg.created_at,
                         });
@@ -208,6 +214,7 @@ impl Agent {
                 if !has_tool_requests {
                     break;
                 }
+                awaiting_tool_followup = true;
             }
 
             session.conversation = messages.clone();

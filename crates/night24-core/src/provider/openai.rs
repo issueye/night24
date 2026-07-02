@@ -66,10 +66,11 @@ impl Provider for OpenAIProvider {
                 role: "system".to_string(),
                 content: Some(OpenAiContent::Text(system.to_string())),
                 tool_calls: None,
+                tool_call_id: None,
             }];
 
             for msg in messages {
-                openai_messages.push(openai_message_from_goose(msg));
+                openai_messages.extend(openai_messages_from_goose(msg));
             }
 
             let openai_tools: Vec<OpenAiTool> = if tools.is_empty() {
@@ -346,6 +347,8 @@ struct OpenAiMessage {
     content: Option<OpenAiContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<OpenAiToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,7 +379,7 @@ struct OpenAiFunction {
     parameters: serde_json::Value,
 }
 
-fn openai_message_from_goose(msg: &Message) -> OpenAiMessage {
+fn openai_messages_from_goose(msg: &Message) -> Vec<OpenAiMessage> {
     let role = match msg.role {
         Role::User => "user",
         Role::Assistant => "assistant",
@@ -385,12 +388,13 @@ fn openai_message_from_goose(msg: &Message) -> OpenAiMessage {
     };
 
     let mut tool_calls = vec![];
-    let mut content: Option<OpenAiContent> = None;
+    let mut text_parts = vec![];
+    let mut tool_responses = vec![];
 
     for block in &msg.content {
         match block {
             ContentBlock::Text { text } => {
-                content = Some(OpenAiContent::Text(text.clone()));
+                text_parts.push(text.clone());
             }
             ContentBlock::ToolRequest {
                 id,
@@ -407,22 +411,11 @@ fn openai_message_from_goose(msg: &Message) -> OpenAiMessage {
                 });
             }
             ContentBlock::ToolResponse {
-                id: _,
+                id,
                 content: resp_content,
                 is_error: _,
             } => {
-                if tool_calls.is_empty() {
-                    content = match content {
-                        Some(OpenAiContent::Text(existing)) => Some(OpenAiContent::Text(format!(
-                            "{}\n[tool result] {}",
-                            existing, resp_content
-                        ))),
-                        _ => Some(OpenAiContent::Text(format!(
-                            "[tool result] {}",
-                            resp_content
-                        ))),
-                    };
-                }
+                tool_responses.push((id.clone(), resp_content.clone()));
             }
             ContentBlock::Thinking { text } => {
                 let _ = text;
@@ -430,13 +423,74 @@ fn openai_message_from_goose(msg: &Message) -> OpenAiMessage {
         }
     }
 
-    OpenAiMessage {
-        role: role.to_string(),
-        content,
-        tool_calls: if tool_calls.is_empty() {
-            None
-        } else {
-            Some(tool_calls)
-        },
+    let mut messages = vec![];
+    let content = if text_parts.is_empty() {
+        None
+    } else {
+        Some(OpenAiContent::Text(text_parts.join("\n")))
+    };
+    if content.is_some() || !tool_calls.is_empty() {
+        messages.push(OpenAiMessage {
+            role: role.to_string(),
+            content,
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
+            tool_call_id: None,
+        });
+    }
+
+    for (id, content) in tool_responses {
+        messages.push(OpenAiMessage {
+            role: "tool".to_string(),
+            content: Some(OpenAiContent::Text(content)),
+            tool_calls: None,
+            tool_call_id: Some(id),
+        });
+    }
+
+    messages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_response_serializes_with_tool_call_id() {
+        let message = Message::tool_response("call-1", "ok", false);
+
+        let messages = openai_messages_from_goose(&message);
+
+        assert_eq!(messages.len(), 1);
+        let value = serde_json::to_value(&messages[0]).unwrap();
+        assert_eq!(value["role"], "tool");
+        assert_eq!(value["content"], "ok");
+        assert_eq!(value["tool_call_id"], "call-1");
+        assert!(value.get("tool_calls").is_none());
+    }
+
+    #[test]
+    fn assistant_tool_request_serializes_as_tool_calls() {
+        let message = Message {
+            id: "msg-1".to_string(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolRequest {
+                id: "call-1".to_string(),
+                name: "developer__list_files".to_string(),
+                arguments: serde_json::json!({ "path": "." }),
+            }],
+            created_at: Utc::now(),
+        };
+
+        let messages = openai_messages_from_goose(&message);
+
+        assert_eq!(messages.len(), 1);
+        let value = serde_json::to_value(&messages[0]).unwrap();
+        assert_eq!(value["role"], "assistant");
+        assert_eq!(value["tool_calls"][0]["id"], "call-1");
+        assert!(value.get("tool_call_id").is_none());
     }
 }

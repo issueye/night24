@@ -408,6 +408,7 @@ impl AgentCore {
         let total_deadline = tokio::time::timeout(
             Duration::from_millis(params.limits.total_timeout_ms.max(1)),
             async {
+                let mut awaiting_tool_followup = false;
                 for _turn in 0..params.limits.max_turns.max(1) {
                     if context.is_cancelled() {
                         anyhow::bail!("cancelled");
@@ -495,6 +496,11 @@ impl AgentCore {
                     let (turn_messages, has_tool_requests) = turn_result;
 
                     if turn_messages.is_empty() {
+                        if awaiting_tool_followup {
+                            anyhow::bail!(
+                                "模型在工具结果返回后没有继续生成回复。可能是模型服务未接受工具结果，或返回了空响应。"
+                            );
+                        }
                         break;
                     }
 
@@ -555,13 +561,13 @@ impl AgentCore {
                                         }
                                     }
                                 }
-                                other => blocks.push(other.clone()),
+                                _ => {}
                             }
                         }
                         if had_tool_request && !blocks.is_empty() {
                             executed_messages.push(Message {
                                 id: message.id.clone(),
-                                role: message.role,
+                                role: Role::Tool,
                                 content: blocks,
                                 created_at: message.created_at,
                             });
@@ -576,6 +582,7 @@ impl AgentCore {
                     if !has_tool_requests {
                         break;
                     }
+                    awaiting_tool_followup = true;
                 }
                 anyhow::Ok(())
             },
