@@ -6,7 +6,7 @@ import { Sidebar } from './components/Sidebar.jsx';
 import { ChatPanel } from './components/ChatPanel.jsx';
 import { ContextPanel } from './components/ContextPanel.jsx';
 import { TimelinePanel } from './components/TimelinePanel.jsx';
-import { messageText, safeText } from './utils/format.js';
+import { classNames, isVisibleChatMessage, messageText, messageToolBlocks, safeText } from './utils/format.js';
 
 const DEFAULT_SERVER = 'http://localhost:17787';
 const STORAGE_KEYS = {
@@ -15,7 +15,17 @@ const STORAGE_KEYS = {
   provider: 'night24.provider',
   model: 'night24.model',
   baseUrl: 'night24.baseUrl',
+  accessMode: 'night24.accessMode',
+  fullAccess: 'night24.fullAccess',
+  theme: 'night24.theme',
+  fontSize: 'night24.fontSize',
 };
+
+function readAccessMode() {
+  const mode = readSetting(STORAGE_KEYS.accessMode);
+  if (['strict', 'permissive', 'allow_all'].includes(mode)) return mode;
+  return readSetting(STORAGE_KEYS.fullAccess) === 'true' ? 'allow_all' : 'strict';
+}
 
 function readSetting(key, fallback = '') {
   try {
@@ -74,12 +84,31 @@ function appendMessageDelta(message, delta) {
   return { ...message, content: nextContent };
 }
 
+function withMessageText(message, text) {
+  const content = Array.isArray(message.content) ? message.content : [];
+  let replaced = false;
+  const nextContent = content.map((block) => {
+    if (!replaced && block?.type === 'text') {
+      replaced = true;
+      return { ...block, text };
+    }
+    return block;
+  });
+  if (!replaced) {
+    nextContent.unshift({ type: 'text', text });
+  }
+  return { ...message, content: nextContent };
+}
+
 export default function App() {
   const [apiBase, setApiBase] = useState(() => readSetting(STORAGE_KEYS.apiBase, DEFAULT_SERVER));
   const [apiKey, setApiKey] = useState(() => readSetting(STORAGE_KEYS.apiKey));
   const [provider, setProvider] = useState(() => readSetting(STORAGE_KEYS.provider, 'echo'));
   const [model, setModel] = useState(() => readSetting(STORAGE_KEYS.model, 'echo-v1'));
   const [baseUrl, setBaseUrl] = useState(() => readSetting(STORAGE_KEYS.baseUrl));
+  const [accessMode, setAccessMode] = useState(readAccessMode);
+  const [theme, setTheme] = useState(() => readSetting(STORAGE_KEYS.theme, 'light'));
+  const [fontSize, setFontSize] = useState(() => readSetting(STORAGE_KEYS.fontSize, 'normal'));
   const [providerKey, setProviderKey] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -106,6 +135,7 @@ export default function App() {
   const [eventsOpen, setEventsOpen] = useState(false);
 
   const abortRef = useRef(null);
+  const runTerminalRef = useRef(null);
   const messageEndRef = useRef(null);
 
   const headers = useMemo(() => {
@@ -174,6 +204,41 @@ export default function App() {
       },
     ]);
   }, []);
+
+  const addOrReplaceMessage = useCallback((message) => {
+    if (!isVisibleChatMessage(message)) return;
+    setMessages((items) => {
+      const index = message.id ? items.findIndex((item) => item.id === message.id) : -1;
+      if (index < 0) return [...items, message];
+      return items.map((item, itemIndex) => (itemIndex === index ? message : item));
+    });
+  }, []);
+
+  const addTypewriterMessage = useCallback((message) => {
+    const fullText = messageText(message);
+    if (!fullText.trim()) {
+      addOrReplaceMessage(message);
+      return;
+    }
+
+    const baseMessage = withMessageText(message, '');
+    setMessages((items) => {
+      const index = message.id ? items.findIndex((item) => item.id === message.id) : -1;
+      if (index >= 0) return items.map((item, itemIndex) => (itemIndex === index ? message : item));
+      return [...items, baseMessage];
+    });
+
+    let offset = 0;
+    const step = () => {
+      offset = Math.min(fullText.length, offset + Math.max(2, Math.ceil(fullText.length / 90)));
+      const visibleMessage = withMessageText(message, fullText.slice(0, offset));
+      setMessages((items) => items.map((item) => (item.id === message.id ? visibleMessage : item)));
+      if (offset < fullText.length) {
+        window.setTimeout(step, 16);
+      }
+    };
+    window.setTimeout(step, 16);
+  }, [addOrReplaceMessage]);
 
   const checkServer = useCallback(async () => {
     setServerStatus({ state: 'checking', detail: '正在连接 server' });
@@ -261,6 +326,19 @@ export default function App() {
   }, [baseUrl]);
 
   useEffect(() => {
+    writeSetting(STORAGE_KEYS.accessMode, accessMode);
+    writeSetting(STORAGE_KEYS.fullAccess, accessMode === 'allow_all' ? 'true' : 'false');
+  }, [accessMode]);
+
+  useEffect(() => {
+    writeSetting(STORAGE_KEYS.theme, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    writeSetting(STORAGE_KEYS.fontSize, fontSize);
+  }, [fontSize]);
+
+  useEffect(() => {
     checkServer().then((ok) => {
       if (ok) {
         loadWorkspace();
@@ -344,7 +422,7 @@ export default function App() {
     try {
       const history = await apiJson(`/sessions/${id}/history`);
       setCurrentSessionId(id);
-      setMessages(Array.isArray(history) ? history : []);
+      setMessages(Array.isArray(history) ? history.filter(isVisibleChatMessage) : []);
     } catch (error) {
       showError(`加载会话失败：${normalizeError(error)}`);
     }
@@ -379,24 +457,37 @@ export default function App() {
     }
 
     if (!envelope?.type && envelope?.role) {
-      setMessages((items) => [...items, envelope]);
+      addOrReplaceMessage(envelope);
       return;
     }
 
     if (eventType === 'message') {
       const message = eventPayload?.message || eventPayload;
       if (message?.role) {
-        setMessages((items) => [...items, message]);
+        const existing = message.id && messages.some((item) => item.id === message.id);
+        const canType =
+          !existing &&
+          String(message.role).toLowerCase() === 'assistant' &&
+          messageText(message).length > 0 &&
+          messageToolBlocks(message).length === 0;
+        if (canType) {
+          addTypewriterMessage(message);
+        } else {
+          addOrReplaceMessage(message);
+        }
       } else {
-        setMessages((items) => [
-          ...items,
-          {
-            id: `${Date.now()}`,
-            role: 'assistant',
-            content: [{ type: 'text', text: eventPayload?.text || eventPayload?.content || safeText(eventPayload) }],
-            created_at: new Date().toISOString(),
-          },
-        ]);
+        const text = eventPayload?.text || eventPayload?.content || safeText(eventPayload);
+        if (String(text || '').trim()) {
+          setMessages((items) => [
+            ...items,
+            {
+              id: `${Date.now()}`,
+              role: 'assistant',
+              content: [{ type: 'text', text }],
+              created_at: new Date().toISOString(),
+            },
+          ]);
+        }
       }
       return;
     }
@@ -438,8 +529,6 @@ export default function App() {
         arguments: eventPayload?.arguments || eventPayload?.params,
       };
       setPendingPermissions((items) => [permission, ...items.filter((item) => item.permission_id !== permission.permission_id)]);
-      setRightTab('permissions');
-      setContextOpen(true);
       addTimeline(eventType, '等待权限确认', `${permission.tool_name} · ${permission.summary}`, 'warning');
       return;
     }
@@ -460,7 +549,19 @@ export default function App() {
     }
 
     if (eventType === 'tool_failed') {
-      addTimeline(eventType, eventPayload?.tool_name || '工具失败', eventPayload?.error?.message || eventPayload?.error || safeText(eventPayload), 'error');
+      const toolName = eventPayload?.tool_name || '工具';
+      const detail = eventPayload?.error?.message || eventPayload?.error || safeText(eventPayload);
+      addTimeline(eventType, `${toolName} 失败`, detail, 'error');
+      setMessages((items) => [
+        ...items,
+        {
+          id: `tool-error-${eventPayload?.tool_call_id || Date.now()}-${Math.random().toString(16).slice(2)}`,
+          role: 'assistant',
+          content: [{ type: 'text', text: `工具调用失败：${toolName}\n\n${detail}` }],
+          tone: 'error',
+          created_at: envelope?.created_at || new Date().toISOString(),
+        },
+      ]);
       return;
     }
 
@@ -478,13 +579,14 @@ export default function App() {
     }
 
     if (eventType === 'finish') {
+      runTerminalRef.current = { type: 'finish', runId };
       const finishMessages = Array.isArray(eventPayload?.messages) ? eventPayload.messages : [];
       if (finishMessages.length) {
         setMessages((items) => {
           const seen = new Set(items.map((item) => item.id).filter(Boolean));
           const next = [...items];
           finishMessages.forEach((message) => {
-            if (message?.role && (!message.id || !seen.has(message.id))) {
+            if (message?.role && isVisibleChatMessage(message) && (!message.id || !seen.has(message.id))) {
               next.push(message);
               if (message.id) seen.add(message.id);
             }
@@ -505,11 +607,14 @@ export default function App() {
     }
 
     if (eventType === 'error') {
+      runTerminalRef.current = { type: 'error', runId };
       const detail = eventPayload?.message || eventPayload?.error || safeText(eventPayload);
       addTimeline(eventType, '任务错误', detail, 'error');
       if (runId) {
         setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
       }
+      setIsRunning(false);
+      setActiveRun((run) => (run ? { ...run, status: 'error' } : { status: 'error' }));
       showError(detail);
       return;
     }
@@ -559,6 +664,7 @@ export default function App() {
 
     setTaskText('');
     setIsRunning(true);
+    runTerminalRef.current = null;
     setActiveRun({ status: 'running', started_at: new Date().toISOString() });
     addTimeline('run', '任务已发送', text, 'neutral');
 
@@ -584,6 +690,7 @@ export default function App() {
           model: model.trim() || undefined,
           base_url: baseUrl.trim() || undefined,
           api_key: providerKey.trim() || undefined,
+          permission_mode: accessMode,
         }),
         signal: controller.signal,
       });
@@ -611,21 +718,32 @@ export default function App() {
         }
       }
       if (buffer.trim()) parseSseBlock(buffer);
+      if (!runTerminalRef.current) {
+        const detail = '事件流已断开，未收到任务结束信号';
+        showError(detail);
+        addTimeline('error', '连接中断', detail, 'error');
+        setActiveRun((run) => (run ? { ...run, status: 'interrupted' } : { status: 'interrupted' }));
+        setIsRunning(false);
+      }
     } catch (error) {
-      if (error.name !== 'AbortError') {
+      if (error.name === 'AbortError') {
+        runTerminalRef.current = { type: 'cancelled' };
+      } else {
         const detail = normalizeError(error);
         showError(`任务失败：${detail}`);
         addTimeline('error', '任务失败', detail, 'error');
+        setActiveRun((run) => (run ? { ...run, status: 'error' } : { status: 'error' }));
+        setIsRunning(false);
+        runTerminalRef.current = { type: 'error' };
       }
     } finally {
       abortRef.current = null;
-      setIsRunning(false);
-      setActiveRun((run) => (run ? { ...run, status: 'idle' } : null));
       loadSessions();
     }
   }
 
   async function cancelRun() {
+    runTerminalRef.current = { type: 'cancelled', runId: activeRun?.run_id };
     abortRef.current?.abort();
     setActiveRun((run) => (run ? { ...run, status: 'cancelling' } : { status: 'cancelling' }));
     try {
@@ -647,6 +765,7 @@ export default function App() {
       addTimeline('cancel', '本地已停止，取消接口不可用', normalizeError(error), 'warning');
     } finally {
       setIsRunning(false);
+      setActiveRun((run) => (run ? { ...run, status: 'cancelled' } : { status: 'cancelled' }));
     }
   }
 
@@ -672,7 +791,7 @@ export default function App() {
   const canSend = taskText.trim().length > 0 && !isRunning && Boolean(workspace);
 
   return (
-    <div className="app-shell">
+    <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>
       <TopBar
         serverStatus={serverStatus}
         settingsOpen={settingsOpen}
@@ -689,12 +808,17 @@ export default function App() {
         model={model}
         baseUrl={baseUrl}
         providerKey={providerKey}
+        theme={theme}
+        fontSize={fontSize}
         onApiBaseChange={setApiBase}
         onApiKeyChange={setApiKey}
         onProviderChange={setProvider}
         onModelChange={setModel}
         onBaseUrlChange={setBaseUrl}
         onProviderKeyChange={setProviderKey}
+        onThemeChange={setTheme}
+        onFontSizeChange={setFontSize}
+        onClose={() => setSettingsOpen(false)}
       />
 
       <main className="workspace-grid">
@@ -724,9 +848,12 @@ export default function App() {
           workspace={workspace}
           provider={provider}
           model={model}
+          accessMode={accessMode}
           activeContext={contextOpen ? rightTab : null}
-          pendingPermissionCount={pendingPermissions.length}
+          pendingPermissions={pendingPermissions}
           onTaskTextChange={setTaskText}
+          onAccessModeChange={setAccessMode}
+          onResolvePermission={resolvePermission}
           onSendTask={sendTask}
           onCancelRun={cancelRun}
           onOpenContext={(tab) => {
@@ -742,11 +869,9 @@ export default function App() {
           status={workspaceStatus}
           diffLoading={diffLoading}
           diffError={diffError}
-          pendingPermissions={pendingPermissions}
           onTabChange={openContextTab}
           onClose={() => setContextOpen(false)}
           onRefreshDiff={loadWorkspaceDiff}
-          onResolvePermission={resolvePermission}
         />
       </main>
 

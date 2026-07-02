@@ -147,6 +147,9 @@ impl Provider for AnthropicProvider {
                                     match delta.r#type.as_deref() {
                                         Some("text_delta") => {
                                             accumulated.content.push_str(&delta.text.unwrap_or_default());
+                                            if let Some(msg) = accumulated.snapshot() {
+                                                yield (Some(msg), ProviderUsage::default());
+                                            }
                                         }
                                         Some("input_json_delta") => {
                                             accumulated.tool_call_arguments.push_str(&delta.partial_json.unwrap_or_default());
@@ -190,15 +193,32 @@ impl Provider for AnthropicProvider {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct AccumulatedMessage {
+    id: String,
     role: Option<String>,
     content: String,
     tool_calls: Vec<AnthropicToolCall>,
     tool_call_arguments: String,
 }
 
+impl Default for AccumulatedMessage {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            role: None,
+            content: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_arguments: String::new(),
+        }
+    }
+}
+
 impl AccumulatedMessage {
+    fn snapshot(&self) -> Option<Message> {
+        self.clone().finish()
+    }
+
     fn finish(self) -> Option<Message> {
         let mut blocks: Vec<ContentBlock> = vec![];
         if !self.content.is_empty() {
@@ -221,7 +241,7 @@ impl AccumulatedMessage {
             _ => Role::Assistant,
         };
         Some(Message {
-            id: Uuid::new_v4().to_string(),
+            id: self.id,
             role,
             content: blocks,
             created_at: Utc::now(),

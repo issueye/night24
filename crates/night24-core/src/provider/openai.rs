@@ -155,6 +155,9 @@ impl Provider for OpenAIProvider {
 
                                 if let Some(content) = delta.content {
                                     accumulated.content.push_str(&content);
+                                    if let Some(msg) = accumulated.snapshot() {
+                                        yield (Some(msg), ProviderUsage::default());
+                                    }
                                 }
 
                                 if let Some(tool_calls) = delta.tool_calls {
@@ -189,11 +192,23 @@ impl Provider for OpenAIProvider {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct AccumulatedMessage {
+    id: String,
     role: Option<String>,
     content: String,
     tool_calls: Vec<OpenAiToolCall>,
+}
+
+impl Default for AccumulatedMessage {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            role: None,
+            content: String::new(),
+            tool_calls: Vec::new(),
+        }
+    }
 }
 
 impl AccumulatedMessage {
@@ -214,6 +229,10 @@ impl AccumulatedMessage {
                 arguments: tc.function.arguments.unwrap_or_default(),
             },
         });
+    }
+
+    fn snapshot(&self) -> Option<Message> {
+        self.clone().finish()
     }
 
     fn finish(self) -> Option<Message> {
@@ -243,7 +262,7 @@ impl AccumulatedMessage {
         }
 
         Some(Message {
-            id: Uuid::new_v4().to_string(),
+            id: self.id,
             role,
             content: blocks,
             created_at: Utc::now(),

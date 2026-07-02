@@ -59,6 +59,8 @@ struct ReplyRequest {
     model: Option<String>,
     #[schema(example = "session-123")]
     session_id: Option<String>,
+    #[schema(example = "allow_all")]
+    permission_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
@@ -1976,6 +1978,15 @@ async fn reply_core(State(state): State<AppState>, Json(req): Json<ReplyRequest>
         }],
         created_at: chrono::Utc::now(),
     };
+    let permission_mode = normalize_permission_mode(
+        req.permission_mode
+            .or_else(|| std::env::var("NIGHT24_PERMISSION_MODE").ok()),
+    );
+    info!(
+        run_id = %run_id,
+        permission_mode = %permission_mode,
+        "reply permission mode"
+    );
     let reply_params = ReplyParams {
         run_id: run_id.clone(),
         session: ReplySession {
@@ -1994,9 +2005,9 @@ async fn reply_core(State(state): State<AppState>, Json(req): Json<ReplyRequest>
         },
         limits: ReplyLimits::default(),
         options: ReplyOptions {
-            stream_message_delta: false,
+            stream_message_delta: true,
             emit_tool_events: true,
-            permission_mode: std::env::var("NIGHT24_PERMISSION_MODE").ok(),
+            permission_mode: Some(permission_mode),
         },
     };
 
@@ -2098,6 +2109,21 @@ async fn reply_core(State(state): State<AppState>, Json(req): Json<ReplyRequest>
         .body(Body::from_stream(stream))
         .unwrap()
         .into_response()
+}
+
+fn normalize_permission_mode(mode: Option<String>) -> String {
+    match mode
+        .unwrap_or_else(|| "strict".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .as_str()
+    {
+        "allow_all" | "full_access" => "allow_all".to_string(),
+        "permissive" => "permissive".to_string(),
+        "deny_all" => "deny_all".to_string(),
+        _ => "strict".to_string(),
+    }
 }
 
 fn sse_format_event(event: &serde_json::Value) -> String {
@@ -2244,10 +2270,10 @@ async fn reply(State(state): State<AppState>, Json(req): Json<ReplyRequest>) -> 
                 max_tokens: None,
             },
             system_prompt: "You are a helpful AI assistant.".to_string(),
-            max_turns: 10,
+            max_turns: 40,
             turn_timeout: Duration::from_secs(60),
-            tool_timeout: Duration::from_secs(30),
-            total_timeout: Duration::from_secs(180),
+            tool_timeout: Duration::from_secs(60),
+            total_timeout: Duration::from_secs(600),
         },
         provider,
         state.permission_manager.clone(),
@@ -2408,5 +2434,15 @@ mod tests {
         assert_eq!(files, 1);
         assert_eq!(insertions, 2);
         assert_eq!(deletions, 1);
+    }
+
+    #[test]
+    fn test_normalize_permission_mode() {
+        assert_eq!(normalize_permission_mode(Some("allow_all".to_string())), "allow_all");
+        assert_eq!(normalize_permission_mode(Some("allow-all".to_string())), "allow_all");
+        assert_eq!(normalize_permission_mode(Some("full_access".to_string())), "allow_all");
+        assert_eq!(normalize_permission_mode(Some("permissive".to_string())), "permissive");
+        assert_eq!(normalize_permission_mode(Some("unknown".to_string())), "strict");
+        assert_eq!(normalize_permission_mode(None), "strict");
     }
 }

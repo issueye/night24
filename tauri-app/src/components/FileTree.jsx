@@ -18,7 +18,7 @@ function TreeNode({ node, onOpenFile, selectedPath, depth }) {
     <div className="tree-node">
       <button
         className={classNames('tree-row', selectedPath === node.path && 'selected')}
-        style={{ paddingLeft: 8 + depth * 14 }}
+        style={{ '--tree-depth': depth }}
         onClick={() => {
           if (isDir) setOpen((value) => !value);
           else onOpenFile(node);

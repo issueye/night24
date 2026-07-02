@@ -136,10 +136,10 @@ pub struct ReplyLimits {
 impl Default for ReplyLimits {
     fn default() -> Self {
         Self {
-            max_turns: 10,
+            max_turns: 40,
             turn_timeout_ms: 60_000,
-            tool_timeout_ms: 30_000,
-            total_timeout_ms: 180_000,
+            tool_timeout_ms: 60_000,
+            total_timeout_ms: 600_000,
         }
     }
 }

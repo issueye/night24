@@ -424,7 +424,9 @@ impl AgentCore {
                             let mut stream = provider
                                 .stream(&model_config, &system, &messages, &tools)
                                 .await?;
-                            let mut turn_messages = Vec::new();
+                            let mut message_order = Vec::new();
+                            let mut latest_messages: HashMap<String, Message> = HashMap::new();
+                            let mut streamed_text: HashMap<String, String> = HashMap::new();
                             let mut has_tool_requests = false;
                             while let Some(result) = stream.next().await {
                                 if context.is_cancelled() {
@@ -435,13 +437,56 @@ impl AgentCore {
                                     has_tool_requests |= message.content.iter().any(|block| {
                                         matches!(block, ContentBlock::ToolRequest { .. })
                                     });
-                                    context.send(AgentEventKind::Message {
-                                        message: message.clone(),
-                                    });
-                                    turn_messages.push(message);
+                                    if params.options.stream_message_delta {
+                                        let current_text = text_content(&message);
+                                        let previous_text =
+                                            streamed_text.entry(message.id.clone()).or_default();
+                                        if current_text.starts_with(previous_text.as_str())
+                                            && current_text.len() > previous_text.len()
+                                        {
+                                            let delta = current_text[previous_text.len()..].to_string();
+                                            context.send(AgentEventKind::MessageDelta {
+                                                message_id: message.id.clone(),
+                                                delta,
+                                            });
+                                            *previous_text = current_text;
+                                        } else if !current_text.is_empty()
+                                            && current_text != *previous_text
+                                        {
+                                            context.send(AgentEventKind::Message {
+                                                message: message.clone(),
+                                            });
+                                            *previous_text = current_text;
+                                        }
+
+                                        if message.content.iter().any(|block| {
+                                            matches!(
+                                                block,
+                                                ContentBlock::ToolRequest { .. }
+                                                    | ContentBlock::ToolResponse { .. }
+                                            )
+                                        }) {
+                                            context.send(AgentEventKind::Message {
+                                                message: message.clone(),
+                                            });
+                                        }
+                                    } else {
+                                        context.send(AgentEventKind::Message {
+                                            message: message.clone(),
+                                        });
+                                    }
+
+                                    if !latest_messages.contains_key(&message.id) {
+                                        message_order.push(message.id.clone());
+                                    }
+                                    latest_messages.insert(message.id.clone(), message);
                                 }
                             }
 
+                            let turn_messages = message_order
+                                .into_iter()
+                                .filter_map(|id| latest_messages.remove(&id))
+                                .collect::<Vec<_>>();
                             anyhow::Ok((turn_messages, has_tool_requests))
                         },
                     )
@@ -723,13 +768,26 @@ fn permission_manager_for_mode(mode: Option<&str>) -> PermissionManager {
         .unwrap_or("strict")
         .trim()
         .to_ascii_lowercase()
+        .replace('-', "_")
         .as_str()
     {
-        "allow_all" => PermissionManager::new(PermissionLevel::Allow),
+        "allow_all" | "full_access" => PermissionManager::new(PermissionLevel::Allow),
         "deny_all" => PermissionManager::new(PermissionLevel::Deny),
         "permissive" => PermissionManager::permissive_local(),
         _ => PermissionManager::default(),
     }
+}
+
+fn text_content(message: &Message) -> String {
+    message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } | ContentBlock::Thinking { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn risk_for_tool(tool_name: &str) -> RiskLevel {

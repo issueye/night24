@@ -14,15 +14,16 @@ export function MarkdownMessage({ text }) {
               </a>
             );
           },
-          code({ inline, className, children, ...props }) {
-            if (inline) {
-              return <code className="inline-code" {...props}>{children}</code>;
-            }
+          code({ node, className, children, ...props }) {
+            const isBlock = node?.position?.start?.line !== node?.position?.end?.line || Boolean(className);
             return (
-              <pre className="code-block">
-                <code className={className} {...props}>{children}</code>
-              </pre>
+              <code className={isBlock ? className : 'inline-code'} {...props}>
+                {children}
+              </code>
             );
+          },
+          pre({ children }) {
+            return <pre className="code-block">{children}</pre>;
           },
           table({ children }) {
             return <div className="table-wrap"><table>{children}</table></div>;

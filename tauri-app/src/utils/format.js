@@ -20,16 +20,22 @@ export function messageText(message) {
       .map((block) => {
         if (block?.type === 'text') return block.text || '';
         if (block?.type === 'thinking') return block.text || '';
-        if (block?.type === 'tool_request') {
-          return `Tool ${block.name || 'unknown'}\n${safeText(block.arguments)}`;
-        }
-        if (block?.type === 'tool_response') return safeText(block.content);
+        if (block?.type === 'tool_request' || block?.type === 'tool_response') return '';
         return safeText(block);
       })
       .filter(Boolean)
       .join('\n\n');
   }
   return safeText(message.content);
+}
+
+export function messageToolBlocks(message) {
+  if (!message || !Array.isArray(message.content)) return [];
+  return message.content.filter((block) => block?.type === 'tool_request' || block?.type === 'tool_response');
+}
+
+export function isVisibleChatMessage(message) {
+  return messageText(message).trim().length > 0 || messageToolBlocks(message).length > 0;
 }
 
 export function formatTime(value) {

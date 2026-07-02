@@ -4,6 +4,16 @@ import { classNames, formatTime } from '../utils/format.js';
 export function TimelinePanel({ timeline, activeRun, open, onToggle, onClose }) {
   const latest = timeline[0];
   const runStatus = activeRun?.status || 'idle';
+  const runLabel =
+    runStatus === 'running' ? '运行中' :
+    runStatus === 'idle' ? '就绪' :
+    runStatus === 'completed' ? '已完成' :
+    runStatus === 'finished' ? '已完成' :
+    runStatus === 'cancelled' ? '已取消' :
+    runStatus === 'cancelling' ? '正在取消' :
+    runStatus === 'interrupted' ? '已中断' :
+    runStatus === 'error' || runStatus === 'failed' ? '出错' :
+    runStatus;
 
   return (
     <>
@@ -33,7 +43,7 @@ export function TimelinePanel({ timeline, activeRun, open, onToggle, onClose }) 
       <footer className="statusbar">
         <div className={classNames('statusbar-state', runStatus)}>
           <Radio size={13} />
-          <span>{runStatus === 'running' ? '运行中' : runStatus === 'idle' ? '就绪' : runStatus}</span>
+          <span>{runLabel}</span>
         </div>
 
         <button className={classNames('statusbar-event-button', open && 'active', latest?.tone)} onClick={onToggle} type="button">
