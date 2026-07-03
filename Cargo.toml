@@ -10,7 +10,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Async
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time", "signal", "process"] }
 futures = { version = "0.3", default-features = false, features = ["std"] }
 async-stream = { version = "0.3", default-features = false }
 

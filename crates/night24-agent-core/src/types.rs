@@ -7,6 +7,7 @@ use std::sync::{
 use night24_protocol::{AgentEvent, AgentEventKind, PermissionDecision};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
+use crate::hooks::{HookContext, HookRunner};
 use crate::rpc::agent_event_notification;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,7 @@ pub(super) struct RunContext {
     pub(super) output: Option<UnboundedSender<String>>,
     pub(super) collected: Option<Arc<Mutex<Vec<String>>>>,
     pub(super) permissions: Arc<Mutex<HashMap<String, PermissionHandle>>>,
+    pub(super) hooks: Arc<HookRunner>,
 }
 
 impl RunContext {
@@ -54,6 +56,16 @@ impl RunContext {
             if let Ok(mut collected) = collected.lock() {
                 collected.push(message);
             }
+        }
+    }
+
+    pub(super) async fn run_hooks(&self, context: HookContext<'_>) {
+        for output in self.hooks.run(&context).await {
+            self.send(AgentEventKind::RunOutput {
+                source: output.source,
+                stream: output.stream,
+                text: output.text,
+            });
         }
     }
 

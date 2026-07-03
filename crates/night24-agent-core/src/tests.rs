@@ -1,4 +1,5 @@
 use super::*;
+use crate::hooks::{hook_context_json, HookContext, HookEvent, HookRunner};
 use serde_json::json;
 
 #[tokio::test]
@@ -400,6 +401,231 @@ fn network_proxy_does_not_override_tool_argument() {
         Some("http://127.0.0.1:7890"),
     );
     assert_eq!(with_proxy["proxy"], "direct");
+}
+
+#[test]
+fn hook_config_ignores_command_only_hooks() {
+    let runner = HookRunner::from_config_str(
+        r#"{
+            "hooks": [
+                { "event": "run_started", "command": "echo start" },
+                { "event": "before_tool", "command": "" },
+                { "event": "run_finished", "script": "hooks/done.gs", "enabled": false }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    assert!(runner.is_empty());
+}
+
+#[test]
+fn hook_config_accepts_gts_script_hooks() {
+    let runner = HookRunner::from_config_str(
+        r#"{
+            "hooks": [
+                {
+                    "event": "before_provider_request",
+                    "name": "provider-policy",
+                    "engine": "gts",
+                    "script": "hooks/provider_policy.gs",
+                    "timeout_ms": 5000
+                }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    assert!(!runner.is_empty());
+}
+
+#[tokio::test]
+async fn gts_hook_calls_execute_with_args_and_structured_outputs() {
+    let temp_dir = test_temp_dir("gts-execute-hook").await;
+    let hook_dir = temp_dir.join("hooks");
+    tokio::fs::create_dir_all(&hook_dir).await.unwrap();
+    tokio::fs::write(
+        hook_dir.join("audit.gs"),
+        r#"function execute(args) {
+  return {
+    outputs: [
+      {
+        stream: "stdout",
+        text: "event=" + args.event + " run=" + args.run_id + " tool=" + args.tool_name + " text=" + args.arguments.text
+      },
+      {
+        stream: "stderr",
+        text: "summary=" + args.summary + " cwd=" + args.working_dir
+      }
+    ]
+  };
+}
+"#,
+    )
+    .await
+    .unwrap();
+
+    let config = serde_json::json!({
+        "hooks": [
+            {
+                "event": "before_tool",
+                "name": "tool-audit",
+                "engine": "gts",
+                "script": "hooks/audit.gs",
+                "timeout_ms": 5000
+            }
+        ]
+    });
+    let runner = HookRunner::from_config_str(&config.to_string()).unwrap();
+
+    let outputs = runner
+        .run(&HookContext {
+            event: HookEvent::BeforeTool,
+            run_id: "run-gts-execute",
+            working_dir: &temp_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: Some("tool-1"),
+            tool_name: Some("developer__echo"),
+            summary: Some("Call developer__echo"),
+            arguments: Some(&json!({"text": "hello"})),
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    assert_eq!(outputs.len(), 2);
+    assert_eq!(outputs[0].source, "hook:before_tool:tool-audit");
+    assert!(matches!(
+        outputs[0].stream,
+        night24_protocol::OutputStream::Stdout
+    ));
+    assert_eq!(
+        outputs[0].text,
+        "event=before_tool run=run-gts-execute tool=developer__echo text=hello"
+    );
+    assert_eq!(outputs[1].source, "hook:before_tool:tool-audit");
+    assert!(matches!(
+        outputs[1].stream,
+        night24_protocol::OutputStream::Stderr
+    ));
+    assert!(outputs[1]
+        .text
+        .contains("summary=Call developer__echo cwd="));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn gts_hook_can_call_cli_from_inside_script() {
+    let temp_dir = test_temp_dir("gts-cli-hook").await;
+    let hook_dir = temp_dir.join("hooks");
+    tokio::fs::create_dir_all(&hook_dir).await.unwrap();
+    tokio::fs::write(
+        hook_dir.join("cli.gs"),
+        r#"let exec = require("@std/exec");
+let os = require("@std/os");
+
+function execute(args) {
+  let output = "";
+  if (os.platform === "windows") {
+    output = exec.output("cmd", ["/C", "echo cli-ok"]);
+  } else {
+    output = exec.output("sh", ["-c", "printf cli-ok"]);
+  }
+  return {
+    outputs: [
+      {
+        stream: "stdout",
+        text: "cli=" + output
+      }
+    ]
+  };
+}
+"#,
+    )
+    .await
+    .unwrap();
+
+    let config = serde_json::json!({
+        "hooks": [
+            {
+                "event": "run_started",
+                "name": "cli-hook",
+                "engine": "gts",
+                "script": "hooks/cli.gs",
+                "timeout_ms": 5000
+            }
+        ]
+    });
+    let runner = HookRunner::from_config_str(&config.to_string()).unwrap();
+
+    let outputs = runner
+        .run(&HookContext {
+            event: HookEvent::RunStarted,
+            run_id: "run-gts-cli",
+            working_dir: &temp_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    let stdout = outputs
+        .iter()
+        .filter(|output| matches!(output.stream, night24_protocol::OutputStream::Stdout))
+        .map(|output| output.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(stdout.contains("cli=cli-ok"));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[test]
+fn hook_context_json_includes_provider_and_tool_fields() {
+    let temp_dir = std::path::PathBuf::from("E:/workspace/example");
+    let args = json!({"command": "date"});
+    let json_text = hook_context_json(&HookContext {
+        event: HookEvent::BeforeTool,
+        run_id: "run-json",
+        working_dir: &temp_dir,
+        provider: Some("openai"),
+        model: Some("gpt-4o-mini"),
+        message_count: Some(4),
+        tool_count: Some(18),
+        tool_call_id: Some("tool-1"),
+        tool_name: Some("developer__shell"),
+        summary: Some("Run shell command: date"),
+        arguments: Some(&args),
+        result_preview: None,
+        error: None,
+        duration_ms: None,
+        finish_status: None,
+    });
+    let value: serde_json::Value = serde_json::from_str(&json_text).unwrap();
+
+    assert_eq!(value["event"], "before_tool");
+    assert_eq!(value["run_id"], "run-json");
+    assert_eq!(value["provider"], "openai");
+    assert_eq!(value["model"], "gpt-4o-mini");
+    assert_eq!(value["message_count"], 4);
+    assert_eq!(value["tool_count"], 18);
+    assert_eq!(value["tool_name"], "developer__shell");
+    assert_eq!(value["arguments"]["command"], "date");
 }
 
 async fn initialized_core() -> AgentCore {

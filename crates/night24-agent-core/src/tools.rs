@@ -10,6 +10,7 @@ use night24_protocol::{AgentEventKind, PermissionDecision, RiskLevel};
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 
+use crate::hooks::{HookContext, HookEvent};
 use crate::types::{PermissionHandle, RunContext, RunHandle};
 
 pub(super) async fn execute_tool_with_events(
@@ -27,6 +28,7 @@ pub(super) async fn execute_tool_with_events(
     }
 
     let arguments = arguments_with_network_proxy(tool_name, arguments, network_proxy);
+    let summary = summarize_tool_call(tool_name, &arguments);
 
     match security.require_permission(tool_name).await {
         PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
@@ -45,12 +47,31 @@ pub(super) async fn execute_tool_with_events(
                     },
                 );
 
+            context
+                .run_hooks(HookContext {
+                    event: HookEvent::PermissionRequired,
+                    run_id: &context.run_id,
+                    working_dir,
+                    provider: None,
+                    model: None,
+                    message_count: None,
+                    tool_count: None,
+                    tool_call_id: Some(tool_call_id),
+                    tool_name: Some(tool_name),
+                    summary: Some(&summary),
+                    arguments: Some(&arguments),
+                    result_preview: None,
+                    error: None,
+                    duration_ms: None,
+                    finish_status: None,
+                })
+                .await;
             context.send(AgentEventKind::PermissionRequired {
                 permission_id,
                 tool_call_id: tool_call_id.to_string(),
                 tool_name: tool_name.to_string(),
                 risk: risk_for_tool(tool_name),
-                summary: summarize_tool_call(tool_name, &arguments),
+                summary: summary.clone(),
                 arguments: arguments.clone(),
                 timeout_ms: 300_000,
             });
@@ -71,43 +92,117 @@ pub(super) async fn execute_tool_with_events(
         anyhow::bail!("cancelled");
     }
 
+    context
+        .run_hooks(HookContext {
+            event: HookEvent::BeforeTool,
+            run_id: &context.run_id,
+            working_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(tool_name),
+            summary: Some(&summary),
+            arguments: Some(&arguments),
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
     if context.emit_tool_events {
         context.send(AgentEventKind::ToolStarted {
             tool_call_id: tool_call_id.to_string(),
             tool_name: tool_name.to_string(),
-            summary: summarize_tool_call(tool_name, &arguments),
+            summary,
             arguments: arguments.clone(),
         });
     }
 
     let started = Instant::now();
-    let result = tokio::time::timeout(
+    let result = match tokio::time::timeout(
         tool_timeout,
         execute_tool_raw_output(tool_name, &arguments, working_dir, security),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("tool timed out after {:?}", tool_timeout))??;
-    let result = resolve_sensitive_output(
-        context,
-        security,
-        tool_call_id,
-        tool_name,
-        &arguments,
-        result,
-    )
-    .await?;
+    .map_err(|_| anyhow::anyhow!("tool timed out after {:?}", tool_timeout))?
+    {
+        Ok(result) => {
+            resolve_sensitive_output(
+                context,
+                security,
+                tool_call_id,
+                tool_name,
+                &arguments,
+                result,
+            )
+            .await
+        }
+        Err(err) => Err(err),
+    };
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    let result = match result {
+        Ok(result) => result,
+        Err(err) => {
+            let error = err.to_string();
+            context
+                .run_hooks(HookContext {
+                    event: HookEvent::AfterTool,
+                    run_id: &context.run_id,
+                    working_dir,
+                    provider: None,
+                    model: None,
+                    message_count: None,
+                    tool_count: None,
+                    tool_call_id: Some(tool_call_id),
+                    tool_name: Some(tool_name),
+                    summary: None,
+                    arguments: Some(&arguments),
+                    result_preview: None,
+                    error: Some(&error),
+                    duration_ms: Some(duration_ms),
+                    finish_status: None,
+                })
+                .await;
+            return Err(err);
+        }
+    };
 
     if context.is_cancelled() {
         anyhow::bail!("cancelled");
     }
 
+    let result_preview = preview(&result);
+    context
+        .run_hooks(HookContext {
+            event: HookEvent::AfterTool,
+            run_id: &context.run_id,
+            working_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(tool_name),
+            summary: None,
+            arguments: Some(&arguments),
+            result_preview: Some(&result_preview),
+            error: None,
+            duration_ms: Some(duration_ms),
+            finish_status: None,
+        })
+        .await;
+
     if context.emit_tool_events {
         context.send(AgentEventKind::ToolFinished {
             tool_call_id: tool_call_id.to_string(),
             tool_name: tool_name.to_string(),
-            duration_ms: started.elapsed().as_millis() as u64,
+            duration_ms,
             summary: format!("{} completed", tool_name),
-            result_preview: preview(&result),
+            result_preview,
             is_error: false,
         });
     }

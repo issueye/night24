@@ -11,6 +11,7 @@ description = "Night24 Agent Core process over stdio JSON-RPC"
 anyhow.workspace = true
 chrono.workspace = true
 night24-core = { path = "../night24-core" }
+night24-gts = { path = "../night24-gts", default-features = false }
 night24-protocol = { path = "../night24-protocol" }
 futures.workspace = true
 serde.workspace = true

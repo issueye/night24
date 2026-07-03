@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+mod hooks;
 mod providers;
 mod rpc;
 mod tools;
 mod types;
 
+use hooks::{HookContext, HookEvent, HookRunner};
 use providers::{create_provider, effective_model, effective_provider};
 use rpc::{
     agent_event_notification, core_capabilities, decode_optional_params, decode_params,
@@ -246,6 +248,7 @@ impl AgentCore {
                 None
             },
             permissions: self.permissions.clone(),
+            hooks: Arc::new(HookRunner::from_environment(&params.session.working_dir)),
         };
         let runs = self.runs.clone();
         let permissions = self.permissions.clone();
@@ -370,6 +373,25 @@ impl AgentCore {
                     let turn_result = tokio::time::timeout(
                         Duration::from_millis(params.limits.turn_timeout_ms.max(1)),
                         async {
+                            context
+                                .run_hooks(HookContext {
+                                    event: HookEvent::BeforeProviderRequest,
+                                    run_id: &params.run_id,
+                                    working_dir: &params.session.working_dir,
+                                    provider: Some(provider.name()),
+                                    model: Some(&model_config.model),
+                                    message_count: Some(messages.len()),
+                                    tool_count: Some(tools.len()),
+                                    tool_call_id: None,
+                                    tool_name: None,
+                                    summary: None,
+                                    arguments: None,
+                                    result_preview: None,
+                                    error: None,
+                                    duration_ms: None,
+                                    finish_status: None,
+                                })
+                                .await;
                             let mut stream = provider
                                 .stream(&model_config, &system, &messages, &tools)
                                 .await?;
@@ -568,8 +590,52 @@ async fn reply_events(
     default_provider: String,
     context: RunContext,
 ) -> Vec<String> {
+    context
+        .run_hooks(HookContext {
+            event: HookEvent::RunStarted,
+            run_id: &params.run_id,
+            working_dir: &params.session.working_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
     match AgentCore::run_agent_with_events(&params, &default_provider, &context).await {
         Ok(messages) => {
+            let status = if context.is_cancelled() {
+                "cancelled"
+            } else {
+                "completed"
+            };
+            context
+                .run_hooks(HookContext {
+                    event: HookEvent::RunFinished,
+                    run_id: &params.run_id,
+                    working_dir: &params.session.working_dir,
+                    provider: None,
+                    model: None,
+                    message_count: None,
+                    tool_count: None,
+                    tool_call_id: None,
+                    tool_name: None,
+                    summary: None,
+                    arguments: None,
+                    result_preview: None,
+                    error: None,
+                    duration_ms: None,
+                    finish_status: Some(status),
+                })
+                .await;
             let mut output = context.drain_collected();
             output.push(agent_event_notification(AgentEvent::new(
                 params.run_id.clone(),
@@ -588,6 +654,35 @@ async fn reply_events(
         }
         Err(err) => {
             let message = err.to_string();
+            let status = if context.is_cancelled() || message.contains("cancelled") {
+                "cancelled"
+            } else {
+                "failed"
+            };
+            let event = if status == "failed" {
+                HookEvent::RunFailed
+            } else {
+                HookEvent::RunFinished
+            };
+            context
+                .run_hooks(HookContext {
+                    event,
+                    run_id: &params.run_id,
+                    working_dir: &params.session.working_dir,
+                    provider: None,
+                    model: None,
+                    message_count: None,
+                    tool_count: None,
+                    tool_call_id: None,
+                    tool_name: None,
+                    summary: None,
+                    arguments: None,
+                    result_preview: None,
+                    error: Some(&message),
+                    duration_ms: None,
+                    finish_status: Some(status),
+                })
+                .await;
             let mut output = context.drain_collected();
             if context.is_cancelled() || message.contains("cancelled") {
                 output.push(agent_event_notification(AgentEvent::new(
