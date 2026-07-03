@@ -79,7 +79,7 @@ export function SettingsStrip({
                 </label>
                 <label>
                   <span>Provider Key</span>
-                  <input type="password" value={providerKey} onChange={(event) => onProviderKeyChange(event.target.value)} placeholder="not saved" />
+                  <input type="password" value={providerKey} onChange={(event) => onProviderKeyChange(event.target.value)} placeholder="saved locally" />
                 </label>
               </div>
             )}

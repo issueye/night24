@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -140,6 +141,42 @@ pub fn builtin_tools() -> Vec<Tool> {
                     "body": {
                         "type": "string",
                         "description": "Optional request body."
+                    },
+                    "proxy": {
+                        "type": "string",
+                        "description": "Optional HTTP/HTTPS proxy URL for this request. Use \"direct\" to ignore environment proxy settings."
+                    }
+                },
+                "required": ["url"]
+            }),
+        },
+        Tool {
+            name: "developer__network_request".to_string(),
+            description: "Make an HTTP or HTTPS network request and return status and body."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Target HTTP or HTTPS URL."
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method.",
+                        "default": "GET"
+                    },
+                    "headers": {
+                        "type": "object",
+                        "description": "Optional JSON object of headers."
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional request body."
+                    },
+                    "proxy": {
+                        "type": "string",
+                        "description": "Optional HTTP/HTTPS proxy URL for this request. Use \"direct\" to ignore environment proxy settings."
                     }
                 },
                 "required": ["url"]
@@ -154,6 +191,28 @@ pub fn builtin_tools() -> Vec<Tool> {
                     "query": {
                         "type": "string",
                         "description": "Search query."
+                    },
+                    "proxy": {
+                        "type": "string",
+                        "description": "Optional HTTP/HTTPS proxy URL for this search. Use \"direct\" to ignore environment proxy settings."
+                    }
+                },
+                "required": ["query"]
+            }),
+        },
+        Tool {
+            name: "developer__network_search".to_string(),
+            description: "Search the web and return a short result summary.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query."
+                    },
+                    "proxy": {
+                        "type": "string",
+                        "description": "Optional HTTP/HTTPS proxy URL for this search. Use \"direct\" to ignore environment proxy settings."
                     }
                 },
                 "required": ["query"]
@@ -208,6 +267,10 @@ pub fn builtin_tools() -> Vec<Tool> {
                     "url": {
                         "type": "string",
                         "description": "Target URL to scrape."
+                    },
+                    "proxy": {
+                        "type": "string",
+                        "description": "Optional HTTP/HTTPS proxy URL for this request. Use \"direct\" to ignore environment proxy settings."
                     }
                 },
                 "required": ["url"]
@@ -389,6 +452,373 @@ fn html_to_text(html: &str) -> String {
     lines.join("\n")
 }
 
+const MAX_NETWORK_RESPONSE_CHARS: usize = 100_000;
+const MAX_SEARCH_RESULTS: usize = 5;
+const MAX_SEARCH_SNIPPET_CHARS: usize = 240;
+const MAX_SEARCH_TITLE_CHARS: usize = 80;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchResult {
+    title: String,
+    snippet: String,
+    url: String,
+}
+
+fn validate_http_url(url: &str) -> anyhow::Result<reqwest::Url> {
+    let parsed = reqwest::Url::parse(url).map_err(|err| anyhow::anyhow!("invalid url: {err}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => anyhow::bail!("unsupported url scheme: {scheme}"),
+    }
+    if parsed.host_str().is_none() {
+        anyhow::bail!("url must include a host");
+    }
+    Ok(parsed)
+}
+
+fn parse_headers(arguments: &serde_json::Value) -> Vec<(String, String)> {
+    arguments
+        .get("headers")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let truncated = text.chars().take(max_chars).collect::<String>();
+    format!("{truncated}\n...[truncated]")
+}
+
+fn proxy_from_arguments(arguments: &serde_json::Value) -> Option<String> {
+    arguments
+        .get("proxy")
+        .and_then(|value| value.as_str())
+        .and_then(non_empty_trimmed)
+        .map(str::to_string)
+}
+
+fn configured_network_proxy(request_proxy: Option<&str>) -> Option<String> {
+    if let Some(value) = request_proxy {
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("direct") || value.eq_ignore_ascii_case("none") {
+            return None;
+        }
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+
+    [
+        "NIGHT24_NETWORK_PROXY",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]
+    .into_iter()
+    .find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| non_empty_trimmed(&value).map(str::to_string))
+    })
+}
+
+fn non_empty_trimmed(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn http_client(proxy: Option<&str>) -> anyhow::Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .user_agent("Night24/0.1 (+https://github.com/night24)");
+
+    if let Some(proxy) = configured_network_proxy(proxy) {
+        builder =
+            builder
+                .proxy(reqwest::Proxy::all(&proxy).map_err(|err| {
+                    anyhow::anyhow!("invalid network proxy `{}`: {}", proxy, err)
+                })?);
+    }
+
+    builder.build().map_err(Into::into)
+}
+
+async fn send_network_request(
+    url: &str,
+    method: &str,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+    proxy: Option<&str>,
+) -> anyhow::Result<String> {
+    let url = validate_http_url(url)?;
+    let client = http_client(proxy)?;
+    let method = method.to_uppercase();
+    let mut request = match method.as_str() {
+        "GET" => client.get(url),
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "PATCH" => client.patch(url),
+        "DELETE" => client.delete(url),
+        "HEAD" => client.head(url),
+        _ => anyhow::bail!("unsupported http method: {}", method),
+    };
+
+    for (key, value) in headers {
+        request = request.header(&key, value);
+    }
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+
+    let response = request.send().await?;
+    let status = response.status();
+    let final_url = response.url().to_string();
+    let text = response.text().await.unwrap_or_default();
+    let text = truncate_chars(&text, MAX_NETWORK_RESPONSE_CHARS);
+
+    if status.is_success() {
+        Ok(format!(
+            "status: {}\nurl: {}\n\n{}",
+            status, final_url, text
+        ))
+    } else {
+        anyhow::bail!("http request failed {} at {}:\n{}", status, final_url, text);
+    }
+}
+
+async fn fetch_network_body(url: &str, proxy: Option<&str>) -> anyhow::Result<String> {
+    let url = validate_http_url(url)?;
+    let response = http_client(proxy)?.get(url).send().await?;
+    let status = response.status();
+    let final_url = response.url().to_string();
+    let text = response.text().await.unwrap_or_default();
+    if status.is_success() {
+        Ok(text)
+    } else {
+        anyhow::bail!(
+            "http request failed {} at {}:\n{}",
+            status,
+            final_url,
+            truncate_chars(&text, 4_000)
+        );
+    }
+}
+
+async fn search_web(query: &str, proxy: Option<&str>) -> anyhow::Result<String> {
+    let query = query.trim();
+    if query.is_empty() {
+        anyhow::bail!("missing `query` for web search");
+    }
+
+    let url = reqwest::Url::parse_with_params(
+        "https://api.duckduckgo.com/",
+        &[
+            ("q", query),
+            ("format", "json"),
+            ("no_redirect", "1"),
+            ("no_html", "1"),
+            ("skip_disambig", "1"),
+        ],
+    )?;
+
+    let client = http_client(proxy)?;
+    let response = client.get(url).send().await?;
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(
+            "web search failed {}:\n{}",
+            status,
+            truncate_chars(&text, 4_000)
+        );
+    }
+
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|err| anyhow::anyhow!("web search returned invalid json: {err}"))?;
+    Ok(format_duckduckgo_results(query, &value))
+}
+
+fn format_duckduckgo_results(query: &str, value: &serde_json::Value) -> String {
+    let results = clean_duckduckgo_results(query, value);
+
+    if results.is_empty() {
+        return format!("No clean search results for: {query}");
+    }
+
+    let mut output = format!("Search results for: {query}\n");
+    for (index, result) in results.into_iter().enumerate() {
+        output.push_str(&format!("{}. {}\n", index + 1, result.title));
+        output.push_str(&result.snippet);
+        output.push('\n');
+        if !result.url.is_empty() {
+            output.push_str(&result.url);
+            output.push('\n');
+        }
+    }
+    output.trim_end().to_string()
+}
+
+fn clean_duckduckgo_results(query: &str, value: &serde_json::Value) -> Vec<SearchResult> {
+    let mut results = Vec::new();
+    let mut seen = HashSet::new();
+    let heading = value
+        .get("Heading")
+        .and_then(|value| value.as_str())
+        .unwrap_or(query);
+    let abstract_text = clean_search_text(
+        value
+            .get("AbstractText")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        MAX_SEARCH_SNIPPET_CHARS,
+    );
+    let abstract_url = clean_url(
+        value
+            .get("AbstractURL")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+    );
+    if !abstract_text.is_empty() {
+        push_search_result(
+            &mut results,
+            &mut seen,
+            clean_search_text(heading, MAX_SEARCH_TITLE_CHARS),
+            abstract_text,
+            abstract_url,
+        );
+    }
+
+    collect_duckduckgo_topics(value.get("Results"), &mut results, &mut seen);
+    collect_duckduckgo_topics(value.get("RelatedTopics"), &mut results, &mut seen);
+
+    results.truncate(MAX_SEARCH_RESULTS);
+    results
+}
+
+fn collect_duckduckgo_topics(
+    value: Option<&serde_json::Value>,
+    results: &mut Vec<SearchResult>,
+    seen: &mut HashSet<String>,
+) {
+    let Some(serde_json::Value::Array(items)) = value else {
+        return;
+    };
+
+    for item in items {
+        if results.len() >= MAX_SEARCH_RESULTS {
+            return;
+        }
+        if let Some(nested) = item.get("Topics") {
+            collect_duckduckgo_topics(Some(nested), results, seen);
+            continue;
+        }
+        let text = clean_search_text(
+            item.get("Text")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            MAX_SEARCH_SNIPPET_CHARS,
+        );
+        if text.is_empty() {
+            continue;
+        }
+        let (title, snippet) = split_search_topic_text(&text);
+        let url = clean_url(
+            item.get("FirstURL")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+        );
+        push_search_result(results, seen, title, snippet, url);
+    }
+}
+
+fn push_search_result(
+    results: &mut Vec<SearchResult>,
+    seen: &mut HashSet<String>,
+    title: String,
+    snippet: String,
+    url: String,
+) {
+    let snippet = clean_search_text(&snippet, MAX_SEARCH_SNIPPET_CHARS);
+    if snippet.is_empty() {
+        return;
+    }
+    let title = if title.trim().is_empty() {
+        clean_search_text(&snippet, MAX_SEARCH_TITLE_CHARS)
+    } else {
+        clean_search_text(&title, MAX_SEARCH_TITLE_CHARS)
+    };
+    let key = if url.is_empty() {
+        snippet.to_ascii_lowercase()
+    } else {
+        url.to_ascii_lowercase()
+    };
+    if !seen.insert(key) {
+        return;
+    }
+    results.push(SearchResult {
+        title,
+        snippet,
+        url,
+    });
+}
+
+fn split_search_topic_text(text: &str) -> (String, String) {
+    if let Some((title, rest)) = text.split_once(" - ") {
+        let title = clean_search_text(title, MAX_SEARCH_TITLE_CHARS);
+        let snippet = clean_search_text(rest, MAX_SEARCH_SNIPPET_CHARS);
+        if !title.is_empty() && !snippet.is_empty() {
+            return (title, snippet);
+        }
+    }
+    (
+        clean_search_text(text, MAX_SEARCH_TITLE_CHARS),
+        clean_search_text(text, MAX_SEARCH_SNIPPET_CHARS),
+    )
+}
+
+fn clean_search_text(text: &str, max_chars: usize) -> String {
+    let decoded = text
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">");
+    let compact = decoded
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    limit_single_line(&compact, max_chars)
+}
+
+fn clean_url(url: &str) -> String {
+    limit_single_line(url.trim(), 500)
+}
+
+fn limit_single_line(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut value = text.chars().take(max_chars).collect::<String>();
+    value.push_str("...");
+    value
+}
+
 pub async fn execute_tool(
     name: &str,
     arguments: &serde_json::Value,
@@ -398,10 +828,7 @@ pub async fn execute_tool(
     timeout(Duration::from_secs(10), async {
         match name {
             "developer__echo" => {
-                let text = arguments
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let text = arguments.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 Ok(text.to_string())
             }
             "developer__shell" => {
@@ -452,7 +879,9 @@ pub async fn execute_tool(
                 let content = arguments
                     .get("content")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing `content` for developer__write_file"))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("missing `content` for developer__write_file")
+                    })?;
 
                 let permission = security.require_permission("developer__write_file").await;
                 if permission == PermissionLevel::Deny {
@@ -511,7 +940,9 @@ pub async fn execute_tool(
                 let expression = arguments
                     .get("expression")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing `expression` for developer__calculator"))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("missing `expression` for developer__calculator")
+                    })?;
 
                 let sanitized = expression
                     .chars()
@@ -522,73 +953,38 @@ pub async fn execute_tool(
                     .map_err(|e| anyhow::anyhow!("calculator error: {}", e))?;
                 Ok(format!("{}", value))
             }
-            "developer__http_request" => {
+            "developer__http_request" | "developer__network_request" => {
                 let url = arguments
                     .get("url")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing `url` for developer__http_request"))?;
+                    .ok_or_else(|| anyhow::anyhow!("missing `url` for network request"))?;
 
                 let method = arguments
                     .get("method")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("GET")
-                    .to_uppercase();
-
-                let headers = arguments
-                    .get("headers")
-                    .and_then(|v| v.as_object())
-                    .map(|obj| {
-                        obj.iter()
-                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                    .unwrap_or("GET");
 
                 let body = arguments
                     .get("body")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let client = reqwest::Client::new();
-                let mut request = match method.as_str() {
-                    "GET" => client.get(url),
-                    "POST" => client.post(url),
-                    "PUT" => client.put(url),
-                    "PATCH" => client.patch(url),
-                    "DELETE" => client.delete(url),
-                    "HEAD" => client.head(url),
-                    _ => anyhow::bail!("unsupported http method: {}", method),
-                };
-
-                for (key, value) in headers {
-                    request = request.header(&key, value);
-                }
-
-                if let Some(body) = body {
-                    request = request.body(body);
-                }
-
-                let response = request.send().await?;
-                let status = response.status();
-                let text = response.text().await?;
-
-                if status.is_success() {
-                    Ok(text)
-                } else {
-                    anyhow::bail!("http request failed {}: {}", status, text);
-                }
+                send_network_request(
+                    url,
+                    method,
+                    parse_headers(arguments),
+                    body,
+                    proxy_from_arguments(arguments).as_deref(),
+                )
+                .await
             }
-            "developer__web_search" => {
+            "developer__web_search" | "developer__network_search" => {
                 let query = arguments
                     .get("query")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing `query` for developer__web_search"))?;
+                    .ok_or_else(|| anyhow::anyhow!("missing `query` for web search"))?;
 
-                // Placeholder search result.
-                Ok(format!(
-                    "Simulated search results for: {}\n- Result 1: https://example.com/1\n- Result 2: https://example.com/2",
-                    query
-                ))
+                search_web(query, proxy_from_arguments(arguments).as_deref()).await
             }
             "developer__jq" => {
                 let data = arguments
@@ -628,10 +1024,7 @@ pub async fn execute_tool(
                     }
                 }
 
-                Ok(format!(
-                    "(unsupported jq-like query in Phase 1: {})",
-                    query
-                ))
+                Ok(format!("(unsupported jq-like query in Phase 1: {})", query))
             }
             "developer__file_search" => {
                 let query = arguments
@@ -645,9 +1038,7 @@ pub async fn execute_tool(
                     .map(|p| p.to_string())
                     .unwrap_or_else(|| ".".to_string());
 
-                let file_pattern = arguments
-                    .get("file_pattern")
-                    .and_then(|v| v.as_str());
+                let file_pattern = arguments.get("file_pattern").and_then(|v| v.as_str());
 
                 let resolved = resolve_within_workdir(working_dir, &target)?;
                 let mut matches = Vec::new();
@@ -673,7 +1064,8 @@ pub async fn execute_tool(
                                 stack.push(path);
                             } else if path.is_file() {
                                 if let Some(pattern) = file_pattern {
-                                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                                    let name =
+                                        path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                                     if !glob_match(pattern, name) {
                                         continue;
                                     }
@@ -700,17 +1092,21 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("missing `url` for developer__web_scraper"))?;
 
-                let client = reqwest::Client::new();
-                let response = client.get(url).send().await?;
-                let html = response.text().await?;
+                let html =
+                    fetch_network_body(url, proxy_from_arguments(arguments).as_deref()).await?;
 
-                Ok(html_to_text(&html))
+                Ok(truncate_chars(
+                    &html_to_text(&html),
+                    MAX_NETWORK_RESPONSE_CHARS,
+                ))
             }
             "developer__code_interpreter" => {
                 let code = arguments
                     .get("code")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing `code` for developer__code_interpreter"))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("missing `code` for developer__code_interpreter")
+                    })?;
 
                 let language = arguments
                     .get("language")
@@ -721,7 +1117,8 @@ pub async fn execute_tool(
                 let escaped = code.replace("\\", "\\\\").replace("\"", "\\\"");
                 let output = match language.as_str() {
                     "python" => {
-                        run_shell_command(&format!("python -u -c \"{}\"", escaped), working_dir).await?
+                        run_shell_command(&format!("python -u -c \"{}\"", escaped), working_dir)
+                            .await?
                     }
                     "javascript" | "js" => {
                         run_shell_command(&format!("node -e \"{}\"", escaped), working_dir).await?
@@ -735,10 +1132,17 @@ pub async fn execute_tool(
                 let query = arguments
                     .get("query")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("missing `query` for developer__database_query"))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("missing `query` for developer__database_query")
+                    })?;
 
                 let sanitized = query.trim().to_lowercase();
-                if sanitized.starts_with("drop") || sanitized.starts_with("delete") || sanitized.starts_with("update") || sanitized.starts_with("insert") || sanitized.starts_with("alter") {
+                if sanitized.starts_with("drop")
+                    || sanitized.starts_with("delete")
+                    || sanitized.starts_with("update")
+                    || sanitized.starts_with("insert")
+                    || sanitized.starts_with("alter")
+                {
                     anyhow::bail!("read-only query required; write operations are not allowed");
                 }
 
@@ -781,7 +1185,9 @@ pub async fn execute_tool(
                     }
                     result.push(serde_json::Value::Object(obj));
                 }
-                Ok(serde_json::to_string_pretty(&serde_json::Value::Array(result))?)
+                Ok(serde_json::to_string_pretty(&serde_json::Value::Array(
+                    result,
+                ))?)
             }
             _ => anyhow::bail!("unknown tool: {}", name),
         }
@@ -795,6 +1201,7 @@ mod tests {
     use super::*;
     use crate::permission::PermissionManager;
     use std::path::PathBuf;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn test_echo_tool() {
@@ -852,18 +1259,75 @@ mod tests {
         assert!(result.unwrap().contains("a"));
     }
 
-    #[tokio::test]
-    async fn test_web_search_tool() {
-        let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
-        let args = serde_json::json!({"query": "rust"});
-        let result = execute_tool(
-            "developer__web_search",
-            &args,
-            PathBuf::from(".").as_path(),
-            &security,
-        )
-        .await;
-        assert!(result.unwrap().contains("rust"));
+    #[test]
+    fn test_web_search_result_formatting() {
+        let value = serde_json::json!({
+            "Heading": "Rust",
+            "AbstractText": "Rust   is &quot;a&quot; programming language.",
+            "AbstractURL": "https://www.rust-lang.org/",
+            "RelatedTopics": [
+                {
+                    "Text": "Cargo is Rust's package manager.",
+                    "FirstURL": "https://doc.rust-lang.org/cargo/"
+                }
+            ]
+        });
+        let result = format_duckduckgo_results("rust", &value);
+        assert!(result.contains("Search results for: rust"));
+        assert!(result.contains("Rust is \"a\" programming language."));
+        assert!(result.contains("https://www.rust-lang.org/"));
+    }
+
+    #[test]
+    fn test_web_search_cleaning_deduplicates_and_truncates() {
+        let long_text = "x".repeat(400);
+        let value = serde_json::json!({
+            "RelatedTopics": [
+                {
+                    "Text": format!("Long topic - {}", long_text),
+                    "FirstURL": "https://example.com/a"
+                },
+                {
+                    "Text": "Duplicate topic - should be removed",
+                    "FirstURL": "https://example.com/a"
+                }
+            ]
+        });
+        let cleaned = clean_duckduckgo_results("query", &value);
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].title, "Long topic");
+        assert!(cleaned[0].snippet.ends_with("..."));
+        assert!(cleaned[0].snippet.chars().count() <= MAX_SEARCH_SNIPPET_CHARS + 3);
+    }
+
+    #[test]
+    fn test_proxy_argument_and_direct_mode() {
+        let args = serde_json::json!({"proxy": " http://127.0.0.1:8080 "});
+        assert_eq!(
+            proxy_from_arguments(&args).as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
+        assert_eq!(configured_network_proxy(Some("direct")), None);
+        assert!(http_client(Some("http://127.0.0.1:8080")).is_ok());
+        assert!(http_client(Some("not a proxy")).is_err());
+    }
+
+    #[test]
+    fn test_validate_http_url_rejects_unsupported_scheme() {
+        let err = validate_http_url("file:///etc/passwd").unwrap_err();
+        assert!(err.to_string().contains("unsupported url scheme"));
+    }
+
+    #[test]
+    fn test_network_tool_definitions_include_aliases() {
+        let names = builtin_tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"developer__http_request".to_string()));
+        assert!(names.contains(&"developer__network_request".to_string()));
+        assert!(names.contains(&"developer__web_search".to_string()));
+        assert!(names.contains(&"developer__network_search".to_string()));
     }
 
     #[tokio::test]
@@ -972,5 +1436,35 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("database not found"));
+    }
+
+    #[tokio::test]
+    async fn test_send_network_request_reads_local_http_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0u8; 1024];
+            let _ = socket.read(&mut buffer).await;
+            let body = "hello from local server";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let result = send_network_request(
+            &format!("http://{addr}/"),
+            "GET",
+            Vec::new(),
+            None,
+            Some("direct"),
+        )
+        .await
+        .unwrap();
+        assert!(result.contains("status: 200 OK"));
+        assert!(result.contains("hello from local server"));
     }
 }

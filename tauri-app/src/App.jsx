@@ -15,10 +15,13 @@ const STORAGE_KEYS = {
   provider: 'night24.provider',
   model: 'night24.model',
   baseUrl: 'night24.baseUrl',
+  providerKey: 'night24.providerKey',
   accessMode: 'night24.accessMode',
   fullAccess: 'night24.fullAccess',
   theme: 'night24.theme',
   fontSize: 'night24.fontSize',
+  currentWorkspacePath: 'night24.currentWorkspacePath',
+  recentWorkspaces: 'night24.recentWorkspaces',
 };
 
 function readAccessMode() {
@@ -43,10 +46,78 @@ function writeSetting(key, value) {
   }
 }
 
+function readJsonSetting(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonSetting(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore private-mode storage failures.
+  }
+}
+
 function apiUrl(base, path) {
   const normalizedBase = String(base || DEFAULT_SERVER).replace(/\/+$/, '');
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   return `${normalizedBase}${normalizedPath}`;
+}
+
+function workspaceNameFromPath(path) {
+  return String(path || '')
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop() || 'workspace';
+}
+
+function normalizeLocalPath(path) {
+  return String(path || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
+function sameWorkspacePath(left, right) {
+  const a = normalizeLocalPath(left);
+  const b = normalizeLocalPath(right);
+  return Boolean(a && b && a === b);
+}
+
+function compactWorkspaces(workspaces) {
+  const seen = new Set();
+  return (Array.isArray(workspaces) ? workspaces : [])
+    .filter((item) => item?.root_path)
+    .filter((item) => {
+      const key = String(item.root_path).toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
+}
+
+function rememberWorkspace(workspace) {
+  if (!workspace?.root_path) return;
+  writeSetting(STORAGE_KEYS.currentWorkspacePath, workspace.root_path);
+  const stored = readJsonSetting(STORAGE_KEYS.recentWorkspaces, []);
+  const next = compactWorkspaces([
+    {
+      id: workspace.id || `local-${workspace.root_path}`,
+      name: workspace.name || workspaceNameFromPath(workspace.root_path),
+      root_path: workspace.root_path,
+      created_at: workspace.created_at || new Date().toISOString(),
+      last_opened_at: workspace.last_opened_at || new Date().toISOString(),
+    },
+    ...stored,
+  ]);
+  writeJsonSetting(STORAGE_KEYS.recentWorkspaces, next);
 }
 
 function normalizeError(error) {
@@ -109,12 +180,12 @@ export default function App() {
   const [accessMode, setAccessMode] = useState(readAccessMode);
   const [theme, setTheme] = useState(() => readSetting(STORAGE_KEYS.theme, 'light'));
   const [fontSize, setFontSize] = useState(() => readSetting(STORAGE_KEYS.fontSize, 'normal'));
-  const [providerKey, setProviderKey] = useState('');
+  const [providerKey, setProviderKey] = useState(() => readSetting(STORAGE_KEYS.providerKey));
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [serverStatus, setServerStatus] = useState({ state: 'checking', detail: '正在连接 server' });
   const [workspace, setWorkspace] = useState(null);
-  const [recentWorkspaces, setRecentWorkspaces] = useState([]);
+  const [recentWorkspaces, setRecentWorkspaces] = useState(() => readJsonSetting(STORAGE_KEYS.recentWorkspaces, []));
   const [tree, setTree] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [rightTab, setRightTab] = useState('files');
@@ -267,18 +338,38 @@ export default function App() {
   }, [apiJson, showError]);
 
   const loadWorkspace = useCallback(async () => {
+    const storedRecent = readJsonSetting(STORAGE_KEYS.recentWorkspaces, []);
     try {
-      const current = await apiJson('/workspaces/current');
+      let current = await apiJson('/workspaces/current');
+      if (!current) {
+        const savedPath = readSetting(STORAGE_KEYS.currentWorkspacePath);
+        if (savedPath) {
+          current = await apiJson('/workspaces/open', {
+            method: 'POST',
+            body: JSON.stringify({ path: savedPath }),
+          }).catch(() => null);
+        }
+      }
       setWorkspace(current || null);
       const recent = await apiJson('/workspaces/recent').catch(() => ({ workspaces: [] }));
-      setRecentWorkspaces(Array.isArray(recent?.workspaces) ? recent.workspaces : []);
+      const mergedRecent = compactWorkspaces([
+        ...(current ? [current] : []),
+        ...(Array.isArray(recent?.workspaces) ? recent.workspaces : []),
+        ...storedRecent,
+      ]);
+      setRecentWorkspaces(mergedRecent);
+      writeJsonSetting(STORAGE_KEYS.recentWorkspaces, mergedRecent);
       if (current) {
+        rememberWorkspace(current);
         const data = await apiJson('/workspace/tree');
         setTree(data?.root || null);
+      } else {
+        setTree(null);
       }
     } catch {
       setWorkspace(null);
       setTree(null);
+      setRecentWorkspaces(storedRecent);
     }
   }, [apiJson]);
 
@@ -326,6 +417,10 @@ export default function App() {
   }, [baseUrl]);
 
   useEffect(() => {
+    writeSetting(STORAGE_KEYS.providerKey, providerKey);
+  }, [providerKey]);
+
+  useEffect(() => {
     writeSetting(STORAGE_KEYS.accessMode, accessMode);
     writeSetting(STORAGE_KEYS.fullAccess, accessMode === 'allow_all' ? 'true' : 'false');
   }, [accessMode]);
@@ -367,7 +462,12 @@ export default function App() {
         headers,
         body: JSON.stringify({ path }),
       });
+      clearConversationView({ abortActive: true });
       setWorkspace(opened);
+      rememberWorkspace(opened);
+      setCurrentSessionId(null);
+      setRightTab('files');
+      setContextOpen(true);
       setSelectedFile(null);
       setWorkspaceStatus(null);
       setWorkspaceDiff(null);
@@ -399,7 +499,21 @@ export default function App() {
     if (tab === 'diff') loadWorkspaceDiff();
   }
 
+  function clearConversationView({ abortActive = false } = {}) {
+    if (abortActive) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    }
+    runTerminalRef.current = null;
+    setMessages([]);
+    setPendingPermissions([]);
+    setTimeline([]);
+    setActiveRun(null);
+    setIsRunning(false);
+  }
+
   async function createSession() {
+    clearConversationView({ abortActive: true });
     try {
       const session = await apiJson('/sessions', {
         method: 'POST',
@@ -412,13 +526,13 @@ export default function App() {
       });
       setSessions((items) => [session, ...items]);
       setCurrentSessionId(session.id);
-      setMessages([]);
     } catch (error) {
       showError(`新建会话失败：${normalizeError(error)}`);
     }
   }
 
   async function selectSession(id) {
+    clearConversationView({ abortActive: true });
     try {
       const history = await apiJson(`/sessions/${id}/history`);
       setCurrentSessionId(id);
@@ -436,7 +550,7 @@ export default function App() {
       setSessions((items) => items.filter((item) => item.id !== id));
       if (currentSessionId === id) {
         setCurrentSessionId(null);
-        setMessages([]);
+        clearConversationView({ abortActive: true });
       }
     } catch (error) {
       showError(`删除会话失败：${normalizeError(error)}`);
@@ -789,6 +903,10 @@ export default function App() {
   }
 
   const canSend = taskText.trim().length > 0 && !isRunning && Boolean(workspace);
+  const projectSessions = useMemo(() => {
+    if (!workspace?.root_path) return [];
+    return sessions.filter((session) => sameWorkspacePath(session.working_dir, workspace.root_path));
+  }, [sessions, workspace]);
 
   return (
     <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>
@@ -825,13 +943,9 @@ export default function App() {
         <Sidebar
           workspace={workspace}
           recentWorkspaces={recentWorkspaces}
-          tree={tree}
-          selectedFile={selectedFile}
-          sessions={sessions}
+          sessions={projectSessions}
           currentSessionId={currentSessionId}
           onOpenWorkspace={openWorkspace}
-          onRefreshWorkspace={loadWorkspace}
-          onOpenFile={openFile}
           onCreateSession={createSession}
           onSelectSession={selectSession}
           onDeleteSession={deleteSession}
@@ -864,6 +978,8 @@ export default function App() {
         <ContextPanel
           open={contextOpen}
           rightTab={rightTab}
+          tree={tree}
+          selectedPath={selectedFile?.path}
           selectedFile={selectedFile}
           diff={workspaceDiff}
           status={workspaceStatus}
@@ -871,6 +987,8 @@ export default function App() {
           diffError={diffError}
           onTabChange={openContextTab}
           onClose={() => setContextOpen(false)}
+          onOpenFile={openFile}
+          onRefreshWorkspace={loadWorkspace}
           onRefreshDiff={loadWorkspaceDiff}
         />
       </main>

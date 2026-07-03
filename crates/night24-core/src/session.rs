@@ -338,4 +338,35 @@ mod tests {
         let renamed = manager.rename(&original.id, "renamed").await.unwrap();
         assert_eq!(renamed.name, "renamed");
     }
+
+    #[tokio::test]
+    async fn test_session_manager_sqlite_persists_between_instances() {
+        let db_path =
+            std::env::temp_dir().join(format!("night24-session-test-{}.db", uuid::Uuid::new_v4()));
+        let db_url = format!(
+            "sqlite:file:{}?mode=rwc",
+            db_path.to_string_lossy().replace('\\', "/")
+        );
+
+        let manager = SessionManager::with_sqlite(&db_url).await.unwrap();
+        let mut session = manager
+            .create("persisted", PathBuf::from("."), SessionType::User)
+            .await
+            .unwrap();
+        session
+            .conversation
+            .push(crate::model::Message::user("remember this"));
+        manager.save(&session).await.unwrap();
+
+        let reloaded_manager = SessionManager::with_sqlite(&db_url).await.unwrap();
+        let reloaded = reloaded_manager
+            .get(&session.id)
+            .await
+            .unwrap()
+            .expect("session should persist");
+        assert_eq!(reloaded.name, "persisted");
+        assert_eq!(reloaded.conversation.len(), 1);
+
+        let _ = std::fs::remove_file(db_path);
+    }
 }

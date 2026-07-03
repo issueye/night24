@@ -3,7 +3,7 @@ import { Placeholder } from './Placeholder.jsx';
 
 export function FilePreview({ file }) {
   if (!file) {
-    return <Placeholder title="选择一个文件查看内容" detail="左侧文件树支持文本文件预览。" />;
+    return <Placeholder title="选择一个文件查看内容" detail="项目目录支持文本文件预览。" />;
   }
 
   return (

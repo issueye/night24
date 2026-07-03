@@ -1,17 +1,12 @@
-import { Bot, Clock3, Files, MessageSquare, MessageSquarePlus, Plug, RefreshCw, Search, TimerReset, Trash2 } from 'lucide-react';
+import { Bot, Clock3, MessageSquare, MessageSquarePlus, Plug, Search, TimerReset, Trash2 } from 'lucide-react';
 import { classNames, formatTime } from '../utils/format.js';
-import { FileTree } from './FileTree.jsx';
 
 export function Sidebar({
   workspace,
   recentWorkspaces,
-  tree,
-  selectedFile,
   sessions,
   currentSessionId,
   onOpenWorkspace,
-  onRefreshWorkspace,
-  onOpenFile,
   onCreateSession,
   onSelectSession,
   onDeleteSession,
@@ -72,16 +67,6 @@ export function Sidebar({
               <Trash2 size={13} onClick={(event) => onDeleteSession(session.id, event)} />
             </button>
           ))}
-        </div>
-      </section>
-
-      <section className="menu-section tree-block">
-        <div className="menu-section-head">
-          <span><Files size={14} />目录</span>
-          <button className="icon-button compact" onClick={onRefreshWorkspace} title="刷新文件树" type="button"><RefreshCw size={14} /></button>
-        </div>
-        <div className="tree-scroll">
-          <FileTree tree={tree} selectedPath={selectedFile?.path} onOpenFile={onOpenFile} />
         </div>
       </section>
     </aside>

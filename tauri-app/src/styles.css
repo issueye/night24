@@ -401,7 +401,7 @@ button {
 
 .left-panel {
   display: grid;
-  grid-template-rows: auto minmax(150px, 0.78fr) minmax(190px, 1fr);
+  grid-template-rows: auto auto minmax(220px, 1fr);
   overflow: hidden;
 }
 
@@ -688,6 +688,11 @@ button {
   justify-items: center;
   gap: 3px;
   min-height: 22px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 
 .timeline-point > span {
@@ -718,6 +723,16 @@ button {
 
 .timeline-point.active > span {
   background: currentColor;
+}
+
+.timeline-point:hover > span,
+.timeline-point:focus-visible > span {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 4px rgba(55, 125, 255, 0.12), 0 0 0 3px #fbfcff;
+}
+
+.timeline-point:focus-visible {
+  outline: none;
 }
 
 .timeline-point small {
@@ -772,6 +787,27 @@ button {
   display: flex;
   gap: 8px;
   max-width: min(820px, 82%);
+}
+
+.message-anchor {
+  display: flex;
+  width: 100%;
+  border-radius: 14px;
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+
+.message-anchor .message.assistant,
+.message-anchor .message.error {
+  margin-right: auto;
+}
+
+.message-anchor .message.user {
+  margin-left: auto;
+}
+
+.message-anchor.highlighted {
+  background: rgba(55, 125, 255, 0.08);
+  box-shadow: 0 0 0 8px rgba(55, 125, 255, 0.08);
 }
 
 .message.user {
@@ -1134,11 +1170,14 @@ button {
   top: 70px;
   right: 18px;
   bottom: 44px;
+  right: auto;
+  bottom: auto;
   z-index: 25;
   display: grid;
   grid-template-rows: 44px 40px minmax(0, 1fr);
   width: min(560px, calc(100vw - 340px));
   min-width: 420px;
+  min-height: 300px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--line);
@@ -1151,11 +1190,28 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--line);
 }
 
+.float-head.draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.float-head.draggable:active {
+  cursor: grabbing;
+}
+
+.drag-indicator {
+  display: inline-grid;
+  place-items: center;
+  color: var(--subtle);
+}
+
 .float-head strong {
+  flex: 1;
   font-size: 14px;
 }
 
@@ -1190,6 +1246,51 @@ button {
   display: grid;
   grid-template-rows: 38px minmax(0, 1fr);
   min-height: 0;
+}
+
+.files-context {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.44fr) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.context-tree {
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+}
+
+.context-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.context-section-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: linear-gradient(135deg, transparent 50%, rgba(91, 103, 122, 0.28) 50%);
+  border: 0;
+  cursor: nwse-resize;
 }
 
 .file-head {
@@ -1574,7 +1675,7 @@ button {
 }
 
 .left-panel {
-  grid-template-rows: auto auto minmax(120px, 0.46fr) minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(220px, 1fr);
   background: var(--sidebar-bg);
   border: 0;
   border-right: 1px solid var(--line);
@@ -1709,6 +1810,11 @@ button {
   box-shadow: 0 0 0 3px #ffffff;
 }
 
+.timeline-point:hover > span,
+.timeline-point:focus-visible > span {
+  box-shadow: 0 0 0 4px rgba(55, 125, 255, 0.12), 0 0 0 3px #ffffff;
+}
+
 .messages {
   width: min(760px, calc(100% - 92px));
   margin: 0 auto;
@@ -1753,7 +1859,7 @@ button {
 
 .composer {
   width: min(738px, calc(100% - 92px));
-  margin: 0 auto 16px;
+  margin: 12px auto 16px;
   padding: 12px;
   background: #ffffff;
   border: 1px solid #e8e6e1;
@@ -1800,8 +1906,8 @@ button {
 
 .context-float {
   top: 68px;
-  right: 20px;
-  bottom: 56px;
+  right: auto;
+  bottom: auto;
   width: min(300px, calc(100vw - 300px));
   min-width: 300px;
   grid-template-rows: 42px 38px minmax(0, 1fr);

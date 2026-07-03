@@ -31,9 +31,11 @@ impl ToolCategory {
                 ToolCategory::Read
             }
             "developer__write_file" => ToolCategory::Write,
-            "developer__http_request" | "developer__web_search" | "developer__web_scraper" => {
-                ToolCategory::Network
-            }
+            "developer__http_request"
+            | "developer__network_request"
+            | "developer__web_search"
+            | "developer__network_search"
+            | "developer__web_scraper" => ToolCategory::Network,
             _ => ToolCategory::Other,
         }
     }
@@ -176,6 +178,10 @@ mod tests {
         );
         assert_eq!(
             ToolCategory::from_tool_name("developer__http_request"),
+            ToolCategory::Network
+        );
+        assert_eq!(
+            ToolCategory::from_tool_name("developer__network_search"),
             ToolCategory::Network
         );
         assert_eq!(

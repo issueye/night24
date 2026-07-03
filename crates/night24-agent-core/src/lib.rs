@@ -822,6 +822,21 @@ fn summarize_tool_call(tool_name: &str, arguments: &serde_json::Value) -> String
             .and_then(|value| value.as_str())
             .map(|value| format!("Read file: {}", value))
             .unwrap_or_else(|| "Read file".to_string()),
+        "developer__http_request" | "developer__network_request" => arguments
+            .get("url")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("Request URL: {}", value))
+            .unwrap_or_else(|| "Network request".to_string()),
+        "developer__web_search" | "developer__network_search" => arguments
+            .get("query")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("Search web: {}", value))
+            .unwrap_or_else(|| "Web search".to_string()),
+        "developer__web_scraper" => arguments
+            .get("url")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("Scrape URL: {}", value))
+            .unwrap_or_else(|| "Scrape web page".to_string()),
         _ => format!("Call {}", tool_name),
     }
 }

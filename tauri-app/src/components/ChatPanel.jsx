@@ -46,7 +46,10 @@ export function ChatPanel({
   onOpenContext,
 }) {
   const scrollRef = useRef(null);
+  const targetRefs = useRef(new Map());
+  const highlightTimerRef = useRef(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [highlightedTarget, setHighlightedTarget] = useState('');
 
   function updateScrollButton() {
     const node = scrollRef.current;
@@ -59,13 +62,35 @@ export function ChatPanel({
     messageEndRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }
 
+  function setTargetRef(id) {
+    return (node) => {
+      if (!id) return;
+      if (node) targetRefs.current.set(id, node);
+      else targetRefs.current.delete(id);
+    };
+  }
+
+  function scrollToTarget(id) {
+    const node = targetRefs.current.get(id);
+    if (!node) return;
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlightedTarget(id);
+    window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedTarget('');
+    }, 1400);
+  }
+
   useEffect(() => {
     updateScrollButton();
   }, [messages.length, pendingPermissions.length]);
 
+  useEffect(() => () => window.clearTimeout(highlightTimerRef.current), []);
+
   const timelineItems = [
     ...messages.map((message, index) => ({
       id: message.id || `message-${index}`,
+      targetId: `message-${message.id || index}`,
       tone: message.tone,
       role: String(message.role || 'assistant').toLowerCase(),
       label: timelineLabel(message),
@@ -73,6 +98,7 @@ export function ChatPanel({
     })),
     ...pendingPermissions.map((permission) => ({
       id: permission.permission_id,
+      targetId: `permission-${permission.permission_id}`,
       tone: 'permission',
       role: 'permission',
       label: '权限',
@@ -102,14 +128,16 @@ export function ChatPanel({
         <aside className="conversation-timeline" aria-label="对话时间轴">
           <div className="timeline-rail" />
           {timelineItems.map((item, index) => (
-            <div
+            <button
               className={classNames('timeline-point', item.role, item.tone, index === timelineItems.length - 1 && 'active')}
               key={item.id}
+              onClick={() => scrollToTarget(item.targetId)}
               title={`${item.label}${item.time ? ` · ${item.time}` : ''}`}
+              type="button"
             >
               <span />
               <small>{item.time}</small>
-            </div>
+            </button>
           ))}
         </aside>
 
@@ -121,14 +149,25 @@ export function ChatPanel({
               <span>打开项目后，像聊天一样描述要修改、解释或检查的内容。</span>
             </div>
           ) : messages.map((message, index) => (
-            <MessageBubble key={message.id || index} message={message} />
+            <div
+              className={classNames('message-anchor', highlightedTarget === `message-${message.id || index}` && 'highlighted')}
+              key={message.id || index}
+              ref={setTargetRef(`message-${message.id || index}`)}
+            >
+              <MessageBubble message={message} />
+            </div>
           ))}
           {pendingPermissions.map((permission) => (
-            <PermissionRequestCard
+            <div
+              className={classNames('message-anchor', highlightedTarget === `permission-${permission.permission_id}` && 'highlighted')}
               key={permission.permission_id}
-              permission={permission}
-              onResolve={onResolvePermission}
-            />
+              ref={setTargetRef(`permission-${permission.permission_id}`)}
+            >
+              <PermissionRequestCard
+                permission={permission}
+                onResolve={onResolvePermission}
+              />
+            </div>
           ))}
           <div ref={messageEndRef} />
         </div>

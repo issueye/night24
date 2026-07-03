@@ -125,6 +125,7 @@ struct SessionSummary {
     id: String,
     name: String,
     session_type: String,
+    working_dir: String,
     updated_at: String,
 }
 
@@ -630,6 +631,56 @@ fn locate_agent_core_bin() -> PathBuf {
     PathBuf::from(exe_name)
 }
 
+fn session_database_url() -> String {
+    std::env::var("NIGHT24_DATABASE_URL")
+        .ok()
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(normalize_sqlite_database_url(trimmed))
+            }
+        })
+        .unwrap_or_else(default_session_database_url)
+}
+
+fn default_session_database_url() -> String {
+    let path = std::env::var("NIGHT24_DATA_DIR")
+        .ok()
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(trimmed).join("night24.db"))
+            }
+        })
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join("night24.db")
+        });
+    sqlite_file_url(path)
+}
+
+fn normalize_sqlite_database_url(value: &str) -> String {
+    if value == "sqlite::memory:"
+        || value.starts_with("sqlite:file:")
+        || value.starts_with("sqlite://")
+        || value.starts_with("sqlite:")
+    {
+        value.to_string()
+    } else {
+        sqlite_file_url(PathBuf::from(value))
+    }
+}
+
+fn sqlite_file_url(path: PathBuf) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    format!("sqlite:file:{path}?mode=rwc")
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -667,26 +718,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!(cwd = %std::env::current_dir().unwrap_or_default().display(), db_url = %std::env::var("NIGHT24_DATABASE_URL").unwrap_or_default(), "starting night24-server");
 
-    let session_manager = if let Ok(db_url) = std::env::var("NIGHT24_DATABASE_URL") {
-        let db_url = db_url.trim().to_string();
-        let db_url = if db_url == "sqlite::memory:" || db_url.starts_with("sqlite:file:") {
-            db_url
-        } else if db_url.starts_with("sqlite:") {
-            let path = db_url.trim_start_matches("sqlite:").trim_start_matches('/');
-            format!("sqlite:file:{}?mode=rwc", path)
-        } else {
-            format!("sqlite:file:{}?mode=rwc", db_url)
-        };
-        info!(db_url, "initializing sqlite session store");
-        match SessionManager::with_sqlite(db_url).await {
-            Ok(manager) => Arc::new(manager),
-            Err(err) => {
-                warn!(error = ?err, "failed to init sqlite session store, falling back to in-memory");
-                Arc::new(SessionManager::new())
-            }
+    let db_url = session_database_url();
+    info!(db_url, "initializing sqlite session store");
+    let session_manager = match SessionManager::with_sqlite(&db_url).await {
+        Ok(manager) => Arc::new(manager),
+        Err(err) => {
+            warn!(error = ?err, "failed to init sqlite session store, falling back to in-memory");
+            Arc::new(SessionManager::new())
         }
-    } else {
-        Arc::new(SessionManager::new())
     };
     let provider_registry = build_provider_registry();
     let permission_manager = build_permission_manager();
@@ -1768,6 +1807,7 @@ async fn list_sessions(
             id: s.id,
             name: s.name,
             session_type: format!("{:?}", s.session_type),
+            working_dir: s.working_dir.to_string_lossy().to_string(),
             updated_at: s.updated_at.to_rfc3339(),
         })
         .collect();
@@ -2438,11 +2478,50 @@ mod tests {
 
     #[test]
     fn test_normalize_permission_mode() {
-        assert_eq!(normalize_permission_mode(Some("allow_all".to_string())), "allow_all");
-        assert_eq!(normalize_permission_mode(Some("allow-all".to_string())), "allow_all");
-        assert_eq!(normalize_permission_mode(Some("full_access".to_string())), "allow_all");
-        assert_eq!(normalize_permission_mode(Some("permissive".to_string())), "permissive");
-        assert_eq!(normalize_permission_mode(Some("unknown".to_string())), "strict");
+        assert_eq!(
+            normalize_permission_mode(Some("allow_all".to_string())),
+            "allow_all"
+        );
+        assert_eq!(
+            normalize_permission_mode(Some("allow-all".to_string())),
+            "allow_all"
+        );
+        assert_eq!(
+            normalize_permission_mode(Some("full_access".to_string())),
+            "allow_all"
+        );
+        assert_eq!(
+            normalize_permission_mode(Some("permissive".to_string())),
+            "permissive"
+        );
+        assert_eq!(
+            normalize_permission_mode(Some("unknown".to_string())),
+            "strict"
+        );
         assert_eq!(normalize_permission_mode(None), "strict");
+    }
+
+    #[test]
+    fn test_normalize_sqlite_database_url() {
+        assert_eq!(
+            normalize_sqlite_database_url("sqlite::memory:"),
+            "sqlite::memory:"
+        );
+        assert_eq!(
+            normalize_sqlite_database_url("sqlite:file:night24.db?mode=rwc"),
+            "sqlite:file:night24.db?mode=rwc"
+        );
+        assert_eq!(
+            normalize_sqlite_database_url("custom.db"),
+            "sqlite:file:custom.db?mode=rwc"
+        );
+    }
+
+    #[test]
+    fn test_sqlite_file_url_normalizes_windows_separators() {
+        assert_eq!(
+            sqlite_file_url(PathBuf::from("data\\night24.db")),
+            "sqlite:file:data/night24.db?mode=rwc"
+        );
     }
 }
