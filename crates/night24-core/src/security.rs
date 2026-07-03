@@ -21,9 +21,54 @@ const PROMPT_INJECTION_PATTERNS: &[&str] = &[
     "pretend you are dan",
 ];
 
+const CREDENTIAL_KEY_HINTS: &[&str] = &[
+    "api_key",
+    "apikey",
+    "access_key",
+    "access_token",
+    "auth_token",
+    "bearer_token",
+    "client_secret",
+    "database_url",
+    "db_password",
+    "github_token",
+    "jwt_secret",
+    "password",
+    "private_key",
+    "refresh_token",
+    "secret",
+    "secret_key",
+    "token",
+];
+
+const PLACEHOLDER_VALUES: &[&str] = &[
+    "",
+    "<token>",
+    "<secret>",
+    "<password>",
+    "changeme",
+    "example",
+    "example-token",
+    "placeholder",
+    "redacted",
+    "secret",
+    "test",
+    "todo",
+    "your-api-key",
+    "your-token",
+    "xxx",
+    "xxxx",
+];
+
 #[derive(Debug, Clone)]
 pub struct SecurityInspector {
     pub permission_manager: Arc<PermissionManager>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputInspection {
+    pub findings: Vec<String>,
+    pub sanitized: String,
 }
 
 impl SecurityInspector {
@@ -65,21 +110,146 @@ impl SecurityInspector {
     }
 
     pub async fn inspect_output(&self, text: &str) -> Vec<String> {
-        let mut findings = Vec::new();
+        self.sanitize_output(text).await.findings
+    }
 
-        let lower = text.to_lowercase();
-        if lower.contains("password") || lower.contains("secret") || lower.contains("token") {
-            if lower.contains("=") || lower.contains(":") {
-                findings.push("Output may contain sensitive credential-like values".to_string());
-            }
+    pub async fn sanitize_output(&self, text: &str) -> OutputInspection {
+        let mut findings = Vec::new();
+        let mut redacted_count = 0usize;
+        let sanitized = text
+            .lines()
+            .map(|line| match redact_secret_line(line) {
+                Some(redacted) => {
+                    redacted_count += 1;
+                    redacted
+                }
+                None => line.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if redacted_count > 0 {
+            findings.push(format!(
+                "Output contained sensitive credential-like values; redacted {} line(s)",
+                redacted_count
+            ));
         }
 
-        findings
+        OutputInspection {
+            findings,
+            sanitized,
+        }
     }
 
     pub async fn require_permission(&self, tool_name: &str) -> PermissionLevel {
         self.permission_manager.check(tool_name).await
     }
+}
+
+fn redact_secret_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((delimiter_index, key, value)) = split_key_value_with_index(line) {
+        if is_credential_key(key) && is_sensitive_value(value) {
+            let value_start = line[delimiter_index + 1..]
+                .char_indices()
+                .find(|(_, ch)| !ch.is_whitespace())
+                .map(|(index, _)| delimiter_index + 1 + index)
+                .unwrap_or(delimiter_index + 1);
+            return Some(format!(
+                "{}[redacted sensitive value]",
+                &line[..value_start]
+            ));
+        }
+    }
+
+    if contains_known_secret_token(trimmed) {
+        return Some(format!(
+            "{}[redacted sensitive line]",
+            line.chars()
+                .take_while(|ch| ch.is_whitespace())
+                .collect::<String>()
+        ));
+    }
+
+    None
+}
+
+fn split_key_value_with_index(line: &str) -> Option<(usize, &str, &str)> {
+    let delimiter_index = line
+        .char_indices()
+        .find_map(|(index, ch)| matches!(ch, '=' | ':').then_some(index))?;
+    let key = line[..delimiter_index]
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'));
+    let value = line[delimiter_index + 1..]
+        .trim()
+        .trim_matches(',')
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'));
+    Some((delimiter_index, key, value))
+}
+
+fn is_credential_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    CREDENTIAL_KEY_HINTS
+        .iter()
+        .any(|hint| normalized == *hint || normalized.ends_with(&format!("_{hint}")))
+}
+
+fn is_sensitive_value(value: &str) -> bool {
+    let value = value
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '<' | '>'));
+    let lower = value.to_ascii_lowercase();
+    if PLACEHOLDER_VALUES.contains(&lower.as_str()) {
+        return false;
+    }
+    if contains_known_secret_token(value) {
+        return true;
+    }
+    let meaningful_len = value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .count();
+    meaningful_len >= 8 && has_mixed_secret_chars(value)
+}
+
+fn has_mixed_secret_chars(value: &str) -> bool {
+    let has_alpha = value.chars().any(|ch| ch.is_ascii_alphabetic());
+    let has_digit = value.chars().any(|ch| ch.is_ascii_digit());
+    let has_symbol = value
+        .chars()
+        .any(|ch| matches!(ch, '_' | '-' | '.' | '/' | '+' | '='));
+    has_alpha && (has_digit || has_symbol)
+}
+
+fn contains_known_secret_token(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("sk-")
+        || lower.contains("ghp_")
+        || lower.contains("github_pat_")
+        || text.contains("AKIA")
+        || looks_like_jwt(text)
+}
+
+fn looks_like_jwt(text: &str) -> bool {
+    text.split_whitespace().any(|part| {
+        let token = part.trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | ';'));
+        token.starts_with("eyJ") && token.matches('.').count() == 2 && token.len() > 40
+    })
 }
 
 #[cfg(test)]
@@ -122,6 +292,67 @@ mod tests {
         let inspector = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
         let findings = inspector.inspect_output("hello world").await;
         assert!(findings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_inspect_output_allows_prd_security_terms() {
+        let inspector = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
+        let findings = inspector
+            .inspect_output(
+                r#"
+# PRD
+
+- 用户登录后获取 token
+- 支持 secret 管理说明
+- password: 用户可在设置页修改密码
+- api_key: <your-api-key>
+"#,
+            )
+            .await;
+        assert!(findings.is_empty(), "PRD text flagged: {:?}", findings);
+    }
+
+    #[tokio::test]
+    async fn test_inspect_output_detects_api_key_like_value() {
+        let inspector = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
+        let findings = inspector
+            .inspect_output("OPENAI_API_KEY=sk-test1234567890abcdef")
+            .await;
+        assert!(!findings.is_empty());
+        assert!(findings[0].contains("credential-like"));
+    }
+
+    #[tokio::test]
+    async fn test_inspect_output_detects_jwt_like_value() {
+        let inspector = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
+        let findings = inspector
+            .inspect_output(
+                "token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payloadvalue.signaturevalue",
+            )
+            .await;
+        assert!(!findings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_sanitize_output_redacts_sensitive_values_only() {
+        let inspector = SecurityInspector::new(std::sync::Arc::new(PermissionManager::default()));
+        let inspection = inspector
+            .sanitize_output(
+                r#"title: Project PRD
+OPENAI_API_KEY=sk-test1234567890abcdef
+description: token is a login concept"#,
+            )
+            .await;
+
+        assert_eq!(inspection.findings.len(), 1);
+        assert!(inspection.sanitized.contains("title: Project PRD"));
+        assert!(inspection
+            .sanitized
+            .contains("description: token is a login concept"));
+        assert!(inspection
+            .sanitized
+            .contains("OPENAI_API_KEY=[redacted sensitive value]"));
+        assert!(!inspection.sanitized.contains("sk-test1234567890abcdef"));
     }
 
     #[tokio::test]

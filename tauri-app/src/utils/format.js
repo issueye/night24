@@ -35,6 +35,7 @@ export function messageToolBlocks(message) {
 }
 
 export function isVisibleChatMessage(message) {
+  if (String(message?.role || '').toLowerCase() === 'system') return false;
   return messageText(message).trim().length > 0 || messageToolBlocks(message).length > 0;
 }
 

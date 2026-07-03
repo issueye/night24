@@ -1,23 +1,35 @@
 import { Palette, Server, X } from 'lucide-react';
 import { useState } from 'react';
 import { classNames } from '../utils/format.js';
+import { BaseSettings } from './settings/BaseSettings.jsx';
+import { ProviderSettings } from './settings/ProviderSettings.jsx';
 
 export function SettingsStrip({
   open,
   apiBase,
   apiKey,
+  providerProfiles,
+  providerProfileId,
   provider,
   model,
   baseUrl,
   providerKey,
+  contextThreshold,
+  networkProxy,
   theme,
   fontSize,
   onApiBaseChange,
   onApiKeyChange,
+  onProviderProfileChange,
+  onProviderProfileCreate,
+  onProviderProfileUpdate,
+  onProviderProfileDelete,
   onProviderChange,
   onModelChange,
   onBaseUrlChange,
   onProviderKeyChange,
+  onContextThresholdChange,
+  onNetworkProxyChange,
   onThemeChange,
   onFontSizeChange,
   onClose,
@@ -50,59 +62,39 @@ export function SettingsStrip({
 
           <div className="settings-content">
             {tab === 'provider' && (
-              <div className="settings-form">
-                <label>
-                  <span>Server</span>
-                  <input value={apiBase} onChange={(event) => onApiBaseChange(event.target.value)} />
-                </label>
-                <label>
-                  <span>Server Key</span>
-                  <input type="password" value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} />
-                </label>
-                <label>
-                  <span>Provider</span>
-                  <select value={provider} onChange={(event) => onProviderChange(event.target.value)}>
-                    <option value="echo">echo</option>
-                    <option value="openai">openai</option>
-                    <option value="anthropic">anthropic</option>
-                    <option value="ollama">ollama</option>
-                    <option value="stepfun">stepfun</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Model</span>
-                  <input value={model} onChange={(event) => onModelChange(event.target.value)} placeholder="echo-v1" />
-                </label>
-                <label>
-                  <span>Base URL</span>
-                  <input value={baseUrl} onChange={(event) => onBaseUrlChange(event.target.value)} placeholder="optional" />
-                </label>
-                <label>
-                  <span>Provider Key</span>
-                  <input type="password" value={providerKey} onChange={(event) => onProviderKeyChange(event.target.value)} placeholder="saved locally" />
-                </label>
-              </div>
+              <ProviderSettings
+                providerProfiles={providerProfiles}
+                providerProfileId={providerProfileId}
+                provider={provider}
+                model={model}
+                baseUrl={baseUrl}
+                providerKey={providerKey}
+                contextThreshold={contextThreshold}
+                networkProxy={networkProxy}
+                onProviderProfileChange={onProviderProfileChange}
+                onProviderProfileCreate={onProviderProfileCreate}
+                onProviderProfileUpdate={onProviderProfileUpdate}
+                onProviderProfileDelete={onProviderProfileDelete}
+                onProviderChange={onProviderChange}
+                onModelChange={onModelChange}
+                onBaseUrlChange={onBaseUrlChange}
+                onProviderKeyChange={onProviderKeyChange}
+                onContextThresholdChange={onContextThresholdChange}
+                onNetworkProxyChange={onNetworkProxyChange}
+              />
             )}
 
             {tab === 'base' && (
-              <div className="settings-form">
-                <label>
-                  <span>主题</span>
-                  <select value={theme} onChange={(event) => onThemeChange(event.target.value)}>
-                    <option value="light">明亮</option>
-                    <option value="warm">柔和</option>
-                    <option value="dark">深色</option>
-                  </select>
-                </label>
-                <label>
-                  <span>字体大小</span>
-                  <select value={fontSize} onChange={(event) => onFontSizeChange(event.target.value)}>
-                    <option value="compact">紧凑</option>
-                    <option value="normal">标准</option>
-                    <option value="large">偏大</option>
-                  </select>
-                </label>
-              </div>
+              <BaseSettings
+                apiBase={apiBase}
+                apiKey={apiKey}
+                theme={theme}
+                fontSize={fontSize}
+                onApiBaseChange={onApiBaseChange}
+                onApiKeyChange={onApiKeyChange}
+                onThemeChange={onThemeChange}
+                onFontSizeChange={onFontSizeChange}
+              />
             )}
           </div>
         </div>

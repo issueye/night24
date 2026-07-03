@@ -140,6 +140,46 @@ impl ContextManager {
         }
     }
 
+    pub fn maybe_compact_by_token_threshold(
+        &self,
+        messages: &mut Vec<Message>,
+        max_tokens: usize,
+    ) -> CompactionResult {
+        self.truncate_tool_outputs(messages);
+        self.token_estimate
+            .store(self.estimate_tokens(messages), Ordering::Relaxed);
+        if max_tokens == 0 || self.token_estimate() < max_tokens {
+            return CompactionResult::Noop;
+        }
+
+        let original_len = messages.len();
+        let keep = self.preserve_recent.min(messages.len());
+        if keep == 0 || messages.len() <= keep {
+            return CompactionResult::Noop;
+        }
+
+        let removed: Vec<Message> = messages.drain(0..messages.len() - keep).collect();
+        let summary = Self::summarize(&removed);
+        if !summary.is_empty() {
+            messages.insert(
+                0,
+                Message {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    role: Role::System,
+                    content: vec![ContentBlock::Text { text: summary }],
+                    created_at: chrono::Utc::now(),
+                },
+            );
+        }
+        self.token_estimate
+            .store(self.estimate_tokens(messages), Ordering::Relaxed);
+
+        CompactionResult::Compacted {
+            removed: original_len - messages.len(),
+            current: messages.len(),
+        }
+    }
+
     fn summarize(removed: &[Message]) -> String {
         let mut summary = String::from("[compacted context]");
         for msg in removed.iter().rev().take(8) {

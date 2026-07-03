@@ -152,6 +152,10 @@ pub struct ReplyOptions {
     pub emit_tool_events: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_proxy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_threshold_tokens: Option<usize>,
 }
 
 impl Default for ReplyOptions {
@@ -160,6 +164,8 @@ impl Default for ReplyOptions {
             stream_message_delta: false,
             emit_tool_events: true,
             permission_mode: None,
+            network_proxy: None,
+            context_threshold_tokens: None,
         }
     }
 }

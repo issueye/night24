@@ -1,200 +1,55 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
 import { TopBar } from './components/TopBar.jsx';
 import { SettingsStrip } from './components/SettingsStrip.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { ChatPanel } from './components/ChatPanel.jsx';
 import { ContextPanel } from './components/ContextPanel.jsx';
 import { TimelinePanel } from './components/TimelinePanel.jsx';
+import { useApiClient } from './hooks/useApiClient.js';
+import { useProviderSettings } from './hooks/useProviderSettings.js';
+import { useWorkspaceState } from './hooks/useWorkspaceState.js';
 import { classNames, isVisibleChatMessage, messageText, messageToolBlocks, safeText } from './utils/format.js';
-
-const DEFAULT_SERVER = 'http://localhost:17787';
-const STORAGE_KEYS = {
-  apiBase: 'night24.apiBase',
-  apiKey: 'night24.apiKey',
-  provider: 'night24.provider',
-  model: 'night24.model',
-  baseUrl: 'night24.baseUrl',
-  providerKey: 'night24.providerKey',
-  accessMode: 'night24.accessMode',
-  fullAccess: 'night24.fullAccess',
-  theme: 'night24.theme',
-  fontSize: 'night24.fontSize',
-  currentWorkspacePath: 'night24.currentWorkspacePath',
-  recentWorkspaces: 'night24.recentWorkspaces',
-};
-
-function readAccessMode() {
-  const mode = readSetting(STORAGE_KEYS.accessMode);
-  if (['strict', 'permissive', 'allow_all'].includes(mode)) return mode;
-  return readSetting(STORAGE_KEYS.fullAccess) === 'true' ? 'allow_all' : 'strict';
-}
-
-function readSetting(key, fallback = '') {
-  try {
-    return localStorage.getItem(key) || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeSetting(key, value) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Ignore private-mode storage failures.
-  }
-}
-
-function readJsonSetting(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonSetting(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Ignore private-mode storage failures.
-  }
-}
-
-function apiUrl(base, path) {
-  const normalizedBase = String(base || DEFAULT_SERVER).replace(/\/+$/, '');
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${normalizedBase}${normalizedPath}`;
-}
-
-function workspaceNameFromPath(path) {
-  return String(path || '')
-    .replace(/[\\/]+$/, '')
-    .split(/[\\/]/)
-    .filter(Boolean)
-    .pop() || 'workspace';
-}
-
-function normalizeLocalPath(path) {
-  return String(path || '')
-    .replace(/\\/g, '/')
-    .replace(/\/+$/, '')
-    .toLowerCase();
-}
-
-function sameWorkspacePath(left, right) {
-  const a = normalizeLocalPath(left);
-  const b = normalizeLocalPath(right);
-  return Boolean(a && b && a === b);
-}
-
-function compactWorkspaces(workspaces) {
-  const seen = new Set();
-  return (Array.isArray(workspaces) ? workspaces : [])
-    .filter((item) => item?.root_path)
-    .filter((item) => {
-      const key = String(item.root_path).toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 8);
-}
-
-function rememberWorkspace(workspace) {
-  if (!workspace?.root_path) return;
-  writeSetting(STORAGE_KEYS.currentWorkspacePath, workspace.root_path);
-  const stored = readJsonSetting(STORAGE_KEYS.recentWorkspaces, []);
-  const next = compactWorkspaces([
-    {
-      id: workspace.id || `local-${workspace.root_path}`,
-      name: workspace.name || workspaceNameFromPath(workspace.root_path),
-      root_path: workspace.root_path,
-      created_at: workspace.created_at || new Date().toISOString(),
-      last_opened_at: workspace.last_opened_at || new Date().toISOString(),
-    },
-    ...stored,
-  ]);
-  writeJsonSetting(STORAGE_KEYS.recentWorkspaces, next);
-}
-
-function normalizeError(error) {
-  if (!error) return '未知错误';
-  if (typeof error === 'string') return error;
-  if (error instanceof TypeError && /fetch/i.test(error.message || '')) {
-    return '无法连接 server，请确认服务已启动或 Server 地址正确';
-  }
-  return error.message || safeText(error);
-}
-
-function unwrapSsePayload(eventName, payload) {
-  if (payload?.method === 'agent.event' && payload.params) {
-    return payload.params;
-  }
-  if (eventName === 'agent.event' && payload?.params) {
-    return payload.params;
-  }
-  return payload;
-}
-
-function appendMessageDelta(message, delta) {
-  const content = Array.isArray(message.content) ? message.content : [{ type: 'text', text: messageText(message) }];
-  let appended = false;
-  const nextContent = content.map((block) => {
-    if (!appended && block?.type === 'text') {
-      appended = true;
-      return { ...block, text: `${block.text || ''}${delta}` };
-    }
-    return block;
-  });
-  if (!appended) {
-    nextContent.push({ type: 'text', text: delta });
-  }
-  return { ...message, content: nextContent };
-}
-
-function withMessageText(message, text) {
-  const content = Array.isArray(message.content) ? message.content : [];
-  let replaced = false;
-  const nextContent = content.map((block) => {
-    if (!replaced && block?.type === 'text') {
-      replaced = true;
-      return { ...block, text };
-    }
-    return block;
-  });
-  if (!replaced) {
-    nextContent.unshift({ type: 'text', text });
-  }
-  return { ...message, content: nextContent };
-}
+import { normalizeError, unwrapSsePayload } from './utils/events.js';
+import { appendMessageDelta, withMessageText } from './utils/messages.js';
+import {
+  DEFAULT_SERVER,
+  STORAGE_KEYS,
+  apiUrl,
+  parseOptionalPositiveInt,
+  readAccessMode,
+  readSetting,
+  sameWorkspacePath,
+  writeSetting,
+} from './utils/settings.js';
 
 export default function App() {
   const [apiBase, setApiBase] = useState(() => readSetting(STORAGE_KEYS.apiBase, DEFAULT_SERVER));
   const [apiKey, setApiKey] = useState(() => readSetting(STORAGE_KEYS.apiKey));
-  const [provider, setProvider] = useState(() => readSetting(STORAGE_KEYS.provider, 'echo'));
-  const [model, setModel] = useState(() => readSetting(STORAGE_KEYS.model, 'echo-v1'));
-  const [baseUrl, setBaseUrl] = useState(() => readSetting(STORAGE_KEYS.baseUrl));
   const [accessMode, setAccessMode] = useState(readAccessMode);
+  const [networkProxy, setNetworkProxy] = useState(() => readSetting(STORAGE_KEYS.networkProxy));
   const [theme, setTheme] = useState(() => readSetting(STORAGE_KEYS.theme, 'light'));
   const [fontSize, setFontSize] = useState(() => readSetting(STORAGE_KEYS.fontSize, 'normal'));
-  const [providerKey, setProviderKey] = useState(() => readSetting(STORAGE_KEYS.providerKey));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const {
+    providerProfiles,
+    providerProfileId,
+    provider,
+    model,
+    baseUrl,
+    providerKey,
+    contextThreshold,
+    setProvider,
+    setModel,
+    setBaseUrl,
+    setProviderKey,
+    setContextThreshold,
+    createProviderProfileFromCurrent,
+    selectProviderProfile,
+    updateProviderProfile,
+    deleteProviderProfile,
+  } = useProviderSettings();
 
   const [serverStatus, setServerStatus] = useState({ state: 'checking', detail: '正在连接 server' });
-  const [workspace, setWorkspace] = useState(null);
-  const [recentWorkspaces, setRecentWorkspaces] = useState(() => readJsonSetting(STORAGE_KEYS.recentWorkspaces, []));
-  const [tree, setTree] = useState(null);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [rightTab, setRightTab] = useState('files');
-  const [contextOpen, setContextOpen] = useState(false);
-  const [workspaceStatus, setWorkspaceStatus] = useState(null);
-  const [workspaceDiff, setWorkspaceDiff] = useState(null);
-  const [diffLoading, setDiffLoading] = useState(false);
-  const [diffError, setDiffError] = useState('');
-
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -208,45 +63,7 @@ export default function App() {
   const abortRef = useRef(null);
   const runTerminalRef = useRef(null);
   const messageEndRef = useRef(null);
-
-  const headers = useMemo(() => {
-    const next = { 'Content-Type': 'application/json' };
-    if (apiKey.trim()) {
-      next.Authorization = `Bearer ${apiKey.trim()}`;
-      next['X-API-Key'] = apiKey.trim();
-    }
-    return next;
-  }, [apiKey]);
-
-  const apiJson = useCallback(
-    async (path, options = {}) => {
-      const response = await fetch(apiUrl(apiBase, path), {
-        ...options,
-        headers: {
-          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-          ...(apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}`, 'X-API-Key': apiKey.trim() } : {}),
-          ...(options.headers || {}),
-        },
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        let detail = text;
-        try {
-          detail = JSON.parse(text).error || text;
-        } catch {
-          // Keep raw response text.
-        }
-        throw new Error(detail || `HTTP ${response.status}`);
-      }
-      if (!text) return null;
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
-      }
-    },
-    [apiBase, apiKey],
-  );
+  const { headers, apiJson } = useApiClient(apiBase, apiKey);
 
   const addTimeline = useCallback((type, title, detail, tone = 'neutral') => {
     setTimeline((items) => [
@@ -311,6 +128,45 @@ export default function App() {
     window.setTimeout(step, 16);
   }, [addOrReplaceMessage]);
 
+  const clearConversationView = useCallback(({ abortActive = false } = {}) => {
+    if (abortActive) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    }
+    runTerminalRef.current = null;
+    setMessages([]);
+    setPendingPermissions([]);
+    setTimeline([]);
+    setActiveRun(null);
+    setIsRunning(false);
+  }, []);
+
+  const {
+    workspace,
+    recentWorkspaces,
+    tree,
+    selectedFile,
+    rightTab,
+    contextOpen,
+    workspaceStatus,
+    workspaceDiff,
+    diffLoading,
+    diffError,
+    setContextOpen,
+    loadWorkspace,
+    loadWorkspaceDiff,
+    openWorkspace,
+    openFile,
+    openContextTab,
+  } = useWorkspaceState({
+    apiJson,
+    headers,
+    addTimeline,
+    showError,
+    clearConversationView,
+    onWorkspaceOpened: () => setCurrentSessionId(null),
+  });
+
   const checkServer = useCallback(async () => {
     setServerStatus({ state: 'checking', detail: '正在连接 server' });
     try {
@@ -337,62 +193,6 @@ export default function App() {
     }
   }, [apiJson, showError]);
 
-  const loadWorkspace = useCallback(async () => {
-    const storedRecent = readJsonSetting(STORAGE_KEYS.recentWorkspaces, []);
-    try {
-      let current = await apiJson('/workspaces/current');
-      if (!current) {
-        const savedPath = readSetting(STORAGE_KEYS.currentWorkspacePath);
-        if (savedPath) {
-          current = await apiJson('/workspaces/open', {
-            method: 'POST',
-            body: JSON.stringify({ path: savedPath }),
-          }).catch(() => null);
-        }
-      }
-      setWorkspace(current || null);
-      const recent = await apiJson('/workspaces/recent').catch(() => ({ workspaces: [] }));
-      const mergedRecent = compactWorkspaces([
-        ...(current ? [current] : []),
-        ...(Array.isArray(recent?.workspaces) ? recent.workspaces : []),
-        ...storedRecent,
-      ]);
-      setRecentWorkspaces(mergedRecent);
-      writeJsonSetting(STORAGE_KEYS.recentWorkspaces, mergedRecent);
-      if (current) {
-        rememberWorkspace(current);
-        const data = await apiJson('/workspace/tree');
-        setTree(data?.root || null);
-      } else {
-        setTree(null);
-      }
-    } catch {
-      setWorkspace(null);
-      setTree(null);
-      setRecentWorkspaces(storedRecent);
-    }
-  }, [apiJson]);
-
-  const loadWorkspaceDiff = useCallback(async () => {
-    if (!workspace) return;
-    setDiffLoading(true);
-    setDiffError('');
-    try {
-      const [status, diff] = await Promise.all([
-        apiJson('/workspace/status'),
-        apiJson('/workspace/diff'),
-      ]);
-      setWorkspaceStatus(status);
-      setWorkspaceDiff(diff);
-    } catch (error) {
-      setWorkspaceStatus(null);
-      setWorkspaceDiff(null);
-      setDiffError(normalizeError(error));
-    } finally {
-      setDiffLoading(false);
-    }
-  }, [apiJson, workspace]);
-
   useEffect(() => {
     writeSetting(STORAGE_KEYS.apiBase, apiBase);
   }, [apiBase]);
@@ -402,23 +202,8 @@ export default function App() {
   }, [apiKey]);
 
   useEffect(() => {
-    writeSetting(STORAGE_KEYS.provider, provider);
-    if (provider === 'echo' && !model.trim()) {
-      setModel('echo-v1');
-    }
-  }, [provider, model]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.model, model);
-  }, [model]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.baseUrl, baseUrl);
-  }, [baseUrl]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.providerKey, providerKey);
-  }, [providerKey]);
+    writeSetting(STORAGE_KEYS.networkProxy, networkProxy);
+  }, [networkProxy]);
 
   useEffect(() => {
     writeSetting(STORAGE_KEYS.accessMode, accessMode);
@@ -445,72 +230,6 @@ export default function App() {
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
-
-  async function openWorkspace(pathFromRecent) {
-    try {
-      let path = pathFromRecent;
-      if (!path) {
-        try {
-          path = await invoke('select_directory');
-        } catch {
-          path = window.prompt('输入项目目录路径');
-        }
-      }
-      if (!path) return;
-      const opened = await apiJson('/workspaces/open', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ path }),
-      });
-      clearConversationView({ abortActive: true });
-      setWorkspace(opened);
-      rememberWorkspace(opened);
-      setCurrentSessionId(null);
-      setRightTab('files');
-      setContextOpen(true);
-      setSelectedFile(null);
-      setWorkspaceStatus(null);
-      setWorkspaceDiff(null);
-      setDiffError('');
-      const data = await apiJson('/workspace/tree');
-      setTree(data?.root || null);
-      await loadWorkspace();
-      addTimeline('workspace', '已打开项目', opened?.root_path || path, 'success');
-    } catch (error) {
-      showError(`打开项目失败：${normalizeError(error)}`);
-    }
-  }
-
-  async function openFile(node) {
-    if (!node || node.kind !== 'file') return;
-    try {
-      setRightTab('files');
-      setContextOpen(true);
-      const file = await apiJson(`/workspace/file?path=${encodeURIComponent(node.path)}`);
-      setSelectedFile(file);
-    } catch (error) {
-      showError(`读取文件失败：${normalizeError(error)}`);
-    }
-  }
-
-  function openContextTab(tab) {
-    setRightTab(tab);
-    setContextOpen(true);
-    if (tab === 'diff') loadWorkspaceDiff();
-  }
-
-  function clearConversationView({ abortActive = false } = {}) {
-    if (abortActive) {
-      abortRef.current?.abort();
-      abortRef.current = null;
-    }
-    runTerminalRef.current = null;
-    setMessages([]);
-    setPendingPermissions([]);
-    setTimeline([]);
-    setActiveRun(null);
-    setIsRunning(false);
-  }
 
   async function createSession() {
     clearConversationView({ abortActive: true });
@@ -685,8 +404,7 @@ export default function App() {
     }
 
     if (eventType === 'diff_ready') {
-      setRightTab('diff');
-      setContextOpen(true);
+      openContextTab('diff');
       loadWorkspaceDiff();
       addTimeline(eventType, '变更已生成', eventPayload?.summary || safeText(eventPayload), 'success');
       return;
@@ -805,6 +523,8 @@ export default function App() {
           base_url: baseUrl.trim() || undefined,
           api_key: providerKey.trim() || undefined,
           permission_mode: accessMode,
+          network_proxy: networkProxy.trim() || undefined,
+          context_threshold_tokens: parseOptionalPositiveInt(contextThreshold),
         }),
         signal: controller.signal,
       });
@@ -922,18 +642,28 @@ export default function App() {
         open={settingsOpen}
         apiBase={apiBase}
         apiKey={apiKey}
+        providerProfiles={providerProfiles}
+        providerProfileId={providerProfileId}
         provider={provider}
         model={model}
         baseUrl={baseUrl}
         providerKey={providerKey}
+        contextThreshold={contextThreshold}
+        networkProxy={networkProxy}
         theme={theme}
         fontSize={fontSize}
         onApiBaseChange={setApiBase}
         onApiKeyChange={setApiKey}
+        onProviderProfileChange={selectProviderProfile}
+        onProviderProfileCreate={createProviderProfileFromCurrent}
+        onProviderProfileUpdate={updateProviderProfile}
+        onProviderProfileDelete={deleteProviderProfile}
         onProviderChange={setProvider}
         onModelChange={setModel}
         onBaseUrlChange={setBaseUrl}
         onProviderKeyChange={setProviderKey}
+        onContextThresholdChange={setContextThreshold}
+        onNetworkProxyChange={setNetworkProxy}
         onThemeChange={setTheme}
         onFontSizeChange={setFontSize}
         onClose={() => setSettingsOpen(false)}
@@ -960,12 +690,13 @@ export default function App() {
           isRunning={isRunning}
           canSend={canSend}
           workspace={workspace}
-          provider={provider}
-          model={model}
+          providerProfiles={providerProfiles}
+          providerProfileId={providerProfileId}
           accessMode={accessMode}
           activeContext={contextOpen ? rightTab : null}
           pendingPermissions={pendingPermissions}
           onTaskTextChange={setTaskText}
+          onProviderProfileChange={selectProviderProfile}
           onAccessModeChange={setAccessMode}
           onResolvePermission={resolvePermission}
           onSendTask={sendTask}
