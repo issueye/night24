@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, Method, StatusCode},
     routing::delete,
     routing::get,
@@ -30,7 +30,7 @@ mod workspace;
 use api_types::{
     AcceptedResponse, CancelAgentRequest, CoreStatusResponse, CreateSessionRequest,
     ForkSessionRequest, PermissionDecisionRequest, ReadyResponse, RenameSessionRequest,
-    ReplyRequest, SessionSummary, ToolsResponse, WorkspaceState,
+    ReplyRequest, SessionSummary, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
 };
 use auth::require_api_key;
 use core_client::{AgentCoreClient, CoreRuntimeStatus};
@@ -49,7 +49,7 @@ use workspace::{
 use night24_core::{
     provider::registry::ProviderRegistry, session::SessionManager, tool_executor::builtin_tools,
 };
-use night24_protocol::PermissionDecision;
+use night24_protocol::{PermissionDecision, SkillRegistryParams, SubAgentPoolParams};
 
 fn session_database_url() -> String {
     std::env::var("NIGHT24_DATABASE_URL")
@@ -114,7 +114,9 @@ fn sqlite_file_url(path: PathBuf) -> String {
         workspace::workspace_status,
         workspace::workspace_diff,
         hooks::get_workspace_hooks,
-        hooks::put_workspace_hooks
+        hooks::put_workspace_hooks,
+        get_agent_subagents,
+        get_workspace_skills
     ),
     components(schemas(
         ReplyRequest,
@@ -184,6 +186,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/readyz", get(readyz))
         .route("/reply", post(reply_core))
         .route("/agent/cancel", post(agent_cancel))
+        .route("/agent/subagents", get(get_agent_subagents))
         .route("/tools", get(get_tools))
         .route("/workspaces/open", post(open_workspace))
         .route("/workspaces/current", get(current_workspace))
@@ -192,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/workspace/file", get(workspace_file))
         .route("/workspace/status", get(workspace_status))
         .route("/workspace/diff", get(workspace_diff))
+        .route("/workspace/skills", get(get_workspace_skills))
         .route(
             "/workspace/hooks",
             get(get_workspace_hooks).put(put_workspace_hooks),
@@ -441,6 +445,76 @@ async fn get_tools(State(state): State<AppState>) -> Json<ToolsResponse> {
         source: "night24-core builtin fallback".to_string(),
         core_available: false,
     })
+}
+
+#[utoipa::path(
+    get,
+    path = "/agent/subagents",
+    tag = "night24",
+    params(SubAgentPoolQuery),
+    responses(
+        (status = 200, description = "Current sub-agent pool status", body = serde_json::Value)
+    )
+)]
+async fn get_agent_subagents(
+    State(state): State<AppState>,
+    Query(query): Query<SubAgentPoolQuery>,
+) -> Json<serde_json::Value> {
+    let Some(core_client) = &state.core_client else {
+        return Json(serde_json::json!({
+            "core_available": false,
+            "error": "no active core client"
+        }));
+    };
+
+    match core_client
+        .subagents(SubAgentPoolParams {
+            subagent_id: query.subagent_id,
+            include_messages: query.include_messages,
+            include_result: query.include_result,
+        })
+        .await
+    {
+        Ok(result) => Json(serde_json::json!({
+            "core_available": true,
+            "pool": result.pool
+        })),
+        Err(err) => Json(serde_json::json!({
+            "core_available": false,
+            "error": err.to_string()
+        })),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/workspace/skills",
+    tag = "night24",
+    responses(
+        (status = 200, description = "Current workspace skill registry", body = serde_json::Value),
+        (status = 409, description = "No workspace is open")
+    )
+)]
+async fn get_workspace_skills(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let workspace = workspace::current_workspace_info(&state).await?;
+    let Some(core_client) = &state.core_client else {
+        return Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no active core client",
+        ));
+    };
+    let result = core_client
+        .skills(SkillRegistryParams {
+            working_dir: Some(PathBuf::from(&workspace.root_path)),
+        })
+        .await
+        .map_err(|err| json_error(StatusCode::BAD_GATEWAY, err.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "workspace": workspace,
+        "registry": result.registry
+    })))
 }
 
 #[utoipa::path(

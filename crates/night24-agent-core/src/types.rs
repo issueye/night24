@@ -9,6 +9,8 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::hooks::{HookContext, HookRunner};
 use crate::rpc::agent_event_notification;
+use crate::skills::SkillRegistry;
+use crate::subagents::SubAgentPool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CoreState {
@@ -30,6 +32,7 @@ pub(super) struct PermissionHandle {
 #[derive(Clone)]
 pub(super) struct RunContext {
     pub(super) run_id: String,
+    pub(super) agent_id: Option<String>,
     pub(super) emit_tool_events: bool,
     pub(super) cancelled: Arc<AtomicBool>,
     pub(super) seq: Arc<AtomicU64>,
@@ -37,6 +40,8 @@ pub(super) struct RunContext {
     pub(super) collected: Option<Arc<Mutex<Vec<String>>>>,
     pub(super) permissions: Arc<Mutex<HashMap<String, PermissionHandle>>>,
     pub(super) hooks: Arc<HookRunner>,
+    pub(super) subagents: Arc<SubAgentPool>,
+    pub(super) skills: Arc<SkillRegistry>,
 }
 
 impl RunContext {

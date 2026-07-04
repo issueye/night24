@@ -50,6 +50,16 @@ pub(crate) struct CancelAgentRequest {
     pub(crate) reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+pub(crate) struct SubAgentPoolQuery {
+    #[serde(default)]
+    pub(crate) subagent_id: Option<String>,
+    #[serde(default)]
+    pub(crate) include_messages: bool,
+    #[serde(default)]
+    pub(crate) include_result: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub(crate) struct PermissionDecisionRequest {
     #[schema(example = "run-123")]

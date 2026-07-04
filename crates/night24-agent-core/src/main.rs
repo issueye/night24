@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    drop(core);
     drop(output_tx);
     let _ = writer.join();
 

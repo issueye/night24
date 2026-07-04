@@ -12,6 +12,8 @@ pub(super) fn core_capabilities() -> Vec<Capability> {
         Capability::new("agent.tools", 1),
         Capability::new("agent.cancel", 1),
         Capability::new("agent.event", 1),
+        Capability::new("agent.subagents", 1),
+        Capability::new("agent.skills", 1),
         Capability::new("permission.resolve", 1),
     ]
 }

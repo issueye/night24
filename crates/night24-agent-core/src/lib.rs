@@ -2,6 +2,8 @@ use std::collections::HashMap;
 mod hooks;
 mod providers;
 mod rpc;
+mod skills;
+mod subagents;
 mod tools;
 mod types;
 
@@ -11,6 +13,7 @@ use rpc::{
     agent_event_notification, core_capabilities, decode_optional_params, decode_params,
     serialize_response,
 };
+use skills::SkillRegistry;
 #[cfg(test)]
 use tools::arguments_with_network_proxy;
 use tools::{
@@ -28,6 +31,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::StreamExt;
 use night24_core::model::{ContentBlock, Message, Role};
+use night24_core::permission::PermissionLevel;
 use night24_core::provider::ModelConfig;
 use night24_core::security::SecurityInspector;
 #[cfg(test)]
@@ -36,8 +40,10 @@ use night24_protocol::{
     AcceptedResult, AgentEvent, AgentEventKind, AgentToolsParams, AgentToolsResult, CancelParams,
     EventError, FinishStatus, InitializeParams, InitializeResult, JsonRpcError, JsonRpcId,
     JsonRpcRequest, JsonRpcResponse, PeerInfo, PermissionResolution, PingParams, PingResult,
-    ReplyAccepted, ReplyParams, ShutdownParams, PROTOCOL_VERSION,
+    ReplyAccepted, ReplyParams, ShutdownParams, SkillRegistryParams, SkillRegistryResult,
+    SubAgentPoolParams, SubAgentPoolResult, PROTOCOL_VERSION,
 };
+use subagents::{SubAgentMessageDirection, SubAgentMode, SubAgentPool};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::Instant;
 
@@ -50,6 +56,7 @@ pub struct AgentCore {
     output: Option<UnboundedSender<String>>,
     runs: Arc<Mutex<HashMap<String, RunHandle>>>,
     permissions: Arc<Mutex<HashMap<String, PermissionHandle>>>,
+    subagents: Arc<SubAgentPool>,
 }
 
 impl Default for AgentCore {
@@ -61,6 +68,7 @@ impl Default for AgentCore {
             output: None,
             runs: Arc::new(Mutex::new(HashMap::new())),
             permissions: Arc::new(Mutex::new(HashMap::new())),
+            subagents: Arc::new(SubAgentPool::default()),
         }
     }
 }
@@ -120,6 +128,18 @@ impl AgentCore {
                     return vec![self.error_response(id, JsonRpcError::core_not_initialized())];
                 }
                 self.agent_cancel(id, request.params)
+            }
+            "agent.subagents" => {
+                if !self.is_initialized() {
+                    return vec![self.error_response(id, JsonRpcError::core_not_initialized())];
+                }
+                self.agent_subagents(id, request.params)
+            }
+            "agent.skills" => {
+                if !self.is_initialized() {
+                    return vec![self.error_response(id, JsonRpcError::core_not_initialized())];
+                }
+                self.agent_skills(id, request.params)
             }
             "permission.resolve" => {
                 if !self.is_initialized() {
@@ -236,8 +256,11 @@ impl AgentCore {
             },
         );
 
+        let skills = Arc::new(SkillRegistry::load(&params.session.working_dir));
+
         let context = RunContext {
             run_id: run_id.clone(),
+            agent_id: None,
             emit_tool_events: params.options.emit_tool_events,
             cancelled,
             seq: Arc::new(AtomicU64::new(1)),
@@ -249,6 +272,8 @@ impl AgentCore {
             },
             permissions: self.permissions.clone(),
             hooks: Arc::new(HookRunner::from_environment(&params.session.working_dir)),
+            subagents: self.subagents.clone(),
+            skills,
         };
         let runs = self.runs.clone();
         let permissions = self.permissions.clone();
@@ -293,6 +318,44 @@ impl AgentCore {
         deny_pending_permissions_for_run(&self.permissions, &params.run_id);
 
         vec![self.success_response(id, AcceptedResult { accepted: true })]
+    }
+
+    fn agent_subagents(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {
+        let params = match decode_optional_params::<SubAgentPoolParams>(params) {
+            Ok(params) => params,
+            Err(err) => return vec![self.error_response(id, err)],
+        };
+
+        let pool = match self.subagents.snapshot(
+            params.subagent_id.as_deref(),
+            params.include_messages,
+            params.include_result,
+        ) {
+            Ok(pool) => pool,
+            Err(err) => {
+                return vec![self.error_response(id, JsonRpcError::invalid_params(err.to_string()))]
+            }
+        };
+
+        vec![self.success_response(id, SubAgentPoolResult { pool })]
+    }
+
+    fn agent_skills(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {
+        let params = match decode_optional_params::<SkillRegistryParams>(params) {
+            Ok(params) => params,
+            Err(err) => return vec![self.error_response(id, err)],
+        };
+        let working_dir = params
+            .working_dir
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        let registry = SkillRegistry::load(&working_dir);
+        let registry = match serde_json::to_value(registry) {
+            Ok(registry) => registry,
+            Err(err) => {
+                return vec![self.error_response(id, JsonRpcError::internal_error(err.to_string()))]
+            }
+        };
+        vec![self.success_response(id, SkillRegistryResult { registry })]
     }
 
     fn permission_resolve(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {
@@ -343,7 +406,30 @@ impl AgentCore {
             permission_manager_for_mode(params.options.permission_mode.as_deref());
         let security = SecurityInspector::new(Arc::new(permission_manager));
 
-        let system = "You are Night24 Agent Core.".to_string();
+        let mut system = "You are Night24 Agent Core. When a task benefits from delegation, parallel analysis, background work, or isolated investigation, you may autonomously create and manage sub-agents using the developer__subagent_* tools. Use sync sub-agents when you need the result before continuing; use async sub-agents when work can continue while the child runs. Query the sub-agent pool before depending on asynchronous results.".to_string();
+        let skill_list = context.skills.available_for_prompt();
+        if !skill_list.trim().is_empty() {
+            system.push_str("\n\n");
+            system.push_str(&skill_list);
+            system.push_str(
+                "\nUse developer__skill_load to load full skill instructions or bundle files when needed.",
+            );
+        }
+        if let Some((_, skill)) = context.skills.explicit_invocation(&params.input.text) {
+            match context.skills.load_skill(&skill.name, None) {
+                Ok(loaded) => {
+                    system.push_str("\n\nActive skill loaded by explicit user request:\n");
+                    system.push_str(&format!(
+                        "Skill: {}\nDescription: {}\nInstructions:\n{}\n",
+                        loaded.skill.name, loaded.skill.description, loaded.body
+                    ));
+                }
+                Err(err) => {
+                    system.push_str("\n\nExplicit skill request could not be loaded: ");
+                    system.push_str(&err.to_string());
+                }
+            }
+        }
         let tools = night24_core::tool_executor::builtin_tools();
         let mut messages = params.session.conversation.clone();
         messages.push(Message {
@@ -487,17 +573,42 @@ impl AgentCore {
                                 } => {
                                     had_tool_request = true;
                                     let started = Instant::now();
-                                    let result = execute_tool_with_events(
-                                        context,
-                                        &security,
-                                        id,
-                                        name,
-                                        arguments,
-                                        &params.session.working_dir,
-                                        Duration::from_millis(params.limits.tool_timeout_ms.max(1)),
-                                        params.options.network_proxy.as_deref(),
-                                    )
-                                    .await;
+                                    let result = if is_subagent_tool(name) {
+                                        Self::execute_subagent_tool_with_events(
+                                            params,
+                                            default_provider,
+                                            context,
+                                            &security,
+                                            id,
+                                            name,
+                                            arguments,
+                                        )
+                                        .await
+                                    } else if is_skill_tool(name) {
+                                        Self::execute_skill_tool_with_events(
+                                            params,
+                                            context,
+                                            &security,
+                                            id,
+                                            name,
+                                            arguments,
+                                        )
+                                        .await
+                                    } else {
+                                        execute_tool_with_events(
+                                            context,
+                                            &security,
+                                            id,
+                                            name,
+                                            arguments,
+                                            &params.session.working_dir,
+                                            Duration::from_millis(
+                                                params.limits.tool_timeout_ms.max(1),
+                                            ),
+                                            params.options.network_proxy.as_deref(),
+                                        )
+                                        .await
+                                    };
                                     match result {
                                         Ok(content) => {
                                             blocks.push(ContentBlock::ToolResponse {
@@ -567,6 +678,245 @@ impl AgentCore {
         }
     }
 
+    async fn execute_subagent_tool_with_events(
+        params: &ReplyParams,
+        default_provider: &str,
+        context: &RunContext,
+        security: &SecurityInspector,
+        tool_call_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> anyhow::Result<String> {
+        match security.require_permission(tool_name).await {
+            PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
+            PermissionLevel::Confirm | PermissionLevel::Allow => {}
+        }
+
+        let summary = summarize_subagent_tool(tool_name, arguments);
+        context
+            .run_hooks(HookContext {
+                event: HookEvent::BeforeTool,
+                run_id: &context.run_id,
+                working_dir: &params.session.working_dir,
+                provider: None,
+                model: None,
+                message_count: None,
+                tool_count: None,
+                tool_call_id: Some(tool_call_id),
+                tool_name: Some(tool_name),
+                summary: Some(&summary),
+                arguments: Some(arguments),
+                result_preview: None,
+                error: None,
+                duration_ms: None,
+                finish_status: None,
+            })
+            .await;
+
+        if context.emit_tool_events {
+            context.send(AgentEventKind::ToolStarted {
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                summary: summary.clone(),
+                arguments: arguments.clone(),
+            });
+        }
+
+        let started = Instant::now();
+        let result =
+            execute_subagent_tool(params, default_provider, context, tool_name, arguments).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
+
+        match result {
+            Ok(output) => {
+                let result_preview = preview_text(&output);
+                context
+                    .run_hooks(HookContext {
+                        event: HookEvent::AfterTool,
+                        run_id: &context.run_id,
+                        working_dir: &params.session.working_dir,
+                        provider: None,
+                        model: None,
+                        message_count: None,
+                        tool_count: None,
+                        tool_call_id: Some(tool_call_id),
+                        tool_name: Some(tool_name),
+                        summary: None,
+                        arguments: Some(arguments),
+                        result_preview: Some(&result_preview),
+                        error: None,
+                        duration_ms: Some(duration_ms),
+                        finish_status: None,
+                    })
+                    .await;
+
+                if context.emit_tool_events {
+                    context.send(AgentEventKind::ToolFinished {
+                        tool_call_id: tool_call_id.to_string(),
+                        tool_name: tool_name.to_string(),
+                        duration_ms,
+                        summary: format!("{tool_name} completed"),
+                        result_preview,
+                        is_error: false,
+                    });
+                }
+                Ok(output)
+            }
+            Err(err) => {
+                let error = err.to_string();
+                context
+                    .run_hooks(HookContext {
+                        event: HookEvent::AfterTool,
+                        run_id: &context.run_id,
+                        working_dir: &params.session.working_dir,
+                        provider: None,
+                        model: None,
+                        message_count: None,
+                        tool_count: None,
+                        tool_call_id: Some(tool_call_id),
+                        tool_name: Some(tool_name),
+                        summary: None,
+                        arguments: Some(arguments),
+                        result_preview: None,
+                        error: Some(&error),
+                        duration_ms: Some(duration_ms),
+                        finish_status: None,
+                    })
+                    .await;
+                if context.emit_tool_events {
+                    context.send(AgentEventKind::ToolFailed {
+                        tool_call_id: tool_call_id.to_string(),
+                        tool_name: tool_name.to_string(),
+                        duration_ms,
+                        error: EventError {
+                            code: "subagent_tool_failed".to_string(),
+                            message: error,
+                        },
+                    });
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn execute_skill_tool_with_events(
+        params: &ReplyParams,
+        context: &RunContext,
+        security: &SecurityInspector,
+        tool_call_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> anyhow::Result<String> {
+        match security.require_permission(tool_name).await {
+            PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
+            PermissionLevel::Confirm | PermissionLevel::Allow => {}
+        }
+
+        let summary = summarize_skill_tool(arguments);
+        context
+            .run_hooks(HookContext {
+                event: HookEvent::BeforeTool,
+                run_id: &context.run_id,
+                working_dir: &params.session.working_dir,
+                provider: None,
+                model: None,
+                message_count: None,
+                tool_count: None,
+                tool_call_id: Some(tool_call_id),
+                tool_name: Some(tool_name),
+                summary: Some(&summary),
+                arguments: Some(arguments),
+                result_preview: None,
+                error: None,
+                duration_ms: None,
+                finish_status: None,
+            })
+            .await;
+
+        if context.emit_tool_events {
+            context.send(AgentEventKind::ToolStarted {
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                summary: summary.clone(),
+                arguments: arguments.clone(),
+            });
+        }
+
+        let started = Instant::now();
+        let result = execute_skill_tool(context, arguments).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
+
+        match result {
+            Ok(output) => {
+                let result_preview = preview_text(&output);
+                context
+                    .run_hooks(HookContext {
+                        event: HookEvent::AfterTool,
+                        run_id: &context.run_id,
+                        working_dir: &params.session.working_dir,
+                        provider: None,
+                        model: None,
+                        message_count: None,
+                        tool_count: None,
+                        tool_call_id: Some(tool_call_id),
+                        tool_name: Some(tool_name),
+                        summary: None,
+                        arguments: Some(arguments),
+                        result_preview: Some(&result_preview),
+                        error: None,
+                        duration_ms: Some(duration_ms),
+                        finish_status: None,
+                    })
+                    .await;
+                if context.emit_tool_events {
+                    context.send(AgentEventKind::ToolFinished {
+                        tool_call_id: tool_call_id.to_string(),
+                        tool_name: tool_name.to_string(),
+                        duration_ms,
+                        summary: "developer__skill_load completed".to_string(),
+                        result_preview,
+                        is_error: false,
+                    });
+                }
+                Ok(output)
+            }
+            Err(err) => {
+                let error = err.to_string();
+                context
+                    .run_hooks(HookContext {
+                        event: HookEvent::AfterTool,
+                        run_id: &context.run_id,
+                        working_dir: &params.session.working_dir,
+                        provider: None,
+                        model: None,
+                        message_count: None,
+                        tool_count: None,
+                        tool_call_id: Some(tool_call_id),
+                        tool_name: Some(tool_name),
+                        summary: None,
+                        arguments: Some(arguments),
+                        result_preview: None,
+                        error: Some(&error),
+                        duration_ms: Some(duration_ms),
+                        finish_status: None,
+                    })
+                    .await;
+                if context.emit_tool_events {
+                    context.send(AgentEventKind::ToolFailed {
+                        tool_call_id: tool_call_id.to_string(),
+                        tool_name: tool_name.to_string(),
+                        duration_ms,
+                        error: EventError {
+                            code: "skill_tool_failed".to_string(),
+                            message: error,
+                        },
+                    });
+                }
+                Err(err)
+            }
+        }
+    }
+
     fn is_initialized(&self) -> bool {
         matches!(self.state, CoreState::Initialized | CoreState::Draining)
     }
@@ -582,6 +932,373 @@ impl AgentCore {
 
     fn error_response(&self, id: JsonRpcId, error: JsonRpcError) -> String {
         serialize_response(JsonRpcResponse::error(id, error))
+    }
+}
+
+fn is_subagent_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "developer__subagent_spawn"
+            | "developer__subagent_status"
+            | "developer__subagent_message"
+            | "developer__subagent_wait"
+            | "developer__subagent_cancel"
+    )
+}
+
+fn is_skill_tool(tool_name: &str) -> bool {
+    tool_name == "developer__skill_load"
+}
+
+async fn execute_skill_tool(
+    context: &RunContext,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<String> {
+    let name = required_string_arg(arguments, "name")?;
+    let file = string_arg(arguments, "file");
+    let loaded = context.skills.load_skill(name, file.as_deref())?;
+    Ok(serde_json::to_string_pretty(&loaded)?)
+}
+
+async fn execute_subagent_tool(
+    params: &ReplyParams,
+    default_provider: &str,
+    context: &RunContext,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<String> {
+    match tool_name {
+        "developer__subagent_spawn" => {
+            spawn_subagent(params, default_provider, context, arguments).await
+        }
+        "developer__subagent_status" => {
+            let id = string_arg(arguments, "subagent_id");
+            let include_messages = bool_arg(arguments, "include_messages", false);
+            let include_result = bool_arg(arguments, "include_result", false);
+            let value =
+                context
+                    .subagents
+                    .snapshot(id.as_deref(), include_messages, include_result)?;
+            Ok(serde_json::to_string_pretty(&value)?)
+        }
+        "developer__subagent_message" => {
+            let message = required_string_arg(arguments, "message")?;
+            let target = string_arg(arguments, "subagent_id").or_else(|| context.agent_id.clone());
+            let target = target.ok_or_else(|| {
+                anyhow::anyhow!("subagent_id is required when parent sends a sub-agent message")
+            })?;
+            let direction = if context.agent_id.as_deref() == Some(target.as_str()) {
+                SubAgentMessageDirection::ChildToParent
+            } else {
+                SubAgentMessageDirection::ParentToChild
+            };
+            let snapshot =
+                context
+                    .subagents
+                    .add_message(&target, direction, message.to_string())?;
+            Ok(serde_json::to_string_pretty(&snapshot)?)
+        }
+        "developer__subagent_wait" => {
+            let id = required_string_arg(arguments, "subagent_id")?;
+            let timeout_ms = u64_arg(arguments, "timeout_ms", 60_000);
+            let include_messages = bool_arg(arguments, "include_messages", true);
+            let snapshot = context
+                .subagents
+                .wait_for_terminal(id, timeout_ms, include_messages, true)
+                .await?;
+            Ok(serde_json::to_string_pretty(&snapshot)?)
+        }
+        "developer__subagent_cancel" => {
+            let id = string_arg(arguments, "subagent_id");
+            let snapshot = context.subagents.cancel(id.as_deref())?;
+            Ok(serde_json::to_string_pretty(&snapshot)?)
+        }
+        _ => anyhow::bail!("unknown subagent tool: {tool_name}"),
+    }
+}
+
+async fn spawn_subagent(
+    params: &ReplyParams,
+    default_provider: &str,
+    context: &RunContext,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<String> {
+    let task = required_string_arg(arguments, "task")?;
+    let mode = SubAgentMode::from_value(string_arg(arguments, "mode").as_deref());
+    let name = string_arg(arguments, "name");
+    let child_run_id = format!("{}:subagent:{}", context.run_id, uuid::Uuid::new_v4());
+    let handle =
+        context
+            .subagents
+            .create(&context.run_id, &child_run_id, name.as_deref(), task, mode)?;
+
+    let child_params = build_child_reply_params(params, arguments, &handle.id, &child_run_id, task);
+    let child_context = RunContext {
+        run_id: child_run_id,
+        agent_id: Some(handle.id.clone()),
+        emit_tool_events: params.options.emit_tool_events,
+        cancelled: handle.cancelled.clone(),
+        seq: Arc::new(AtomicU64::new(1)),
+        output: None,
+        collected: Some(Arc::new(Mutex::new(Vec::new()))),
+        permissions: context.permissions.clone(),
+        hooks: context.hooks.clone(),
+        subagents: context.subagents.clone(),
+        skills: context.skills.clone(),
+    };
+
+    let pool = context.subagents.clone();
+    let parent_output = context.output.clone();
+    let default_provider = default_provider.to_string();
+    let subagent_id = handle.id.clone();
+
+    match mode {
+        SubAgentMode::Sync => {
+            run_subagent_once(
+                pool.clone(),
+                parent_output,
+                subagent_id.clone(),
+                child_params,
+                default_provider,
+                child_context,
+            )
+            .await;
+            let snapshot = pool
+                .wait_for_terminal(
+                    &subagent_id,
+                    u64_arg(arguments, "timeout_ms", 120_000),
+                    true,
+                    true,
+                )
+                .await?;
+            Ok(serde_json::to_string_pretty(&snapshot)?)
+        }
+        SubAgentMode::Async => {
+            let worker_pool = pool.clone();
+            let worker_subagent_id = subagent_id.clone();
+            std::thread::Builder::new()
+                .name(format!("night24-subagent-{subagent_id}"))
+                .spawn(move || {
+                    let runtime = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => runtime,
+                        Err(err) => {
+                            worker_pool.mark_failed(
+                                &worker_subagent_id,
+                                format!("failed to start subagent runtime: {err}"),
+                                Vec::new(),
+                            );
+                            return;
+                        }
+                    };
+                    runtime.block_on(run_subagent_once(
+                        worker_pool,
+                        parent_output,
+                        worker_subagent_id,
+                        child_params,
+                        default_provider,
+                        child_context,
+                    ));
+                })
+                .map_err(|err| anyhow::anyhow!("failed to spawn subagent thread: {err}"))?;
+            let value = serde_json::json!({
+                "accepted": true,
+                "subagent_id": subagent_id,
+                "status": "running",
+                "pool": pool.snapshot(None, false, false)?,
+            });
+            Ok(serde_json::to_string_pretty(&value)?)
+        }
+    }
+}
+
+async fn run_subagent_once(
+    pool: Arc<SubAgentPool>,
+    parent_output: Option<UnboundedSender<String>>,
+    subagent_id: String,
+    child_params: ReplyParams,
+    default_provider: String,
+    child_context: RunContext,
+) {
+    pool.mark_running(&subagent_id);
+    let events = Box::pin(reply_events(child_params, default_provider, child_context)).await;
+    if let Some(output) = parent_output {
+        for event in &events {
+            let _ = output.send(event.clone());
+        }
+    }
+
+    match subagent_result_from_events(&events) {
+        Ok(result) => pool.mark_completed(&subagent_id, result, events),
+        Err(error) => pool.mark_failed(&subagent_id, error, events),
+    }
+}
+
+fn build_child_reply_params(
+    params: &ReplyParams,
+    arguments: &serde_json::Value,
+    subagent_id: &str,
+    child_run_id: &str,
+    task: &str,
+) -> ReplyParams {
+    let mut child = params.clone();
+    child.run_id = child_run_id.to_string();
+    child.session.id = subagent_id.to_string();
+    child.session.name = string_arg(arguments, "name").unwrap_or_else(|| "subagent".to_string());
+    child.session.conversation = Vec::new();
+    child.input.text = format!(
+        "You are a Night24 sub-agent. Complete the delegated task independently and return a concise result.\n\nSub-agent id: {subagent_id}\nTask:\n{task}"
+    );
+    if let Some(max_turns) = usize_arg(arguments, "max_turns") {
+        child.limits.max_turns = max_turns.max(1);
+    }
+    if let Some(timeout_ms) = optional_u64_arg(arguments, "timeout_ms") {
+        child.limits.total_timeout_ms = timeout_ms.max(1);
+    }
+    if let Some(provider) = string_arg(arguments, "provider") {
+        child.provider.provider = provider;
+    }
+    if let Some(model) = string_arg(arguments, "model") {
+        child.provider.model = model;
+    }
+    child
+}
+
+fn subagent_result_from_events(events: &[String]) -> Result<String, String> {
+    for event in events.iter().rev() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
+            continue;
+        };
+        let Some(params) = value.get("params") else {
+            continue;
+        };
+        match params.get("type").and_then(|value| value.as_str()) {
+            Some("finish") => {
+                let status = params["payload"]["status"].as_str().unwrap_or("completed");
+                if status == "cancelled" || status == "failed" {
+                    return Err(status.to_string());
+                }
+                let text = params["payload"]["messages"]
+                    .as_array()
+                    .map(|messages| {
+                        messages
+                            .iter()
+                            .filter_map(message_text_from_value)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or_else(|| status.to_string());
+                return Ok(text);
+            }
+            Some("error") => {
+                return Err(params["payload"]["message"]
+                    .as_str()
+                    .unwrap_or("subagent failed")
+                    .to_string());
+            }
+            _ => {}
+        }
+    }
+    Err("subagent produced no terminal event".to_string())
+}
+
+fn message_text_from_value(message: &serde_json::Value) -> Option<String> {
+    let role = message.get("role").and_then(|value| value.as_str())?;
+    if role != "assistant" && role != "tool" {
+        return None;
+    }
+    let text = message
+        .get("content")?
+        .as_array()?
+        .iter()
+        .filter_map(|block| {
+            block
+                .get("text")
+                .and_then(|value| value.as_str())
+                .or_else(|| block.get("content").and_then(|value| value.as_str()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn summarize_subagent_tool(tool_name: &str, arguments: &serde_json::Value) -> String {
+    match tool_name {
+        "developer__subagent_spawn" => arguments
+            .get("task")
+            .and_then(|value| value.as_str())
+            .map(|task| format!("Spawn sub-agent: {}", preview_text(task)))
+            .unwrap_or_else(|| "Spawn sub-agent".to_string()),
+        "developer__subagent_status" => "Inspect sub-agent pool".to_string(),
+        "developer__subagent_message" => "Send sub-agent message".to_string(),
+        "developer__subagent_wait" => "Wait for sub-agent".to_string(),
+        "developer__subagent_cancel" => "Cancel sub-agent".to_string(),
+        _ => format!("Call {tool_name}"),
+    }
+}
+
+fn summarize_skill_tool(arguments: &serde_json::Value) -> String {
+    arguments
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(|name| format!("Load skill: {name}"))
+        .unwrap_or_else(|| "Load skill".to_string())
+}
+
+fn required_string_arg<'a>(arguments: &'a serde_json::Value, key: &str) -> anyhow::Result<&'a str> {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing `{key}`"))
+}
+
+fn string_arg(arguments: &serde_json::Value, key: &str) -> Option<String> {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn bool_arg(arguments: &serde_json::Value, key: &str, default: bool) -> bool {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+fn optional_u64_arg(arguments: &serde_json::Value, key: &str) -> Option<u64> {
+    arguments.get(key).and_then(|value| value.as_u64())
+}
+
+fn u64_arg(arguments: &serde_json::Value, key: &str, default: u64) -> u64 {
+    optional_u64_arg(arguments, key).unwrap_or(default)
+}
+
+fn usize_arg(arguments: &serde_json::Value, key: &str) -> Option<usize> {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_u64())
+        .and_then(|value| usize::try_from(value).ok())
+}
+
+fn preview_text(text: &str) -> String {
+    const MAX_PREVIEW: usize = 500;
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= MAX_PREVIEW {
+        compact
+    } else {
+        compact.chars().take(MAX_PREVIEW).collect::<String>() + "..."
     }
 }
 

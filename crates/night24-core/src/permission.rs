@@ -91,6 +91,27 @@ impl PermissionManager {
             "developer__database_query".to_string(),
             PermissionLevel::Allow,
         );
+        policies.insert(
+            "developer__subagent_spawn".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__subagent_status".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__subagent_message".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__subagent_wait".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__subagent_cancel".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert("developer__skill_load".to_string(), PermissionLevel::Allow);
         Self {
             default_level: PermissionLevel::Confirm,
             policies: RwLock::new(policies),

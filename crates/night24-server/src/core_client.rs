@@ -12,6 +12,7 @@ use tracing::warn;
 use night24_protocol::{
     AgentToolsResult, CancelParams, Capability, InitializeEnvironment, InitializeParams,
     JsonRpcRequest, PeerInfo, PermissionDecision, PermissionResolution, ReplyAccepted, ReplyParams,
+    SkillRegistryParams, SkillRegistryResult, SubAgentPoolParams, SubAgentPoolResult,
     PROTOCOL_VERSION,
 };
 
@@ -239,6 +240,26 @@ impl AgentCoreClient {
             Duration::from_secs(5),
         )
         .await
+    }
+
+    pub(crate) async fn subagents(
+        &self,
+        params: SubAgentPoolParams,
+    ) -> anyhow::Result<SubAgentPoolResult> {
+        let result = self
+            .call("agent.subagents", params, Duration::from_secs(5))
+            .await?;
+        serde_json::from_value(result).map_err(Into::into)
+    }
+
+    pub(crate) async fn skills(
+        &self,
+        params: SkillRegistryParams,
+    ) -> anyhow::Result<SkillRegistryResult> {
+        let result = self
+            .call("agent.skills", params, Duration::from_secs(5))
+            .await?;
+        serde_json::from_value(result).map_err(Into::into)
     }
 
     pub(crate) async fn resolve_permission(

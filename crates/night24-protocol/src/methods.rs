@@ -99,6 +99,32 @@ pub struct AgentToolsResult {
     pub tools: Vec<Tool>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SubAgentPoolParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_id: Option<String>,
+    #[serde(default)]
+    pub include_messages: bool,
+    #[serde(default)]
+    pub include_result: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentPoolResult {
+    pub pool: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SkillRegistryParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillRegistryResult {
+    pub registry: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplySession {
     pub id: String,

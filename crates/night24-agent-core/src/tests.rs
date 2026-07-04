@@ -41,6 +41,12 @@ async fn initialize_then_tools_returns_builtin_tools() {
     let value: serde_json::Value = serde_json::from_str(&output[0]).unwrap();
     let tools = value["result"]["tools"].as_array().unwrap();
     assert!(tools.iter().any(|tool| tool["name"] == "developer__echo"));
+    assert!(tools
+        .iter()
+        .any(|tool| tool["name"] == "developer__subagent_spawn"));
+    assert!(tools
+        .iter()
+        .any(|tool| tool["name"] == "developer__skill_load"));
 }
 
 #[tokio::test]
@@ -89,6 +95,203 @@ async fn reply_returns_accepted_message_and_finish() {
     let finish: serde_json::Value = serde_json::from_str(output.last().unwrap()).unwrap();
     assert_eq!(finish["params"]["type"], "finish");
     assert_eq!(finish["params"]["payload"]["status"], "completed");
+}
+
+#[tokio::test]
+async fn agent_skills_returns_workspace_registry() {
+    let temp_dir = test_temp_dir("skills-registry").await;
+    let skill_dir = temp_dir.join(".night24").join("skills").join("review");
+    tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+    tokio::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: review\ndescription: Review changed code.\n---\n# Review\nFind bugs.\n",
+    )
+    .await
+    .unwrap();
+
+    let mut core = initialized_core().await;
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-skills",
+        "method": "agent.skills",
+        "params": {
+            "working_dir": temp_dir
+        }
+    });
+    let output = core.handle_line(&request.to_string()).await;
+    let value: serde_json::Value = serde_json::from_str(&output[0]).unwrap();
+    assert_eq!(value["result"]["registry"]["skills"][0]["name"], "review");
+    assert_eq!(
+        value["result"]["registry"]["skills"][0]["description"],
+        "Review changed code."
+    );
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn skill_load_tool_loads_workspace_skill_body() {
+    let temp_dir = test_temp_dir("skill-load").await;
+    let skill_dir = temp_dir.join(".night24").join("skills").join("review");
+    tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+    tokio::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: review\ndescription: Review changed code.\n---\n# Review\nFind bugs.\n",
+    )
+    .await
+    .unwrap();
+
+    let mut core = initialized_core().await;
+    let working_dir = temp_dir.to_string_lossy().to_string();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-skill-load",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": working_dir,
+                "conversation": []
+            },
+            "input": { "text": "tool:skill_load:review" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+    let output = core.handle_line(&request.to_string()).await;
+    let joined = output.join("\n");
+    assert!(joined.contains("developer__skill_load"));
+    assert!(joined.contains("# Review"));
+    assert!(joined.contains("Find bugs."));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn subagent_sync_spawn_returns_child_result() {
+    let mut core = initialized_core().await;
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-subagent-sync",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_sync: inspect docs" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let joined = output.join("\n");
+
+    assert!(joined.contains("developer__subagent_spawn"));
+    assert!(joined.contains("subagent-"));
+    assert!(
+        joined.contains("\"status\":\"completed\"") || joined.contains("\"status\": \"completed\"")
+    );
+    assert!(joined.contains("inspect docs"));
+}
+
+#[tokio::test]
+async fn subagent_async_spawn_is_visible_in_pool_status() {
+    let mut core = initialized_core().await;
+    let spawn = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-subagent-async",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_async: summarize files" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+    let spawn_output = core.handle_line(&spawn.to_string()).await;
+    let spawn_text = spawn_output.join("\n");
+    assert!(spawn_text.contains("subagent-"));
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let status = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-status",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-subagent-status",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_status:" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let status_output = core.handle_line(&status.to_string()).await;
+    let status_text = status_output.join("\n");
+    assert!(status_text.contains("summarize files"));
+
+    let pool = core.subagents.snapshot(None, true, true).unwrap();
+    assert_eq!(pool["total"], 1);
+    assert_eq!(pool["subagents"][0]["task"], "summarize files");
 }
 
 #[tokio::test]

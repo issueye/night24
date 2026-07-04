@@ -300,5 +300,143 @@ pub fn builtin_tools() -> Vec<Tool> {
                 "required": ["query"]
             }),
         },
+        Tool {
+            name: "developer__subagent_spawn".to_string(),
+            description: "Create a sub-agent to handle a delegated task. Use sync mode to wait for the result immediately, or async mode to run it in the background and manage it through the sub-agent pool.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "The delegated task for the sub-agent. Include all context needed to complete it."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["async", "sync"],
+                        "description": "Execution mode. async returns immediately with a subagent_id. sync waits for completion.",
+                        "default": "async"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional human-readable sub-agent name."
+                    },
+                    "max_turns": {
+                        "type": "integer",
+                        "description": "Optional max turns for the child agent."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "description": "Optional total timeout for the child agent."
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider override. Defaults to the parent provider."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional model override. Defaults to the parent model."
+                    }
+                },
+                "required": ["task"]
+            }),
+        },
+        Tool {
+            name: "developer__subagent_status".to_string(),
+            description: "Inspect the sub-agent pool or a specific sub-agent, including status, messages, and optional result.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "subagent_id": {
+                        "type": "string",
+                        "description": "Optional sub-agent id. Omit to list the whole pool."
+                    },
+                    "include_messages": {
+                        "type": "boolean",
+                        "description": "Whether to include mailbox messages.",
+                        "default": false
+                    },
+                    "include_result": {
+                        "type": "boolean",
+                        "description": "Whether to include full result text.",
+                        "default": false
+                    }
+                },
+                "required": []
+            }),
+        },
+        Tool {
+            name: "developer__subagent_message".to_string(),
+            description: "Send a mailbox message between the parent agent and a sub-agent. Parent calls should specify subagent_id; a sub-agent may omit it to message its parent.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "subagent_id": {
+                        "type": "string",
+                        "description": "Target sub-agent id. Required when the parent sends to a child."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Message text."
+                    }
+                },
+                "required": ["message"]
+            }),
+        },
+        Tool {
+            name: "developer__subagent_wait".to_string(),
+            description: "Wait for an async sub-agent to reach a terminal status and return its result/status.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "subagent_id": {
+                        "type": "string",
+                        "description": "Sub-agent id to wait for."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "description": "Maximum wait time.",
+                        "default": 60000
+                    },
+                    "include_messages": {
+                        "type": "boolean",
+                        "description": "Whether to include mailbox messages.",
+                        "default": true
+                    }
+                },
+                "required": ["subagent_id"]
+            }),
+        },
+        Tool {
+            name: "developer__subagent_cancel".to_string(),
+            description: "Cancel a running sub-agent, or cancel all running sub-agents when subagent_id is omitted.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "subagent_id": {
+                        "type": "string",
+                        "description": "Optional sub-agent id. Omit to cancel all running sub-agents in the pool."
+                    }
+                },
+                "required": []
+            }),
+        },
+        Tool {
+            name: "developer__skill_load".to_string(),
+            description: "Load full instructions for an available skill, or read a text file inside that skill bundle. Use this before following an implicitly selected skill.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Skill name, such as code-review."
+                    },
+                    "file": {
+                        "type": "string",
+                        "description": "Optional relative path inside the skill bundle, such as references/checklist.md."
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
     ]
 }
