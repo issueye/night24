@@ -21,6 +21,7 @@ use utoipa_swagger_ui::SwaggerUi;
 mod api_types;
 mod auth;
 mod core_client;
+mod hooks;
 mod reply;
 mod sessions;
 mod state;
@@ -33,6 +34,7 @@ use api_types::{
 };
 use auth::require_api_key;
 use core_client::{AgentCoreClient, CoreRuntimeStatus};
+use hooks::{get_workspace_hooks, put_workspace_hooks};
 use reply::reply_core;
 use sessions::{
     create_session, delete_session, fork_session, get_session_history, list_sessions,
@@ -110,9 +112,20 @@ fn sqlite_file_url(path: PathBuf) -> String {
         sessions::rename_session,
         sessions::fork_session,
         workspace::workspace_status,
-        workspace::workspace_diff
+        workspace::workspace_diff,
+        hooks::get_workspace_hooks,
+        hooks::put_workspace_hooks
     ),
-    components(schemas(ReplyRequest, CreateSessionRequest, RenameSessionRequest, ForkSessionRequest, SessionSummary)),
+    components(schemas(
+        ReplyRequest,
+        CreateSessionRequest,
+        RenameSessionRequest,
+        ForkSessionRequest,
+        SessionSummary,
+        hooks::HookConfig,
+        hooks::HookDefinition,
+        hooks::HookConfigResponse
+    )),
     tags(
         (name = "night24", description = "Night24 AI Agent API")
     )
@@ -179,6 +192,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/workspace/file", get(workspace_file))
         .route("/workspace/status", get(workspace_status))
         .route("/workspace/diff", get(workspace_diff))
+        .route(
+            "/workspace/hooks",
+            get(get_workspace_hooks).put(put_workspace_hooks),
+        )
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{id}", delete(delete_session))
         .route("/sessions/{id}/history", get(get_session_history))

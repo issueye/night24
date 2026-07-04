@@ -149,16 +149,8 @@ pub(super) struct HookOutput {
 
 impl HookRunner {
     pub(super) fn from_environment(working_dir: &Path) -> Self {
-        let Some(path) = std::env::var_os("NIGHT24_HOOKS_FILE")
-            .map(PathBuf::from)
-            .filter(|path| !path.as_os_str().is_empty())
-        else {
+        let Some(path) = hook_config_path(working_dir) else {
             return Self::default();
-        };
-        let path = if path.is_absolute() {
-            path
-        } else {
-            working_dir.join(path)
         };
 
         match Self::from_path(&path) {
@@ -200,6 +192,26 @@ impl HookRunner {
             outputs.extend(run_gts_hook(hook, context, &self.gts_worker).await);
         }
         outputs
+    }
+}
+
+fn hook_config_path(working_dir: &Path) -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("NIGHT24_HOOKS_FILE")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        return Some(if path.is_absolute() {
+            path
+        } else {
+            working_dir.join(path)
+        });
+    }
+
+    let workspace_config = working_dir.join(".night24").join("hooks.json");
+    if workspace_config.is_file() {
+        Some(workspace_config)
+    } else {
+        None
     }
 }
 

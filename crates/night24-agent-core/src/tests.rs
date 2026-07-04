@@ -439,6 +439,33 @@ fn hook_config_accepts_gts_script_hooks() {
     assert!(!runner.is_empty());
 }
 
+#[test]
+fn hook_runner_loads_workspace_default_config() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("night24-hooks-default-{}", uuid::Uuid::new_v4()));
+    let config_dir = temp_dir.join(".night24");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("hooks.json"),
+        r#"{
+            "hooks": [
+                {
+                    "event": "run_started",
+                    "name": "workspace-default",
+                    "engine": "gts",
+                    "inline_script": "function execute(args) { return { outputs: [] }; }"
+                }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let runner = HookRunner::from_environment(&temp_dir);
+    assert!(!runner.is_empty());
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
 #[tokio::test]
 async fn gts_hook_calls_execute_with_args_and_structured_outputs() {
     let temp_dir = test_temp_dir("gts-execute-hook").await;

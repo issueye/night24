@@ -652,6 +652,8 @@ export default function App() {
         networkProxy={networkProxy}
         theme={theme}
         fontSize={fontSize}
+        workspace={workspace}
+        apiJson={apiJson}
         onApiBaseChange={setApiBase}
         onApiKeyChange={setApiKey}
         onProviderProfileChange={selectProviderProfile}

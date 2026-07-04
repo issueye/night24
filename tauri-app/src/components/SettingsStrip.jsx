@@ -1,7 +1,8 @@
-import { Palette, Server, X } from 'lucide-react';
+import { Palette, Server, Workflow, X } from 'lucide-react';
 import { useState } from 'react';
 import { classNames } from '../utils/format.js';
 import { BaseSettings } from './settings/BaseSettings.jsx';
+import { HookSettings } from './settings/HookSettings.jsx';
 import { ProviderSettings } from './settings/ProviderSettings.jsx';
 
 export function SettingsStrip({
@@ -18,6 +19,8 @@ export function SettingsStrip({
   networkProxy,
   theme,
   fontSize,
+  workspace,
+  apiJson,
   onApiBaseChange,
   onApiKeyChange,
   onProviderProfileChange,
@@ -58,6 +61,10 @@ export function SettingsStrip({
               <Palette size={15} />
               <span>基本设置</span>
             </button>
+            <button className={classNames(tab === 'hooks' && 'active')} onClick={() => setTab('hooks')} type="button">
+              <Workflow size={15} />
+              <span>钩子</span>
+            </button>
           </nav>
 
           <div className="settings-content">
@@ -94,6 +101,13 @@ export function SettingsStrip({
                 onApiKeyChange={onApiKeyChange}
                 onThemeChange={onThemeChange}
                 onFontSizeChange={onFontSizeChange}
+              />
+            )}
+
+            {tab === 'hooks' && (
+              <HookSettings
+                apiJson={apiJson}
+                workspace={workspace}
               />
             )}
           </div>

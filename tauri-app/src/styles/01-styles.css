@@ -357,9 +357,9 @@ button {
 }
 
 .settings-form input,
-.settings-form select {
+.settings-form select,
+.settings-form textarea {
   min-width: 0;
-  height: 34px;
   padding: 0 10px;
   color: var(--text);
   background: var(--surface);
@@ -368,8 +368,23 @@ button {
   outline: none;
 }
 
+.settings-form input,
+.settings-form select {
+  height: 34px;
+}
+
+.settings-form textarea {
+  min-height: 168px;
+  padding: 10px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .settings-form input:focus,
-.settings-form select:focus {
+.settings-form select:focus,
+.settings-form textarea:focus {
   border-color: #9bb8ff;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
@@ -445,4 +460,132 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.provider-profile-row.muted {
+  opacity: 0.58;
+}
+
+.hook-manager {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hook-list-actions,
+.hook-toolbar > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hook-list-empty {
+  padding: 10px 8px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.hook-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hook-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.hook-toolbar > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--subtle);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-action {
+  height: 28px;
+  padding: 0 9px;
+}
+
+.hook-status {
+  min-height: 28px;
+  padding: 7px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hook-status.error {
+  color: var(--red);
+  background: #fff7f7;
+  border-color: #fecaca;
+}
+
+.hook-status.success {
+  color: var(--green);
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.hook-form {
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-right: 2px;
+}
+
+.hook-code-field {
+  grid-column: 1 / -1;
+}
+
+.hook-toggle input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.hook-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--muted);
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+.hook-empty.inline {
+  flex: 1;
+  min-height: 180px;
+}
+
+.hook-empty strong,
+.hook-empty span {
+  display: block;
+}
+
+.hook-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.hook-empty span {
+  max-width: 260px;
+  color: var(--subtle);
+  font-size: 12px;
 }
