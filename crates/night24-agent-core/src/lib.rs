@@ -40,8 +40,9 @@ use night24_protocol::{
     AcceptedResult, AgentEvent, AgentEventKind, AgentToolsParams, AgentToolsResult, CancelParams,
     EventError, FinishStatus, InitializeParams, InitializeResult, JsonRpcError, JsonRpcId,
     JsonRpcRequest, JsonRpcResponse, PeerInfo, PermissionResolution, PingParams, PingResult,
-    ReplyAccepted, ReplyParams, ShutdownParams, SkillRegistryParams, SkillRegistryResult,
-    SubAgentPoolParams, SubAgentPoolResult, PROTOCOL_VERSION,
+    ReplyAccepted, ReplyParams, ShutdownParams, SkillLoadParams, SkillLoadResult,
+    SkillRegistryParams, SkillRegistryResult, SubAgentPoolParams, SubAgentPoolResult,
+    PROTOCOL_VERSION,
 };
 use subagents::{SubAgentMessageDirection, SubAgentMode, SubAgentPool};
 use tokio::sync::mpsc::UnboundedSender;
@@ -140,6 +141,12 @@ impl AgentCore {
                     return vec![self.error_response(id, JsonRpcError::core_not_initialized())];
                 }
                 self.agent_skills(id, request.params)
+            }
+            "agent.skill.load" => {
+                if !self.is_initialized() {
+                    return vec![self.error_response(id, JsonRpcError::core_not_initialized())];
+                }
+                self.agent_skill_load(id, request.params)
             }
             "permission.resolve" => {
                 if !self.is_initialized() {
@@ -356,6 +363,30 @@ impl AgentCore {
             }
         };
         vec![self.success_response(id, SkillRegistryResult { registry })]
+    }
+
+    fn agent_skill_load(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {
+        let params = match decode_params::<SkillLoadParams>(params) {
+            Ok(params) => params,
+            Err(err) => return vec![self.error_response(id, err)],
+        };
+        let working_dir = params
+            .working_dir
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        let registry = SkillRegistry::load(&working_dir);
+        let skill = match registry.load_skill(&params.name, params.file.as_deref()) {
+            Ok(skill) => skill,
+            Err(err) => {
+                return vec![self.error_response(id, JsonRpcError::invalid_params(err.to_string()))]
+            }
+        };
+        let skill = match serde_json::to_value(skill) {
+            Ok(skill) => skill,
+            Err(err) => {
+                return vec![self.error_response(id, JsonRpcError::internal_error(err.to_string()))]
+            }
+        };
+        vec![self.success_response(id, SkillLoadResult { skill })]
     }
 
     fn permission_resolve(&self, id: JsonRpcId, params: Option<serde_json::Value>) -> Vec<String> {

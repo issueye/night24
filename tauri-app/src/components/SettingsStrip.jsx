@@ -1,9 +1,10 @@
-import { Palette, Server, Workflow, X } from 'lucide-react';
+import { Palette, Server, Sparkles, Workflow, X } from 'lucide-react';
 import { useState } from 'react';
 import { classNames } from '../utils/format.js';
 import { BaseSettings } from './settings/BaseSettings.jsx';
 import { HookSettings } from './settings/HookSettings.jsx';
 import { ProviderSettings } from './settings/ProviderSettings.jsx';
+import { SkillSettings } from './settings/SkillSettings.jsx';
 
 export function SettingsStrip({
   open,
@@ -65,6 +66,10 @@ export function SettingsStrip({
               <Workflow size={15} />
               <span>钩子</span>
             </button>
+            <button className={classNames(tab === 'skills' && 'active')} onClick={() => setTab('skills')} type="button">
+              <Sparkles size={15} />
+              <span>技能</span>
+            </button>
           </nav>
 
           <div className="settings-content">
@@ -106,6 +111,13 @@ export function SettingsStrip({
 
             {tab === 'hooks' && (
               <HookSettings
+                apiJson={apiJson}
+                workspace={workspace}
+              />
+            )}
+
+            {tab === 'skills' && (
+              <SkillSettings
                 apiJson={apiJson}
                 workspace={workspace}
               />

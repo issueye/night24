@@ -60,6 +60,12 @@ pub(crate) struct SubAgentPoolQuery {
     pub(crate) include_result: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+pub(crate) struct SkillLoadQuery {
+    #[serde(default)]
+    pub(crate) file: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub(crate) struct PermissionDecisionRequest {
     #[schema(example = "run-123")]

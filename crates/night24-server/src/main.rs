@@ -30,7 +30,7 @@ mod workspace;
 use api_types::{
     AcceptedResponse, CancelAgentRequest, CoreStatusResponse, CreateSessionRequest,
     ForkSessionRequest, PermissionDecisionRequest, ReadyResponse, RenameSessionRequest,
-    ReplyRequest, SessionSummary, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
+    ReplyRequest, SessionSummary, SkillLoadQuery, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
 };
 use auth::require_api_key;
 use core_client::{AgentCoreClient, CoreRuntimeStatus};
@@ -116,7 +116,8 @@ fn sqlite_file_url(path: PathBuf) -> String {
         hooks::get_workspace_hooks,
         hooks::put_workspace_hooks,
         get_agent_subagents,
-        get_workspace_skills
+        get_workspace_skills,
+        get_workspace_skill
     ),
     components(schemas(
         ReplyRequest,
@@ -196,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/workspace/status", get(workspace_status))
         .route("/workspace/diff", get(workspace_diff))
         .route("/workspace/skills", get(get_workspace_skills))
+        .route("/workspace/skills/{name}", get(get_workspace_skill))
         .route(
             "/workspace/hooks",
             get(get_workspace_hooks).put(put_workspace_hooks),
@@ -514,6 +516,45 @@ async fn get_workspace_skills(
     Ok(Json(serde_json::json!({
         "workspace": workspace,
         "registry": result.registry
+    })))
+}
+
+#[utoipa::path(
+    get,
+    path = "/workspace/skills/{name}",
+    tag = "night24",
+    params(
+        ("name" = String, Path, description = "Skill name"),
+        SkillLoadQuery
+    ),
+    responses(
+        (status = 200, description = "Loaded workspace skill details", body = serde_json::Value),
+        (status = 409, description = "No workspace is open")
+    )
+)]
+async fn get_workspace_skill(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(query): Query<SkillLoadQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let workspace = workspace::current_workspace_info(&state).await?;
+    let Some(core_client) = &state.core_client else {
+        return Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no active core client",
+        ));
+    };
+    let result = core_client
+        .load_skill(night24_protocol::SkillLoadParams {
+            working_dir: Some(PathBuf::from(&workspace.root_path)),
+            name,
+            file: query.file,
+        })
+        .await
+        .map_err(|err| json_error(StatusCode::BAD_GATEWAY, err.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "workspace": workspace,
+        "skill": result.skill
     })))
 }
 

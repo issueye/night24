@@ -125,6 +125,20 @@ pub struct SkillRegistryResult {
     pub registry: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SkillLoadParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<PathBuf>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillLoadResult {
+    pub skill: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplySession {
     pub id: String,

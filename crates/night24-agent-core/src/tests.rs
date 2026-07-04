@@ -130,6 +130,36 @@ async fn agent_skills_returns_workspace_registry() {
 }
 
 #[tokio::test]
+async fn agent_skill_load_returns_workspace_skill_body() {
+    let temp_dir = test_temp_dir("skill-load-rpc").await;
+    let skill_dir = temp_dir.join(".night24").join("skills").join("review");
+    tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+    tokio::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: review\ndescription: Review changed code.\n---\n# Review\nFind bugs.\n",
+    )
+    .await
+    .unwrap();
+
+    let mut core = initialized_core().await;
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-skill-load",
+        "method": "agent.skill.load",
+        "params": {
+            "working_dir": temp_dir,
+            "name": "review"
+        }
+    });
+    let output = core.handle_line(&request.to_string()).await;
+    let value: serde_json::Value = serde_json::from_str(&output[0]).unwrap();
+    assert_eq!(value["result"]["skill"]["skill"]["name"], "review");
+    assert_eq!(value["result"]["skill"]["body"], "# Review\nFind bugs.\n");
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn skill_load_tool_loads_workspace_skill_body() {
     let temp_dir = test_temp_dir("skill-load").await;
     let skill_dir = temp_dir.join(".night24").join("skills").join("review");

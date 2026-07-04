@@ -12,8 +12,8 @@ use tracing::warn;
 use night24_protocol::{
     AgentToolsResult, CancelParams, Capability, InitializeEnvironment, InitializeParams,
     JsonRpcRequest, PeerInfo, PermissionDecision, PermissionResolution, ReplyAccepted, ReplyParams,
-    SkillRegistryParams, SkillRegistryResult, SubAgentPoolParams, SubAgentPoolResult,
-    PROTOCOL_VERSION,
+    SkillLoadParams, SkillLoadResult, SkillRegistryParams, SkillRegistryResult, SubAgentPoolParams,
+    SubAgentPoolResult, PROTOCOL_VERSION,
 };
 
 #[derive(Debug, Clone)]
@@ -258,6 +258,16 @@ impl AgentCoreClient {
     ) -> anyhow::Result<SkillRegistryResult> {
         let result = self
             .call("agent.skills", params, Duration::from_secs(5))
+            .await?;
+        serde_json::from_value(result).map_err(Into::into)
+    }
+
+    pub(crate) async fn load_skill(
+        &self,
+        params: SkillLoadParams,
+    ) -> anyhow::Result<SkillLoadResult> {
+        let result = self
+            .call("agent.skill.load", params, Duration::from_secs(5))
             .await?;
         serde_json::from_value(result).map_err(Into::into)
     }

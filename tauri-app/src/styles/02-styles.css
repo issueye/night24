@@ -47,14 +47,26 @@
     grid-template-columns: 132px minmax(0, 1fr);
   }
 
-  .provider-manager {
+  .provider-manager,
+  .hook-manager,
+  .skill-manager {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 150px minmax(0, 1fr);
   }
 
   .provider-form,
-  .settings-form {
+  .settings-form,
+  .skill-meta-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skill-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .skill-inspector-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
