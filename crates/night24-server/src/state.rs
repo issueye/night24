@@ -12,5 +12,5 @@ pub(crate) struct AppState {
     pub(crate) provider_registry: Arc<ProviderRegistry>,
     pub(crate) permission_manager: Arc<night24_core::permission::PermissionManager>,
     pub(crate) workspace_state: Arc<tokio::sync::RwLock<WorkspaceState>>,
-    pub(crate) core_client: Option<Arc<AgentCoreClient>>,
+    pub(crate) core_client: Arc<tokio::sync::RwLock<Option<Arc<AgentCoreClient>>>>,
 }

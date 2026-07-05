@@ -33,8 +33,8 @@ pub(crate) async fn reply_core(
     State(state): State<AppState>,
     Json(req): Json<ReplyRequest>,
 ) -> Response {
-    let core_client = match &state.core_client {
-        Some(core_client) => core_client.clone(),
+    let core_client = match state.core_client.read().await.clone() {
+        Some(core_client) => core_client,
         None => {
             return sse_error_response(None, "core_unavailable", "no active core client", true);
         }

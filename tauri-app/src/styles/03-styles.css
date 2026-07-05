@@ -383,6 +383,58 @@
   display: none;
 }
 
+.composer-threshold {
+  display: inline-grid;
+  flex: 0 0 auto;
+  min-width: 38px;
+  height: 26px;
+  place-items: center;
+  margin-left: auto;
+  color: var(--green);
+  background: var(--green-soft);
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.composer-threshold.warning {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: #fde68a;
+}
+
+.composer-threshold.danger {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: #fecaca;
+}
+
+.composer-compact-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  color: var(--muted);
+  background: #f7f7f5;
+  border: 1px solid #e8e6e1;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.composer-compact-button:hover {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-color: #c9d8ff;
+}
+
+.composer-compact-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .composer-model select:focus,
 .composer-mode select:focus {
   border-color: #9bb8ff;
@@ -412,6 +464,13 @@
 .danger-button {
   color: #ffffff;
   background: var(--red);
+}
+
+.composer-threshold + .primary-button,
+.composer-threshold + .danger-button,
+.composer-compact-button + .primary-button,
+.composer-compact-button + .danger-button {
+  margin-left: 0;
 }
 
 .context-float {

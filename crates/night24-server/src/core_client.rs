@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -47,31 +48,13 @@ pub(crate) struct AgentCoreClient {
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
     event_senders: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
     status: Arc<Mutex<CoreRuntimeStatus>>,
+    generation: Arc<AtomicU64>,
 }
 
 impl AgentCoreClient {
     pub(crate) async fn spawn() -> anyhow::Result<Self> {
-        let bin = locate_agent_core_bin();
-        let mut child = Command::new(&bin)
-            .arg("--stdio")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|err| anyhow::anyhow!("failed to spawn {}: {}", bin.display(), err))?;
-
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("agent-core stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("agent-core stdout unavailable"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("agent-core stderr unavailable"))?;
+        let (stdin, child, stdout, stderr) = spawn_core_process()?;
+        let generation = Arc::new(AtomicU64::new(1));
 
         let client = Self {
             stdin: Arc::new(Mutex::new(stdin)),
@@ -79,9 +62,10 @@ impl AgentCoreClient {
             pending: Arc::new(Mutex::new(HashMap::new())),
             event_senders: Arc::new(Mutex::new(HashMap::new())),
             status: Arc::new(Mutex::new(CoreRuntimeStatus::unavailable("initializing"))),
+            generation,
         };
 
-        client.start_stdout_reader(stdout);
+        client.start_stdout_reader(stdout, 1);
         client.start_stderr_reader(stderr);
         client.initialize().await?;
         if let Ok(mut status) = client.status.lock() {
@@ -119,6 +103,63 @@ impl AgentCoreClient {
             .lock()
             .map(|status| status.clone())
             .unwrap_or_else(|_| CoreRuntimeStatus::unavailable("agent-core status lock poisoned"))
+    }
+
+    pub(crate) async fn restart(&self) -> anyhow::Result<CoreRuntimeStatus> {
+        let generation_id = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Ok(mut status) = self.status.lock() {
+            *status = CoreRuntimeStatus::unavailable("restarting agent-core");
+        }
+
+        reject_pending_requests(&self.pending, "agent-core restarted");
+        if let Ok(mut senders) = self.event_senders.lock() {
+            senders.clear();
+        }
+
+        {
+            let mut child = self
+                .child
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent-core child lock poisoned"))?;
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        let (stdin, child, stdout, stderr) = match spawn_core_process() {
+            Ok(parts) => parts,
+            Err(err) => {
+                if let Ok(mut status) = self.status.lock() {
+                    *status =
+                        CoreRuntimeStatus::unavailable(format!("agent-core restart failed: {err}"));
+                }
+                return Err(err);
+            }
+        };
+
+        *self
+            .stdin
+            .lock()
+            .map_err(|_| anyhow::anyhow!("agent-core stdin lock poisoned"))? = stdin;
+        *self
+            .child
+            .lock()
+            .map_err(|_| anyhow::anyhow!("agent-core child lock poisoned"))? = child;
+
+        self.start_stdout_reader(stdout, generation_id);
+        self.start_stderr_reader(stderr);
+        if let Err(err) = self.initialize().await {
+            if let Ok(mut status) = self.status.lock() {
+                *status =
+                    CoreRuntimeStatus::unavailable(format!("agent-core initialize failed: {err}"));
+            }
+            return Err(err);
+        }
+
+        let status = CoreRuntimeStatus::available();
+        if let Ok(mut guard) = self.status.lock() {
+            *guard = status.clone();
+        }
+        Ok(status)
     }
 
     async fn initialize(&self) -> anyhow::Result<()> {
@@ -292,18 +333,21 @@ impl AgentCoreClient {
         .await
     }
 
-    fn start_stdout_reader(&self, stdout: std::process::ChildStdout) {
+    fn start_stdout_reader(&self, stdout: std::process::ChildStdout, generation_id: u64) {
         let pending = self.pending.clone();
         let event_senders = self.event_senders.clone();
         let status = self.status.clone();
+        let generation = self.generation.clone();
         thread::spawn(move || {
             let reader = std::io::BufReader::new(stdout);
             for line in reader.lines() {
                 let line = match line {
                     Ok(line) => line,
                     Err(err) => {
-                        set_core_status(
+                        set_core_status_if_current(
                             &status,
+                            &generation,
+                            generation_id,
                             CoreRuntimeStatus::unavailable(format!(
                                 "agent-core stdout read failed: {err}"
                             )),
@@ -318,8 +362,10 @@ impl AgentCoreClient {
                 let value: serde_json::Value = match serde_json::from_str(&line) {
                     Ok(value) => value,
                     Err(err) => {
-                        set_core_status(
+                        set_core_status_if_current(
                             &status,
+                            &generation,
+                            generation_id,
                             CoreRuntimeStatus::unavailable(format!(
                                 "agent-core stdout protocol violation: {err}"
                             )),
@@ -377,7 +423,65 @@ impl AgentCoreClient {
     }
 }
 
-fn set_core_status(status_ptr: &Arc<Mutex<CoreRuntimeStatus>>, status: CoreRuntimeStatus) {
+fn spawn_core_process() -> anyhow::Result<(
+    ChildStdin,
+    Child,
+    std::process::ChildStdout,
+    std::process::ChildStderr,
+)> {
+    let bin = locate_agent_core_bin();
+    let mut child = Command::new(&bin)
+        .arg("--stdio")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| anyhow::anyhow!("failed to spawn {}: {}", bin.display(), err))?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("agent-core stdin unavailable"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("agent-core stdout unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("agent-core stderr unavailable"))?;
+
+    Ok((stdin, child, stdout, stderr))
+}
+
+fn reject_pending_requests(
+    pending: &Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
+    reason: &str,
+) {
+    let Ok(mut pending) = pending.lock() else {
+        return;
+    };
+    for (id, tx) in pending.drain() {
+        let _ = tx.send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32003,
+                "message": reason
+            }
+        }));
+    }
+}
+
+fn set_core_status_if_current(
+    status_ptr: &Arc<Mutex<CoreRuntimeStatus>>,
+    generation: &Arc<AtomicU64>,
+    generation_id: u64,
+    status: CoreRuntimeStatus,
+) {
+    if generation.load(Ordering::SeqCst) != generation_id {
+        return;
+    }
     if let Ok(mut guard) = status_ptr.lock() {
         *guard = status.clone();
     }

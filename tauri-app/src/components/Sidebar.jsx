@@ -1,4 +1,4 @@
-import { Bot, Clock3, MessageSquare, MessageSquarePlus, Plug, Search, TimerReset, Trash2 } from 'lucide-react';
+import { Bot, Clock3, MessageSquare, MessageSquarePlus, Settings2, Trash2 } from 'lucide-react';
 import { classNames, formatTime } from '../utils/format.js';
 
 export function Sidebar({
@@ -6,18 +6,17 @@ export function Sidebar({
   recentWorkspaces,
   sessions,
   currentSessionId,
+  settingsOpen,
   onOpenWorkspace,
   onCreateSession,
   onSelectSession,
   onDeleteSession,
+  onToggleSettings,
 }) {
   return (
     <aside className="left-panel menu-sidebar">
       <nav className="primary-nav" aria-label="主导航">
         <button className="nav-row active" type="button"><Bot size={15} />快速对话</button>
-        <button className="nav-row" type="button"><Search size={15} />搜索</button>
-        <button className="nav-row" type="button"><Plug size={15} />插件</button>
-        <button className="nav-row" type="button"><TimerReset size={15} />自动化</button>
       </nav>
 
       <section className="menu-section project-block">
@@ -69,6 +68,13 @@ export function Sidebar({
           ))}
         </div>
       </section>
+
+      <footer className="menu-footer">
+        <button className={classNames('nav-row settings-row', settingsOpen && 'active')} onClick={onToggleSettings} type="button">
+          <Settings2 size={15} />
+          设置
+        </button>
+      </footer>
     </aside>
   );
 }

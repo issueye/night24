@@ -28,17 +28,18 @@ mod state;
 mod workspace;
 
 use api_types::{
-    AcceptedResponse, CancelAgentRequest, CoreStatusResponse, CreateSessionRequest,
-    ForkSessionRequest, PermissionDecisionRequest, ReadyResponse, RenameSessionRequest,
-    ReplyRequest, SessionSummary, SkillLoadQuery, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
+    AcceptedResponse, CancelAgentRequest, CompactSessionRequest, CompactSessionResponse,
+    CoreRestartResponse, CoreStatusResponse, CreateSessionRequest, ForkSessionRequest,
+    PermissionDecisionRequest, ReadyResponse, RenameSessionRequest, ReplyRequest, SessionSummary,
+    SkillLoadQuery, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
 };
 use auth::require_api_key;
 use core_client::{AgentCoreClient, CoreRuntimeStatus};
 use hooks::{get_workspace_hooks, put_workspace_hooks};
 use reply::reply_core;
 use sessions::{
-    create_session, delete_session, fork_session, get_session_history, list_sessions,
-    rename_session,
+    compact_session, create_session, delete_session, fork_session, get_session_history,
+    list_sessions, rename_session,
 };
 use state::AppState;
 use workspace::{
@@ -109,6 +110,7 @@ fn sqlite_file_url(path: PathBuf) -> String {
         sessions::list_sessions,
         sessions::get_session_history,
         sessions::create_session,
+        sessions::compact_session,
         sessions::rename_session,
         sessions::fork_session,
         workspace::workspace_status,
@@ -116,12 +118,15 @@ fn sqlite_file_url(path: PathBuf) -> String {
         hooks::get_workspace_hooks,
         hooks::put_workspace_hooks,
         get_agent_subagents,
+        restart_agent_core,
         get_workspace_skills,
         get_workspace_skill
     ),
     components(schemas(
         ReplyRequest,
         CreateSessionRequest,
+        CompactSessionRequest,
+        CompactSessionResponse,
         RenameSessionRequest,
         ForkSessionRequest,
         SessionSummary,
@@ -179,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
         provider_registry: Arc::new(provider_registry),
         permission_manager: Arc::new(permission_manager),
         workspace_state: Arc::new(tokio::sync::RwLock::new(WorkspaceState::new())),
-        core_client,
+        core_client: Arc::new(tokio::sync::RwLock::new(core_client)),
     };
 
     let app = Router::new()
@@ -187,6 +192,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/readyz", get(readyz))
         .route("/reply", post(reply_core))
         .route("/agent/cancel", post(agent_cancel))
+        .route("/agent/core/restart", post(restart_agent_core))
         .route("/agent/subagents", get(get_agent_subagents))
         .route("/tools", get(get_tools))
         .route("/workspaces/open", post(open_workspace))
@@ -205,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{id}", delete(delete_session))
         .route("/sessions/{id}/history", get(get_session_history))
+        .route("/sessions/{id}/compact", post(compact_session))
         .route("/sessions/{id}/name", put(rename_session))
         .route("/sessions/{id}/fork", post(fork_session))
         .route("/permissions/{id}/approve", post(approve_permission))
@@ -383,6 +390,10 @@ fn json_error(
     (status, Json(serde_json::json!({ "error": message.into() })))
 }
 
+async fn current_core_client(state: &AppState) -> Option<Arc<AgentCoreClient>> {
+    state.core_client.read().await.clone()
+}
+
 #[utoipa::path(
     get,
     path = "/healthz",
@@ -404,7 +415,7 @@ async fn healthz() -> &'static str {
     )
 )]
 async fn readyz(State(state): State<AppState>) -> Json<ReadyResponse> {
-    let core = match &state.core_client {
+    let core = match current_core_client(&state).await {
         Some(core_client) => core_client.status().await,
         None => CoreRuntimeStatus::unavailable("no active core client"),
     };
@@ -428,7 +439,7 @@ async fn readyz(State(state): State<AppState>) -> Json<ReadyResponse> {
     )
 )]
 async fn get_tools(State(state): State<AppState>) -> Json<ToolsResponse> {
-    if let Some(core_client) = &state.core_client {
+    if let Some(core_client) = current_core_client(&state).await {
         match core_client.tools().await {
             Ok(result) => {
                 return Json(ToolsResponse {
@@ -462,7 +473,7 @@ async fn get_agent_subagents(
     State(state): State<AppState>,
     Query(query): Query<SubAgentPoolQuery>,
 ) -> Json<serde_json::Value> {
-    let Some(core_client) = &state.core_client else {
+    let Some(core_client) = current_core_client(&state).await else {
         return Json(serde_json::json!({
             "core_available": false,
             "error": "no active core client"
@@ -489,6 +500,55 @@ async fn get_agent_subagents(
 }
 
 #[utoipa::path(
+    post,
+    path = "/agent/core/restart",
+    tag = "night24",
+    responses(
+        (status = 200, description = "Agent Core restart status", body = CoreRestartResponse)
+    )
+)]
+async fn restart_agent_core(State(state): State<AppState>) -> Json<CoreRestartResponse> {
+    let result = match current_core_client(&state).await {
+        Some(core_client) => core_client.restart().await.map(|_| core_client),
+        None => AgentCoreClient::spawn().await.map(Arc::new),
+    };
+
+    match result {
+        Ok(core_client) => {
+            {
+                let mut guard = state.core_client.write().await;
+                *guard = Some(core_client.clone());
+            }
+            let core = core_client.status().await;
+            Json(CoreRestartResponse {
+                accepted: true,
+                reason: None,
+                core: CoreStatusResponse {
+                    available: core.available,
+                    initialized: core.initialized,
+                    reason: core.reason,
+                },
+            })
+        }
+        Err(err) => {
+            {
+                let mut guard = state.core_client.write().await;
+                *guard = None;
+            }
+            Json(CoreRestartResponse {
+                accepted: false,
+                reason: Some(err.to_string()),
+                core: CoreStatusResponse {
+                    available: false,
+                    initialized: false,
+                    reason: Some(err.to_string()),
+                },
+            })
+        }
+    }
+}
+
+#[utoipa::path(
     get,
     path = "/workspace/skills",
     tag = "night24",
@@ -501,7 +561,7 @@ async fn get_workspace_skills(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let workspace = workspace::current_workspace_info(&state).await?;
-    let Some(core_client) = &state.core_client else {
+    let Some(core_client) = current_core_client(&state).await else {
         return Err(json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "no active core client",
@@ -538,7 +598,7 @@ async fn get_workspace_skill(
     Query(query): Query<SkillLoadQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let workspace = workspace::current_workspace_info(&state).await?;
-    let Some(core_client) = &state.core_client else {
+    let Some(core_client) = current_core_client(&state).await else {
         return Err(json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "no active core client",
@@ -571,7 +631,9 @@ async fn agent_cancel(
     State(state): State<AppState>,
     Json(req): Json<CancelAgentRequest>,
 ) -> Json<AcceptedResponse> {
-    if let (Some(core_client), Some(run_id)) = (&state.core_client, req.run_id.clone()) {
+    if let (Some(core_client), Some(run_id)) =
+        (current_core_client(&state).await, req.run_id.clone())
+    {
         match core_client.cancel(run_id.clone(), req.reason.clone()).await {
             Ok(_) => {
                 return Json(AcceptedResponse {
@@ -620,7 +682,9 @@ async fn approve_permission(
     Path(id): Path<String>,
     Json(req): Json<PermissionDecisionRequest>,
 ) -> Json<AcceptedResponse> {
-    if let (Some(core_client), Some(run_id)) = (&state.core_client, req.run_id.clone()) {
+    if let (Some(core_client), Some(run_id)) =
+        (current_core_client(&state).await, req.run_id.clone())
+    {
         match core_client
             .resolve_permission(
                 run_id.clone(),
@@ -676,7 +740,9 @@ async fn deny_permission(
     Path(id): Path<String>,
     Json(req): Json<PermissionDecisionRequest>,
 ) -> Json<AcceptedResponse> {
-    if let (Some(core_client), Some(run_id)) = (&state.core_client, req.run_id.clone()) {
+    if let (Some(core_client), Some(run_id)) =
+        (current_core_client(&state).await, req.run_id.clone())
+    {
         match core_client
             .resolve_permission(
                 run_id.clone(),

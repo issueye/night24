@@ -108,7 +108,7 @@
 
 .left-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(160px, 1fr) auto;
   overflow: hidden;
 }
 
@@ -130,6 +130,18 @@
 .permissions {
   border-bottom: 0;
   border-top: 1px solid var(--line);
+}
+
+.menu-footer {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.menu-footer .settings-row {
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .section-title,

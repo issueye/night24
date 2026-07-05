@@ -50,6 +50,8 @@ export default function App() {
   } = useProviderSettings();
 
   const [serverStatus, setServerStatus] = useState({ state: 'checking', detail: '正在连接 server' });
+  const [coreRestarting, setCoreRestarting] = useState(false);
+  const [contextCompacting, setContextCompacting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -183,6 +185,29 @@ export default function App() {
       return false;
     }
   }, [apiJson]);
+
+  const restartCore = useCallback(async () => {
+    setCoreRestarting(true);
+    setServerStatus({ state: 'checking', detail: '正在重启 core' });
+    try {
+      const result = await apiJson('/agent/core/restart', {
+        method: 'POST',
+        headers,
+      });
+      if (result?.accepted === false) {
+        throw new Error(result.reason || 'core 重启失败');
+      }
+      addTimeline('core', 'Core 已重启', result?.core?.reason || 'agent-core 已重新初始化', 'success');
+      await checkServer();
+    } catch (error) {
+      const detail = normalizeError(error);
+      setServerStatus({ state: 'failed', detail });
+      addTimeline('core', 'Core 重启失败', detail, 'error');
+      showError(`Core 重启失败：${detail}`);
+    } finally {
+      setCoreRestarting(false);
+    }
+  }, [addTimeline, apiJson, checkServer, headers, showError]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -603,6 +628,42 @@ export default function App() {
     }
   }
 
+  async function compactContext() {
+    if (!currentSessionId || contextCompacting || isRunning) return;
+    setContextCompacting(true);
+    try {
+      const data = await apiJson(`/sessions/${encodeURIComponent(currentSessionId)}/compact`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          threshold_tokens: contextUsage.threshold || undefined,
+          force: true,
+        }),
+      });
+      const nextMessages = Array.isArray(data?.conversation)
+        ? data.conversation.filter(isVisibleChatMessage)
+        : [];
+      setMessages(nextMessages);
+      loadSessions();
+      if (data?.compacted) {
+        addTimeline(
+          'context',
+          '上下文已压缩',
+          `移除 ${data.removed} 条，当前 ${data.current} 条，估算 ${data.token_estimate} tokens`,
+          'success',
+        );
+      } else {
+        addTimeline('context', '无需压缩', '当前会话上下文还不足以压缩', 'neutral');
+      }
+    } catch (error) {
+      const detail = normalizeError(error);
+      addTimeline('context', '压缩失败', detail, 'error');
+      showError(`压缩摘要失败：${detail}`);
+    } finally {
+      setContextCompacting(false);
+    }
+  }
+
   async function resolvePermission(permission, decision) {
     if (!permission?.permission_id) return;
     try {
@@ -623,6 +684,24 @@ export default function App() {
   }
 
   const canSend = taskText.trim().length > 0 && !isRunning && Boolean(workspace);
+  const contextUsage = useMemo(() => {
+    const threshold = parseOptionalPositiveInt(contextThreshold) || 0;
+    const text = [
+      ...messages.map(messageText),
+      taskText,
+    ].join('\n\n');
+    const asciiChars = (text.match(/[\x00-\x7F]/g) || []).length;
+    const nonAsciiChars = Math.max(0, text.length - asciiChars);
+    const estimatedTokens = Math.ceil(asciiChars / 4 + nonAsciiChars * 0.8);
+    const ratio = threshold > 0 ? Math.min(1, estimatedTokens / threshold) : 0;
+    return {
+      threshold,
+      estimatedTokens,
+      percent: threshold > 0 ? Math.round(ratio * 100) : 0,
+      reached: threshold > 0 && estimatedTokens >= threshold,
+      warning: threshold > 0 && estimatedTokens >= threshold * 0.7,
+    };
+  }, [contextThreshold, messages, taskText]);
   const projectSessions = useMemo(() => {
     if (!workspace?.root_path) return [];
     return sessions.filter((session) => sameWorkspacePath(session.working_dir, workspace.root_path));
@@ -632,10 +711,10 @@ export default function App() {
     <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>
       <TopBar
         serverStatus={serverStatus}
-        settingsOpen={settingsOpen}
+        coreRestarting={coreRestarting}
         onRetryServer={checkServer}
+        onRestartCore={restartCore}
         onOpenWorkspace={() => openWorkspace()}
-        onToggleSettings={() => setSettingsOpen((value) => !value)}
       />
 
       <SettingsStrip
@@ -677,10 +756,12 @@ export default function App() {
           recentWorkspaces={recentWorkspaces}
           sessions={projectSessions}
           currentSessionId={currentSessionId}
+          settingsOpen={settingsOpen}
           onOpenWorkspace={openWorkspace}
           onCreateSession={createSession}
           onSelectSession={selectSession}
           onDeleteSession={deleteSession}
+          onToggleSettings={() => setSettingsOpen((value) => !value)}
         />
 
         <ChatPanel
@@ -695,11 +776,15 @@ export default function App() {
           providerProfiles={providerProfiles}
           providerProfileId={providerProfileId}
           accessMode={accessMode}
+          contextUsage={contextUsage}
+          contextCompacting={contextCompacting}
+          canCompactContext={Boolean(currentSessionId && messages.length > 1 && !isRunning)}
           activeContext={contextOpen ? rightTab : null}
           pendingPermissions={pendingPermissions}
           onTaskTextChange={setTaskText}
           onProviderProfileChange={selectProviderProfile}
           onAccessModeChange={setAccessMode}
+          onCompactContext={compactContext}
           onResolvePermission={resolvePermission}
           onSendTask={sendTask}
           onCancelRun={cancelRun}

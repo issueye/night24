@@ -84,10 +84,14 @@ button {
   width: 30px;
   height: 30px;
   place-items: center;
-  color: var(--blue);
-  background: var(--blue-soft);
-  border: 1px solid #d4e0ff;
+  overflow: hidden;
   border-radius: 8px;
+}
+
+.brand-mark img {
+  display: block;
+  width: 30px;
+  height: 30px;
 }
 
 .brand strong,
@@ -164,6 +168,15 @@ button {
   background: var(--blue-hover);
 }
 
+.toolbar-button:disabled,
+.primary-button:disabled,
+.danger-button:disabled,
+.mini-button:disabled,
+.icon-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .icon-button,
 .mini-button {
   color: var(--muted);
@@ -208,7 +221,7 @@ button {
   padding: 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 4px;
   box-shadow: 0 18px 48px rgba(23, 32, 51, 0.18);
 }
 
@@ -230,7 +243,7 @@ button {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 4px;
   outline: none;
 }
 
@@ -263,7 +276,7 @@ button {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 0 24px 70px rgba(17, 24, 39, 0.28);
 }
 
@@ -315,7 +328,7 @@ button {
   padding: 0 10px;
   color: var(--muted);
   background: transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
   text-align: left;
 }
@@ -364,7 +377,7 @@ button {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 4px;
   outline: none;
 }
 

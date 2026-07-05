@@ -18,11 +18,15 @@ export function ChatPanel({
   providerProfiles,
   providerProfileId,
   accessMode,
+  contextUsage,
+  contextCompacting,
+  canCompactContext,
   activeContext,
   pendingPermissions,
   onTaskTextChange,
   onProviderProfileChange,
   onAccessModeChange,
+  onCompactContext,
   onResolvePermission,
   onSendTask,
   onCancelRun,
@@ -136,9 +140,13 @@ export function ChatPanel({
         providerProfiles={providerProfiles}
         providerProfileId={providerProfileId}
         accessMode={accessMode}
+        contextUsage={contextUsage}
+        contextCompacting={contextCompacting}
+        canCompactContext={canCompactContext}
         onTaskTextChange={onTaskTextChange}
         onProviderProfileChange={onProviderProfileChange}
         onAccessModeChange={onAccessModeChange}
+        onCompactContext={onCompactContext}
         onSendTask={onSendTask}
         onCancelRun={onCancelRun}
       />

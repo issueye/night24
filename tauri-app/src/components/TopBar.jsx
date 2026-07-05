@@ -1,11 +1,18 @@
-import { AlertTriangle, FolderOpen, Loader2, SearchCode, Settings2, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Loader2, RotateCcw, Wifi, WifiOff } from 'lucide-react';
+import night24Mark from '../assets/night24-mark.svg';
 import { classNames } from '../utils/format.js';
 
-export function TopBar({ serverStatus, onRetryServer, onOpenWorkspace, settingsOpen, onToggleSettings }) {
+export function TopBar({
+  serverStatus,
+  coreRestarting,
+  onRetryServer,
+  onRestartCore,
+  onOpenWorkspace,
+}) {
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark"><SearchCode size={18} /></div>
+        <div className="brand-mark"><img src={night24Mark} alt="" /></div>
         <div>
           <strong>Night24</strong>
           <span>本地 AI 编程助手</span>
@@ -18,12 +25,12 @@ export function TopBar({ serverStatus, onRetryServer, onOpenWorkspace, settingsO
       </button>
 
       <div className="topbar-actions">
+        <button className="icon-button" disabled={coreRestarting} onClick={onRestartCore} title="重启 Core" type="button">
+          {coreRestarting ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
+        </button>
         <button className="toolbar-button" onClick={onOpenWorkspace} type="button">
           <FolderOpen size={16} />
           打开项目
-        </button>
-        <button className={classNames('icon-button', settingsOpen && 'active')} onClick={onToggleSettings} title="设置" type="button">
-          <Settings2 size={17} />
         </button>
       </div>
     </header>

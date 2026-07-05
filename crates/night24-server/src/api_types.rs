@@ -97,6 +97,23 @@ pub(crate) struct ForkSessionRequest {
     pub(crate) at_index: Option<usize>,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub(crate) struct CompactSessionRequest {
+    #[schema(example = 24000)]
+    pub(crate) threshold_tokens: Option<usize>,
+    #[serde(default)]
+    pub(crate) force: bool,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub(crate) struct CompactSessionResponse {
+    pub(crate) compacted: bool,
+    pub(crate) removed: usize,
+    pub(crate) current: usize,
+    pub(crate) token_estimate: usize,
+    pub(crate) conversation: Vec<night24_core::model::Message>,
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub(crate) struct SessionSummary {
     pub(crate) id: String,
@@ -118,6 +135,13 @@ pub(crate) struct CoreStatusResponse {
     pub(crate) available: bool,
     pub(crate) initialized: bool,
     pub(crate) reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub(crate) struct CoreRestartResponse {
+    pub(crate) accepted: bool,
+    pub(crate) reason: Option<String>,
+    pub(crate) core: CoreStatusResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]

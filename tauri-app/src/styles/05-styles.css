@@ -47,7 +47,7 @@
 
 .settings-strip {
   top: 48px;
-  border-radius: 18px;
+  border-radius: 4px;
   box-shadow: var(--shadow);
 }
 
@@ -58,7 +58,7 @@
 }
 
 .left-panel {
-  grid-template-rows: auto auto minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(160px, 1fr) auto;
   background: var(--sidebar-bg);
   border: 0;
   border-right: 1px solid var(--line);
