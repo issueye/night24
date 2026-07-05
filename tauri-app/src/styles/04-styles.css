@@ -30,7 +30,7 @@
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
@@ -215,6 +215,380 @@
   font-size: 11px;
   line-height: 1.5;
   white-space: pre;
+}
+
+.subagent-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.subagent-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.subagent-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.subagent-stat {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.subagent-stat span {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-stat strong {
+  font-size: 15px;
+}
+
+.subagent-stat.running strong,
+.subagent-status.running {
+  color: var(--blue);
+}
+
+.subagent-stat.completed strong,
+.subagent-status.completed {
+  color: var(--green);
+}
+
+.subagent-stat.failed strong,
+.subagent-status.failed {
+  color: var(--red);
+}
+
+.subagent-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 6px 8px;
+  color: var(--red);
+  background: var(--red-soft);
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.subagent-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.subagent-list {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px;
+  overflow: auto;
+  background: var(--surface-soft);
+  border-right: 1px solid var(--line);
+}
+
+.subagent-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.subagent-row:hover,
+.subagent-row.active {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.subagent-row > div,
+.subagent-row footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.subagent-row strong,
+.subagent-row p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-row strong {
+  font-size: 12px;
+}
+
+.subagent-row em {
+  margin-left: auto;
+  color: var(--subtle);
+  font-style: normal;
+  font-size: 10px;
+}
+
+.subagent-row p {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-row footer {
+  justify-content: space-between;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-row footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.subagent-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  background: var(--subtle);
+  border-radius: 999px;
+}
+
+.subagent-dot.running {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.subagent-dot.completed {
+  background: var(--green);
+}
+
+.subagent-dot.failed {
+  background: var(--red);
+}
+
+.subagent-dot.cancelled {
+  background: var(--amber);
+}
+
+.subagent-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  overflow: auto;
+}
+
+.subagent-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.subagent-detail-head > div {
+  min-width: 0;
+}
+
+.subagent-detail-head strong,
+.subagent-detail-head span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-detail-head span {
+  margin-top: 3px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 7px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.subagent-status.failed,
+.subagent-result.error {
+  color: var(--red);
+}
+
+.subagent-status.cancelled {
+  color: var(--amber);
+}
+
+.subagent-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.subagent-meta label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.subagent-meta span,
+.subagent-section-head {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.subagent-task,
+.subagent-result {
+  margin: 0;
+  padding: 8px;
+  color: var(--text);
+  background: #fbfcff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.subagent-result {
+  max-height: 180px;
+  overflow: auto;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.subagent-messages {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.subagent-message {
+  display: grid;
+  gap: 4px;
+  max-width: 92%;
+  padding: 7px 8px;
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.subagent-message.child_to_parent {
+  justify-self: end;
+  background: #f0fdf4;
+}
+
+.subagent-message > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-message p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.subagent-empty-line {
+  padding: 8px;
+  color: var(--subtle);
+  background: var(--surface-soft);
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.subagent-debug {
+  display: grid;
+  gap: 5px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-debug summary {
+  cursor: pointer;
+}
+
+.subagent-debug code {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 6px;
+  background: var(--surface-soft);
+  border-radius: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-skeleton {
+  height: 70px;
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--surface) 0%, var(--surface-soft) 50%, var(--surface) 100%);
+  border: 1px solid var(--line);
+  border-radius: 4px;
 }
 
 .permissions {

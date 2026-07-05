@@ -89,6 +89,7 @@ export function ChatPanel({
           <button className={classNames('icon-button compact', activeContext === 'files' && 'active')} onClick={() => onOpenContext('files')} title="文件浮窗" type="button"><FileCode2 size={14} /></button>
           <button className={classNames('icon-button compact', activeContext === 'diff' && 'active')} onClick={() => onOpenContext('diff')} title="变更浮窗" type="button"><GitCompare size={14} /></button>
           <button className={classNames('icon-button compact', activeContext === 'preview' && 'active')} onClick={() => onOpenContext('preview')} title="预览浮窗" type="button"><Code2 size={14} /></button>
+          <button className={classNames('icon-button compact', activeContext === 'agents' && 'active')} onClick={() => onOpenContext('agents')} title="子代理浮窗" type="button"><Bot size={14} /></button>
         </div>
       </div>
 

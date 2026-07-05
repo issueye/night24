@@ -61,6 +61,9 @@ export default function App() {
   const [timeline, setTimeline] = useState([]);
   const [pendingPermissions, setPendingPermissions] = useState([]);
   const [eventsOpen, setEventsOpen] = useState(false);
+  const [subAgentPool, setSubAgentPool] = useState(null);
+  const [subAgentLoading, setSubAgentLoading] = useState(false);
+  const [subAgentError, setSubAgentError] = useState('');
 
   const abortRef = useRef(null);
   const runTerminalRef = useRef(null);
@@ -218,6 +221,23 @@ export default function App() {
     }
   }, [apiJson, showError]);
 
+  const loadSubAgents = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setSubAgentLoading(true);
+    }
+    setSubAgentError('');
+    try {
+      const data = await apiJson('/agent/subagents?include_messages=true&include_result=true');
+      setSubAgentPool(data || null);
+    } catch (error) {
+      setSubAgentError(normalizeError(error));
+    } finally {
+      if (!silent) {
+        setSubAgentLoading(false);
+      }
+    }
+  }, [apiJson]);
+
   useEffect(() => {
     writeSetting(STORAGE_KEYS.apiBase, apiBase);
   }, [apiBase]);
@@ -255,6 +275,12 @@ export default function App() {
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
+
+  useEffect(() => {
+    if (contextOpen && rightTab === 'agents') {
+      loadSubAgents();
+    }
+  }, [contextOpen, loadSubAgents, rightTab]);
 
   async function createSession() {
     clearConversationView({ abortActive: true });
@@ -706,6 +732,19 @@ export default function App() {
     if (!workspace?.root_path) return [];
     return sessions.filter((session) => sameWorkspacePath(session.working_dir, workspace.root_path));
   }, [sessions, workspace]);
+  const hasLiveSubAgents = useMemo(() => {
+    const agents = Array.isArray(subAgentPool?.subagents) ? subAgentPool.subagents : [];
+    return agents.some((agent) => agent.status === 'queued' || agent.status === 'running');
+  }, [subAgentPool]);
+
+  useEffect(() => {
+    if (!(contextOpen && rightTab === 'agents')) return undefined;
+    if (!isRunning && !hasLiveSubAgents) return undefined;
+    const timer = window.setInterval(() => {
+      loadSubAgents({ silent: true });
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [contextOpen, hasLiveSubAgents, isRunning, loadSubAgents, rightTab]);
 
   return (
     <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>
@@ -803,11 +842,15 @@ export default function App() {
           status={workspaceStatus}
           diffLoading={diffLoading}
           diffError={diffError}
+          subAgentPool={subAgentPool}
+          subAgentLoading={subAgentLoading}
+          subAgentError={subAgentError}
           onTabChange={openContextTab}
           onClose={() => setContextOpen(false)}
           onOpenFile={openFile}
           onRefreshWorkspace={loadWorkspace}
           onRefreshDiff={loadWorkspaceDiff}
+          onRefreshSubAgents={loadSubAgents}
         />
       </main>
 

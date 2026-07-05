@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Code2, FileCode2, GitCompare, Grip, RefreshCw, X } from 'lucide-react';
+import { Bot, Code2, FileCode2, GitCompare, Grip, RefreshCw, X } from 'lucide-react';
 import { DiffPanel } from './DiffPanel.jsx';
 import { FilePreview } from './FilePreview.jsx';
 import { FileTree } from './FileTree.jsx';
 import { Placeholder } from './Placeholder.jsx';
+import { SubAgentPanel } from './SubAgentPanel.jsx';
 
 function defaultPanelRect() {
   const width = Math.min(520, Math.max(320, window.innerWidth - 320));
@@ -41,15 +42,19 @@ export function ContextPanel({
   status,
   diffLoading,
   diffError,
+  subAgentPool,
+  subAgentLoading,
+  subAgentError,
   onTabChange,
   onClose,
   onOpenFile,
   onRefreshWorkspace,
   onRefreshDiff,
+  onRefreshSubAgents,
 }) {
   const [rect, setRect] = useState(defaultPanelRect);
   const [drag, setDrag] = useState(null);
-  const activeTab = ['files', 'diff', 'preview'].includes(rightTab) ? rightTab : 'files';
+  const activeTab = ['files', 'diff', 'preview', 'agents'].includes(rightTab) ? rightTab : 'files';
 
   useEffect(() => {
     if (!drag) return undefined;
@@ -122,6 +127,7 @@ export function ContextPanel({
         <button className={activeTab === 'files' ? 'active' : ''} onClick={() => onTabChange('files')} type="button"><FileCode2 size={14} />Files</button>
         <button className={activeTab === 'diff' ? 'active' : ''} onClick={() => onTabChange('diff')} type="button"><GitCompare size={14} />Diff</button>
         <button className={activeTab === 'preview' ? 'active' : ''} onClick={() => onTabChange('preview')} type="button"><Code2 size={14} />Preview</button>
+        <button className={activeTab === 'agents' ? 'active' : ''} onClick={() => onTabChange('agents')} type="button"><Bot size={14} />Agents</button>
       </div>
 
       {activeTab === 'files' && (
@@ -140,6 +146,14 @@ export function ContextPanel({
       )}
       {activeTab === 'diff' && <DiffPanel diff={diff} status={status} loading={diffLoading} error={diffError} onRefresh={onRefreshDiff} />}
       {activeTab === 'preview' && <Placeholder title="尚未启动预览" detail="后续接入进程管理后会在这里显示本地预览地址。" />}
+      {activeTab === 'agents' && (
+        <SubAgentPanel
+          pool={subAgentPool}
+          loading={subAgentLoading}
+          error={subAgentError}
+          onRefresh={onRefreshSubAgents}
+        />
+      )}
       <button
         className="panel-resize-handle"
         onPointerDown={(event) => startDrag(event, 'resize')}
