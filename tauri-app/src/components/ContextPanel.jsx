@@ -37,8 +37,10 @@ export function ContextPanel({
   open,
   rightTab,
   tree,
+  treeLoading,
   selectedPath,
   selectedFile,
+  fileLoading,
   diff,
   status,
   diffLoading,
@@ -136,16 +138,18 @@ export function ContextPanel({
           <div className="context-tree">
             <div className="context-section-head">
               <strong>项目目录</strong>
-              <IconButton className="icon-button compact" label="刷新目录" onClick={onRefreshWorkspace} size="sm"><RefreshCw size={13} /></IconButton>
+              <IconButton className="icon-button compact" disabled={treeLoading} label="刷新目录" onClick={() => onRefreshWorkspace({ notifySuccess: true })} size="sm">
+                <RefreshCw className={treeLoading ? 'spin' : ''} size={13} />
+              </IconButton>
             </div>
             <div className="tree-scroll">
-              <FileTree tree={tree} selectedPath={selectedPath} onOpenFile={onOpenFile} />
+              <FileTree loading={treeLoading} tree={tree} selectedPath={selectedPath} onOpenFile={onOpenFile} />
             </div>
           </div>
-          <FilePreview file={selectedFile} />
+          <FilePreview file={selectedFile} loading={fileLoading} />
         </section>
       )}
-      {activeTab === 'diff' && <DiffPanel diff={diff} status={status} loading={diffLoading} error={diffError} onRefresh={onRefreshDiff} />}
+      {activeTab === 'diff' && <DiffPanel diff={diff} status={status} loading={diffLoading} error={diffError} onRefresh={() => onRefreshDiff({ notifySuccess: true })} />}
       {activeTab === 'preview' && <Placeholder title="尚未启动预览" detail="后续接入进程管理后会在这里显示本地预览地址。" />}
       {activeTab === 'agents' && (
         <SubAgentPanel

@@ -16,6 +16,8 @@ import { useSubAgents } from './hooks/useSubAgents.js';
 import { useWorkspaceState } from './hooks/useWorkspaceState.js';
 import { useSessionContexts } from './hooks/useSessionContexts.js';
 import { useRunRegistry } from './hooks/useRunRegistry.js';
+import { useToasts } from './hooks/useToasts.js';
+import { ToastViewport } from './components/ui/index.js';
 import { classNames, isVisibleChatMessage } from './utils/format.js';
 import { estimateContextUsage } from './utils/context.js';
 import { normalizeError } from './utils/events.js';
@@ -49,6 +51,7 @@ function isLiveCheckpoint(checkpoint) {
 }
 
 export default function App() {
+  const { dismissToast, notify, toasts } = useToasts();
   const [apiBase, setApiBase] = useState(() => readSetting(STORAGE_KEYS.apiBase, DEFAULT_SERVER));
   const [apiKey, setApiKey] = useState(() => readSetting(STORAGE_KEYS.apiKey));
   const [accessMode, setAccessMode] = useState(readAccessMode);
@@ -74,7 +77,7 @@ export default function App() {
     selectProviderProfile,
     updateProviderProfile,
     deleteProviderProfile,
-  } = useProviderSettings();
+  } = useProviderSettings({ notify });
 
   const currentSessionIdRef = useRef(null);
   const messageEndRef = useRef(null);
@@ -123,7 +126,10 @@ export default function App() {
         created_at: new Date().toISOString(),
       },
     ]);
-  }, [setSessionMessages]);
+    if (options.toast !== false) {
+      notify({ message: text, tone: 'danger' });
+    }
+  }, [notify, setSessionMessages]);
 
   const addCurrentTimeline = useCallback((type, title, detail, tone = 'neutral') => {
     addSessionTimeline(currentSessionIdRef.current || NEW_SESSION_CONTEXT_ID, type, title, detail, tone);
@@ -146,11 +152,14 @@ export default function App() {
     workspace,
     recentWorkspaces,
     tree,
+    treeLoading,
     selectedFile,
+    fileLoading,
     rightTab,
     contextOpen,
     workspaceStatus,
     workspaceDiff,
+    workspaceLoading,
     diffLoading,
     diffError,
     setContextOpen,
@@ -162,6 +171,7 @@ export default function App() {
   } = useWorkspaceState({
     apiJson,
     addTimeline: addCurrentTimeline,
+    notify,
     showError,
     clearConversationView,
     onWorkspaceOpened: () => clearCurrentSessionRef.current?.(),
@@ -169,6 +179,8 @@ export default function App() {
 
   const {
     sessions,
+    sessionsLoading,
+    sessionActionId,
     currentSessionId,
     loadSessions,
     createSession,
@@ -178,6 +190,7 @@ export default function App() {
     clearCurrentSession,
   } = useSessions({
     apiJson,
+    notify,
     workspace,
     showError,
     onBeforeSessionChange: () => {},
@@ -586,6 +599,7 @@ export default function App() {
   } = useSubAgents({
     apiJson,
     active: contextOpen && rightTab === 'agents',
+    notify,
     running: visibleSessionRunning,
   });
 
@@ -594,6 +608,7 @@ export default function App() {
       <TopBar
         serverStatus={serverStatus}
         coreRestarting={coreRestarting}
+        workspaceLoading={workspaceLoading}
         onRetryServer={checkServer}
         onRestartCore={restartCore}
         onOpenWorkspace={() => openWorkspace()}
@@ -614,6 +629,7 @@ export default function App() {
         theme={theme}
         fontSize={fontSize}
         workspace={workspace}
+        notify={notify}
         apiJson={apiJson}
         onApiBaseChange={setApiBase}
         onApiKeyChange={setApiKey}
@@ -637,6 +653,8 @@ export default function App() {
           workspace={workspace}
           recentWorkspaces={recentWorkspaces}
           sessions={sessions}
+          sessionsLoading={sessionsLoading}
+          sessionActionId={sessionActionId}
           runsById={runRegistry.runsById}
           activeRunBySession={runRegistry.activeRunBySession}
           currentSessionId={currentSessionId}
@@ -678,8 +696,10 @@ export default function App() {
           open={contextOpen}
           rightTab={rightTab}
           tree={tree}
+          treeLoading={treeLoading}
           selectedPath={selectedFile?.path}
           selectedFile={selectedFile}
+          fileLoading={fileLoading}
           diff={workspaceDiff}
           status={workspaceStatus}
           diffLoading={diffLoading}
@@ -692,7 +712,7 @@ export default function App() {
           onOpenFile={openFile}
           onRefreshWorkspace={loadWorkspace}
           onRefreshDiff={loadWorkspaceDiff}
-          onRefreshSubAgents={loadSubAgents}
+          onRefreshSubAgents={() => loadSubAgents({ notifySuccess: true })}
         />
       </main>
 
@@ -703,6 +723,7 @@ export default function App() {
         onToggle={() => setEventsOpen((value) => !value)}
         onClose={() => setEventsOpen(false)}
       />
+      <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </div>
   );
 }

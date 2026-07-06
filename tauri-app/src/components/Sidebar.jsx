@@ -17,6 +17,8 @@ export function Sidebar({
   workspace,
   recentWorkspaces,
   sessions,
+  sessionsLoading,
+  sessionActionId,
   runsById,
   activeRunBySession,
   currentSessionId,
@@ -121,6 +123,7 @@ export function Sidebar({
           <span>项目</span>
           <Button className="mini-button" onClick={() => onOpenWorkspace()} size="sm" variant="soft">打开</Button>
         </div>
+        {sessionsLoading && <div className="empty-block inline">会话加载中...</div>}
         {projects.length === 0 ? (
           <div className="empty-block">尚未打开项目</div>
         ) : (
@@ -161,6 +164,7 @@ export function Sidebar({
                             key={session.id}
                           >
                             <Button
+                              disabled={sessionActionId === session.id}
                               className="project-session-main"
                               onClick={() => selectProjectSession(item, isCurrentProject, session.id)}
                               title={session.name || session.id}
@@ -175,6 +179,7 @@ export function Sidebar({
                             </Button>
                             <IconButton
                               className="session-delete"
+                              disabled={sessionActionId === session.id}
                               onClick={(event) => onDeleteSession(session.id, event)}
                               label="删除会话"
                               size="sm"

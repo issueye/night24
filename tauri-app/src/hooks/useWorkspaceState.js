@@ -13,11 +13,15 @@ import {
 export function useWorkspaceState({
   apiJson,
   addTimeline,
+  notify,
   showError,
   clearConversationView,
   onWorkspaceOpened,
 }) {
   const [workspace, setWorkspace] = useState(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState(() => readJsonSetting(STORAGE_KEYS.recentWorkspaces, []));
   const [tree, setTree] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -38,11 +42,12 @@ export function useWorkspaceState({
     workspaceKeyRef.current = workspace?.root_path || '';
   }, [workspace?.root_path]);
 
-  const loadWorkspace = useCallback(async () => {
+  const loadWorkspace = useCallback(async ({ notifySuccess = false } = {}) => {
     const requestId = loadWorkspaceRequestRef.current + 1;
     loadWorkspaceRequestRef.current = requestId;
     const isCurrentRequest = () => loadWorkspaceRequestRef.current === requestId;
     const storedRecent = readJsonSetting(STORAGE_KEYS.recentWorkspaces, []);
+    setWorkspaceLoading(true);
     try {
       let current = await apiJson('/workspaces/current');
       if (!isCurrentRequest()) return;
@@ -68,21 +73,33 @@ export function useWorkspaceState({
       writeJsonSetting(STORAGE_KEYS.recentWorkspaces, mergedRecent);
       if (current) {
         rememberWorkspace(current);
+        setTreeLoading(true);
         const data = await apiJson('/workspace/tree');
         if (!isCurrentRequest()) return;
         setTree(data?.root || null);
       } else {
         setTree(null);
       }
+      if (notifySuccess) {
+        notify?.({ message: '项目数据已刷新', detail: current?.root_path || '', tone: 'success' });
+      }
     } catch {
       if (!isCurrentRequest()) return;
       setWorkspace(null);
       setTree(null);
       setRecentWorkspaces(storedRecent);
+      if (notifySuccess) {
+        notify?.({ message: '刷新项目数据失败', tone: 'danger' });
+      }
+    } finally {
+      if (isCurrentRequest()) {
+        setWorkspaceLoading(false);
+        setTreeLoading(false);
+      }
     }
-  }, [apiJson]);
+  }, [apiJson, notify]);
 
-  const loadWorkspaceDiff = useCallback(async () => {
+  const loadWorkspaceDiff = useCallback(async ({ notifySuccess = false } = {}) => {
     const workspaceKey = workspace?.root_path || '';
     if (!workspaceKey) return;
     if (diffRequestRef.current?.workspaceKey === workspaceKey) {
@@ -101,11 +118,17 @@ export function useWorkspaceState({
         if (diffGenerationRef.current !== generation || diffRequestRef.current?.request !== request) return;
         setWorkspaceStatus(status);
         setWorkspaceDiff(diff);
+        if (notifySuccess) {
+          notify?.({ message: '变更数据已刷新', tone: 'success' });
+        }
       } catch (error) {
         if (diffGenerationRef.current !== generation || diffRequestRef.current?.request !== request) return;
         setWorkspaceStatus(null);
         setWorkspaceDiff(null);
         setDiffError(normalizeError(error));
+        if (notifySuccess) {
+          notify?.({ message: '刷新变更失败', detail: normalizeError(error), tone: 'danger' });
+        }
       } finally {
         if (diffGenerationRef.current === generation && diffRequestRef.current?.request === request) {
           setDiffLoading(false);
@@ -119,7 +142,7 @@ export function useWorkspaceState({
       }
     });
     return request;
-  }, [apiJson, workspace]);
+  }, [apiJson, notify, workspace]);
 
   async function openWorkspace(pathFromRecent) {
     let requestId = null;
@@ -136,6 +159,8 @@ export function useWorkspaceState({
       if (!path) return;
       requestId = openWorkspaceRequestRef.current + 1;
       openWorkspaceRequestRef.current = requestId;
+      setWorkspaceLoading(true);
+      setTreeLoading(true);
       const opened = await apiJson('/workspaces/open', {
         method: 'POST',
         body: JSON.stringify({ path }),
@@ -161,9 +186,16 @@ export function useWorkspaceState({
       await loadWorkspace();
       if (!isCurrentOpenRequest()) return;
       addTimeline('workspace', '已打开项目', opened?.root_path || path, 'success');
+      notify?.({ message: '项目已打开', detail: opened?.root_path || path, tone: 'success' });
     } catch (error) {
       if (!isCurrentOpenRequest()) return;
-      showError(`打开项目失败：${normalizeError(error)}`);
+      notify?.({ message: '打开项目失败', detail: normalizeError(error), tone: 'danger' });
+      showError(`打开项目失败：${normalizeError(error)}`, { toast: false });
+    } finally {
+      if (isCurrentOpenRequest()) {
+        setWorkspaceLoading(false);
+        setTreeLoading(false);
+      }
     }
   }
 
@@ -173,6 +205,7 @@ export function useWorkspaceState({
     const workspaceKey = workspaceKeyRef.current;
     fileRequestRef.current = requestId;
     try {
+      setFileLoading(true);
       setRightTab('files');
       setContextOpen(true);
       const file = await apiJson(`/workspace/file?path=${encodeURIComponent(node.path)}`);
@@ -180,7 +213,12 @@ export function useWorkspaceState({
       setSelectedFile(file);
     } catch (error) {
       if (fileRequestRef.current !== requestId || workspaceKeyRef.current !== workspaceKey) return;
-      showError(`读取文件失败：${normalizeError(error)}`);
+      notify?.({ message: '读取文件失败', detail: normalizeError(error), tone: 'danger' });
+      showError(`读取文件失败：${normalizeError(error)}`, { toast: false });
+    } finally {
+      if (fileRequestRef.current === requestId && workspaceKeyRef.current === workspaceKey) {
+        setFileLoading(false);
+      }
     }
   }
 
@@ -192,9 +230,12 @@ export function useWorkspaceState({
 
   return {
     workspace,
+    workspaceLoading,
     recentWorkspaces,
     tree,
+    treeLoading,
     selectedFile,
+    fileLoading,
     rightTab,
     contextOpen,
     workspaceStatus,

@@ -26,7 +26,7 @@ function invocationText(skill) {
   return `$${skill.name}`;
 }
 
-export function SkillSettings({ apiJson, workspace }) {
+export function SkillSettings({ apiJson, notify, workspace }) {
   const [skills, setSkills] = useState([]);
   const [skillListVersion, setSkillListVersion] = useState(0);
   const [warnings, setWarnings] = useState([]);
@@ -63,7 +63,7 @@ export function SkillSettings({ apiJson, workspace }) {
     return { total: skills.length, enabled, unavailable };
   }, [skills]);
 
-  async function loadSkills() {
+  async function loadSkills({ notifySuccess = false } = {}) {
     const requestId = skillListRequestRef.current + 1;
     skillListRequestRef.current = requestId;
     skillDetailRequestRef.current += 1;
@@ -90,6 +90,9 @@ export function SkillSettings({ apiJson, workspace }) {
       setWarnings(Array.isArray(registry.warnings) ? registry.warnings : []);
       setSelectedName((current) => nextSkills.find((skill) => skill.name === current)?.name || nextSkills[0]?.name || '');
       setSkillListVersion((version) => version + 1);
+      if (notifySuccess) {
+        notify?.({ message: '技能列表已加载', detail: `${nextSkills.length} 个技能`, tone: 'success' });
+      }
     } catch (err) {
       if (skillListRequestRef.current !== requestId) return;
       setError(normalizeError(err));
@@ -97,6 +100,7 @@ export function SkillSettings({ apiJson, workspace }) {
       setWarnings([]);
       setSelectedName('');
       setLoadedSkill(null);
+      notify?.({ message: '加载技能失败', detail: normalizeError(err), tone: 'danger' });
     } finally {
       if (skillListRequestRef.current === requestId) setLoading(false);
     }
@@ -121,6 +125,7 @@ export function SkillSettings({ apiJson, workspace }) {
       if (skillDetailRequestRef.current !== requestId) return;
       setLoadedSkill(null);
       setError(normalizeError(err));
+      notify?.({ message: '加载技能详情失败', detail: normalizeError(err), tone: 'danger' });
     } finally {
       if (skillDetailRequestRef.current === requestId) setDetailLoading(false);
     }
@@ -142,8 +147,10 @@ export function SkillSettings({ apiJson, workspace }) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(text);
+      notify?.({ message: '调用名已复制', detail: text, tone: 'success' });
     } catch {
       setCopied('');
+      notify?.({ message: '复制调用名失败', tone: 'danger' });
     }
   }
 
@@ -167,7 +174,7 @@ export function SkillSettings({ apiJson, workspace }) {
       listLabel="技能列表"
       listTitle="技能"
       listActions={(
-        <IconButton className="icon-button compact" disabled={loading} label="重新加载" onClick={loadSkills} size="sm">
+        <IconButton className="icon-button compact" disabled={loading} label="重新加载" onClick={() => loadSkills({ notifySuccess: true })} size="sm">
           <RefreshCw size={14} />
         </IconButton>
       )}

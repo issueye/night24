@@ -6,6 +6,7 @@ import { Button, IconButton } from './ui/index.js';
 export function TopBar({
   serverStatus,
   coreRestarting,
+  workspaceLoading,
   onRetryServer,
   onRestartCore,
   onOpenWorkspace,
@@ -33,8 +34,13 @@ export function TopBar({
         <IconButton className="icon-button" disabled={coreRestarting} label="重启 Core" onClick={onRestartCore}>
           {coreRestarting ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
         </IconButton>
-        <Button className="toolbar-button" icon={<FolderOpen size={16} />} onClick={onOpenWorkspace}>
-          打开项目
+        <Button
+          className="toolbar-button"
+          disabled={workspaceLoading}
+          icon={workspaceLoading ? <Loader2 className="spin" size={16} /> : <FolderOpen size={16} />}
+          onClick={onOpenWorkspace}
+        >
+          {workspaceLoading ? '打开中' : '打开项目'}
         </Button>
       </div>
     </header>

@@ -6,7 +6,7 @@ import { HOOK_EVENTS, createHook, hooksToConfig, normalizeHook } from '../../uti
 import { Button, IconButton, Select, Switch, TextField } from '../ui/index.js';
 import { SettingsListDetail } from './SettingsListDetail.jsx';
 
-export function HookSettings({ apiJson, workspace }) {
+export function HookSettings({ apiJson, notify, workspace }) {
   const [hooks, setHooks] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [configPath, setConfigPath] = useState('');
@@ -22,7 +22,7 @@ export function HookSettings({ apiJson, workspace }) {
     [activeId, hooks],
   );
 
-  async function loadHooks() {
+  async function loadHooks({ notifySuccess = false } = {}) {
     const requestId = hookLoadRequestRef.current + 1;
     hookLoadRequestRef.current = requestId;
     hookSaveRequestRef.current += 1;
@@ -46,9 +46,13 @@ export function HookSettings({ apiJson, workspace }) {
       setHooks(nextHooks);
       setActiveId((current) => nextHooks.find((hook) => hook.id === current)?.id || nextHooks[0]?.id || null);
       setConfigPath(data?.path || '');
+      if (notifySuccess) {
+        notify?.({ message: '钩子配置已加载', tone: 'success' });
+      }
     } catch (err) {
       if (hookLoadRequestRef.current !== requestId) return;
       setError(normalizeError(err));
+      notify?.({ message: '加载钩子失败', detail: normalizeError(err), tone: 'danger' });
     } finally {
       if (hookLoadRequestRef.current === requestId) setLoading(false);
     }
@@ -70,6 +74,7 @@ export function HookSettings({ apiJson, workspace }) {
     setSavedAt('');
     setHooks((items) => [...items, hook]);
     setActiveId(hook.id);
+    notify?.({ message: '钩子已新增', detail: hook.name, tone: 'success' });
   }
 
   function deleteHook() {
@@ -78,6 +83,7 @@ export function HookSettings({ apiJson, workspace }) {
     setSavedAt('');
     setHooks(next);
     setActiveId(next[0]?.id || null);
+    notify?.({ message: '钩子已删除', detail: activeHook.name || activeHook.event, tone: 'success' });
   }
 
   async function saveHooks() {
@@ -99,9 +105,11 @@ export function HookSettings({ apiJson, workspace }) {
       setActiveId((current) => nextHooks.find((hook) => hook.id === current)?.id || nextHooks[0]?.id || null);
       setConfigPath(data?.path || '');
       setSavedAt(new Date().toLocaleTimeString());
+      notify?.({ message: '钩子配置已保存', tone: 'success' });
     } catch (err) {
       if (hookSaveRequestRef.current !== requestId) return;
       setError(normalizeError(err));
+      notify?.({ message: '保存钩子失败', detail: normalizeError(err), tone: 'danger' });
     } finally {
       if (hookSaveRequestRef.current === requestId) setSaving(false);
     }
@@ -125,7 +133,7 @@ export function HookSettings({ apiJson, workspace }) {
       listTitle="钩子"
       listActions={(
         <div className="hook-list-actions">
-          <IconButton className="icon-button compact" disabled={loading} label="重新加载" onClick={loadHooks} size="sm">
+          <IconButton className="icon-button compact" disabled={loading} label="重新加载" onClick={() => loadHooks({ notifySuccess: true })} size="sm">
             <RefreshCw size={14} />
           </IconButton>
           <IconButton className="icon-button compact" label="新增钩子" onClick={addHook} size="sm">

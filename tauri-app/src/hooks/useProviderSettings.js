@@ -12,7 +12,7 @@ import {
   writeSetting,
 } from '../utils/settings.js';
 
-export function useProviderSettings() {
+export function useProviderSettings({ notify } = {}) {
   const initialProviderProfiles = useMemo(readProviderProfiles, []);
   const initialProviderProfileId = useMemo(() => {
     const stored = readSetting(STORAGE_KEYS.providerProfileId, 'default-provider');
@@ -92,6 +92,7 @@ export function useProviderSettings() {
     });
     setProviderProfiles((items) => [...items, profile]);
     setProviderProfileId(profile.id);
+    notify?.({ message: '供应商配置已新增', detail: profile.name, tone: 'success' });
   }
 
   function selectProviderProfile(id) {
@@ -104,6 +105,7 @@ export function useProviderSettings() {
     setBaseUrl(formState.baseUrl);
     setProviderKey(formState.apiKey);
     setContextThreshold(formState.contextThreshold);
+    notify?.({ message: '已切换供应商配置', detail: profile.name || profile.provider, tone: 'success', duration: 1800 });
   }
 
   function updateProviderProfile(id, patch) {
@@ -112,6 +114,7 @@ export function useProviderSettings() {
 
   function deleteProviderProfile(id) {
     if (providerProfiles.length <= 1) return;
+    const deleted = providerProfileById(providerProfiles, id);
     const next = providerProfiles.filter((item) => item.id !== id);
     setProviderProfiles(next);
     if (providerProfileId === id && next[0]) {
@@ -123,6 +126,7 @@ export function useProviderSettings() {
       setProviderKey(formState.apiKey);
       setContextThreshold(formState.contextThreshold);
     }
+    notify?.({ message: '供应商配置已删除', detail: deleted?.name || deleted?.provider || '', tone: 'success' });
   }
 
   return {

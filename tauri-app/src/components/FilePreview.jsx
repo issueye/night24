@@ -1,7 +1,11 @@
 import { formatBytes } from '../utils/format.js';
 import { Placeholder } from './Placeholder.jsx';
+import { LoadingBlock } from './ui/index.js';
 
-export function FilePreview({ file }) {
+export function FilePreview({ file, loading }) {
+  if (loading) {
+    return <LoadingBlock className="file-preview" label="文件加载中" />;
+  }
   if (!file) {
     return <Placeholder title="选择一个文件查看内容" detail="项目目录支持文本文件预览。" />;
   }

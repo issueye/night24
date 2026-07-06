@@ -599,14 +599,116 @@ textarea.ui-field-control {
 
 .ui-toast {
   display: inline-flex;
+  width: min(360px, calc(100vw - 32px));
   min-height: var(--ui-control-height-lg);
   align-items: center;
+  gap: 9px;
   padding: 0 calc(var(--ui-field-padding-x) + 2px);
   color: var(--text);
   background: var(--overlay-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
+}
+
+.ui-toast-viewport {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 120;
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ui-toast-viewport .ui-toast {
+  pointer-events: auto;
+}
+
+.ui-toast-success {
+  border-color: var(--success-border);
+}
+
+.ui-toast-warning {
+  border-color: var(--warning-border);
+}
+
+.ui-toast-danger,
+.ui-toast-error {
+  border-color: var(--danger-border);
+}
+
+.ui-toast-icon {
+  display: grid;
+  flex: 0 0 18px;
+  place-items: center;
+  color: var(--blue);
+}
+
+.ui-toast-success .ui-toast-icon {
+  color: var(--green);
+}
+
+.ui-toast-warning .ui-toast-icon {
+  color: var(--amber);
+}
+
+.ui-toast-danger .ui-toast-icon,
+.ui-toast-error .ui-toast-icon {
+  color: var(--red);
+}
+
+.ui-toast-body {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 7px 0;
+}
+
+.ui-toast-body strong,
+.ui-toast-body small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-toast-body strong {
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.ui-toast-body small {
+  color: var(--subtle);
+  font-size: var(--fs-sm);
+}
+
+.ui-toast-close {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  color: var(--subtle);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.ui-toast-close:hover {
+  color: var(--text);
+  background: var(--surface-soft);
+}
+
+.ui-loading-block {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: var(--muted);
+  font-size: var(--ui-font-size);
 }
 
 .ui-tree {

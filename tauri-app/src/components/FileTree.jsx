@@ -1,7 +1,10 @@
 import { FileCode2 } from 'lucide-react';
-import { Tree } from './ui/index.js';
+import { LoadingBlock, Tree } from './ui/index.js';
 
-export function FileTree({ tree, selectedPath, onOpenFile }) {
+export function FileTree({ loading, tree, selectedPath, onOpenFile }) {
+  if (loading && !tree) {
+    return <LoadingBlock label="目录加载中" size="sm" />;
+  }
   return (
     <Tree
       empty="打开项目后显示文件"

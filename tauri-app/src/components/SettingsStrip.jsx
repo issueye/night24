@@ -22,6 +22,7 @@ export function SettingsStrip({
   theme,
   fontSize,
   workspace,
+  notify,
   apiJson,
   onApiBaseChange,
   onApiKeyChange,
@@ -101,6 +102,7 @@ export function SettingsStrip({
             {tab === 'hooks' && (
               <HookSettings
                 apiJson={apiJson}
+                notify={notify}
                 workspace={workspace}
               />
             )}
@@ -108,6 +110,7 @@ export function SettingsStrip({
             {tab === 'skills' && (
               <SkillSettings
                 apiJson={apiJson}
+                notify={notify}
                 workspace={workspace}
               />
             )}
