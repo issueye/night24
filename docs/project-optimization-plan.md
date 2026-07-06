@@ -141,6 +141,7 @@
 - 已完成：`core_client.rs` 抽出 `route_json_rpc_response`，统一 stdout reader 对 pending JSON-RPC response 的投递和移除逻辑，并补充命中/未知 id 的请求池边界测试。
 - 已完成：`reply.rs` 抽出 `text_message` helper，收敛 user message 与 fallback assistant message 的文本消息构造，并补充当前用户无回复时才追加 placeholder 的边界测试。
 - 已完成：`core_client.rs` 增加 `PendingResponses` / `EventSenders` 类型别名，收敛请求池和事件 sender map 类型签名，并补充接收端关闭时仍清理 pending/sender 的边界测试。
+- 已完成：`core_client.rs` 在 agent-core RPC 超时或响应通道关闭时主动清理 pending 请求，避免无响应核心导致请求池累积，并补充移除 helper 边界测试。
 - 已完成：`workspace.rs` 抽出 `classify_diff_stat_line`，集中 diff 文件头、插入行、删除行分类，并补充 `+++` / `---` 文件头不计入增删行的边界测试。
 - 已完成：`sessions.rs` 抽出 `forced_compaction_preserve_recent`，集中 forced compact 时保留最近消息数量的边界计算，并补充 0/1/2/7/20 会话长度测试。
 
@@ -492,6 +493,7 @@
 - `crates/night24-server/src/core_client.rs`：抽出终止事件识别 helper，并补充 finish/error 分类测试。
 - `crates/night24-server/src/core_client.rs`：抽出 `agent_event_run_id`，统一 agent event run_id 读取和测试。
 - `crates/night24-server/src/core_client.rs`：抽出 `non_empty_path`，集中处理 agent-core 二进制路径环境变量空白值。
+- `crates/night24-server/src/core_client.rs`：agent-core RPC 超时或响应通道关闭时立即移除 pending 请求，降低长运行服务的请求池泄漏风险。
 - `crates/night24-server/src/auth.rs`：抽出 `provided_api_key`，统一 Bearer / X-API-Key header 解析并补充纯函数测试。
 - `crates/night24-server/src/auth.rs`：补充 Authorization 非 UTF-8 时回退 `X-API-Key` 的边界测试。
 - `crates/night24-gts/src/stdlib/modules/exec.rs`：迁移 command builder 初始化到 `ObjectBuilder::new().into_shared()`。

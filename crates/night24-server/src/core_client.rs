@@ -219,10 +219,17 @@ impl AgentCoreClient {
             return Err(anyhow::anyhow!("agent-core write failed: {err}"));
         }
 
-        let response = tokio::time::timeout(timeout, rx)
-            .await
-            .map_err(|_| anyhow::anyhow!("agent-core request timed out: {method}"))?
-            .map_err(|_| anyhow::anyhow!("agent-core response channel closed"))?;
+        let response = match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) => {
+                remove_pending_response(&self.pending, &id);
+                return Err(anyhow::anyhow!("agent-core response channel closed"));
+            }
+            Err(_) => {
+                remove_pending_response(&self.pending, &id);
+                return Err(anyhow::anyhow!("agent-core request timed out: {method}"));
+            }
+        };
 
         if let Some(error) = response.get("error") {
             return Err(anyhow::anyhow!("agent-core {method} failed: {error}"));
@@ -545,6 +552,14 @@ fn route_json_rpc_response(pending: &PendingResponses, id: String, value: serde_
     if let Some(tx) = tx {
         let _ = tx.send(value);
     }
+}
+
+fn remove_pending_response(pending: &PendingResponses, id: &str) -> bool {
+    pending
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.remove(id))
+        .is_some()
 }
 
 fn agent_event_run_id(event: &serde_json::Value) -> Option<&str> {
@@ -918,6 +933,28 @@ mod tests {
         );
 
         assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_pending_response_removes_request_without_sending() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, rx) = oneshot::channel();
+        pending.lock().unwrap().insert("rpc-1".to_string(), tx);
+
+        assert!(remove_pending_response(&pending, "rpc-1"));
+        assert!(pending.lock().unwrap().is_empty());
+        assert!(rx.blocking_recv().is_err());
+    }
+
+    #[test]
+    fn remove_pending_response_ignores_unknown_id() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, mut rx) = oneshot::channel();
+        pending.lock().unwrap().insert("rpc-1".to_string(), tx);
+
+        assert!(!remove_pending_response(&pending, "rpc-missing"));
+        assert!(pending.lock().unwrap().contains_key("rpc-1"));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
