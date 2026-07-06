@@ -691,6 +691,8 @@
 
 追加完成：`reply.rs` 抽出 core event payload 中 message / messages 解析 helper，收敛 `message` 与 `finish` 持久化分支的反序列化逻辑，并补充 malformed payload 过滤测试。
 
+追加完成：`reply.rs` 抽出 terminal event 前置 `diff_ready` 注入 helper，集中维护 diff_ready 先发与终止事件 seq 后移规则，并补充事件顺序和 seq 测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

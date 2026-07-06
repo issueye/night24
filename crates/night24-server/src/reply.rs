@@ -143,17 +143,13 @@ fn prepare_core_event_dispatch(
 
     if is_terminal {
         let seq = core_event_seq(&event_to_send);
-        if let Some(diff_event) = build_diff_ready_event(
+        let diff_event = build_diff_ready_event(
             &state.run_id,
             seq,
             &state.diff_root,
             state.diff_baseline.as_ref(),
-        ) {
-            if let Some(object) = event_to_send.as_object_mut() {
-                object.insert("seq".to_string(), serde_json::json!(seq + 1));
-            }
-            events.push(diff_event);
-        }
+        );
+        append_diff_ready_before_terminal(&mut events, &mut event_to_send, diff_event);
     }
 
     events.push(event_to_send);
@@ -161,6 +157,18 @@ fn prepare_core_event_dispatch(
         events,
         is_terminal,
     }
+}
+
+fn append_diff_ready_before_terminal(
+    events: &mut Vec<serde_json::Value>,
+    terminal_event: &mut serde_json::Value,
+    diff_event: Option<serde_json::Value>,
+) {
+    let Some(diff_event) = diff_event else {
+        return;
+    };
+    set_core_event_seq(terminal_event, core_event_seq(terminal_event) + 1);
+    events.push(diff_event);
 }
 
 fn finalize_pumped_session(mut session: Session, run_id: &str, user_message_id: &str) -> Session {
@@ -444,6 +452,12 @@ fn core_event_seq(event: &serde_json::Value) -> u64 {
         .get("seq")
         .and_then(|value| value.as_u64())
         .unwrap_or(0)
+}
+
+fn set_core_event_seq(event: &mut serde_json::Value, seq: u64) {
+    if let Some(object) = event.as_object_mut() {
+        object.insert("seq".to_string(), serde_json::json!(seq));
+    }
 }
 
 fn conversation_has_assistant_after_current_user(conversation: &[Message], user_id: &str) -> bool {
@@ -1078,6 +1092,32 @@ mod tests {
         assert_eq!(core_event_seq(&message), 7);
         assert_eq!(core_event_seq(&finish), 12);
         assert_eq!(core_event_seq(&error_without_seq), 0);
+    }
+
+    #[test]
+    fn diff_ready_helper_precedes_terminal_event_and_shifts_terminal_seq() {
+        let mut events = Vec::new();
+        let mut terminal = serde_json::json!({
+            "type": "finish",
+            "run_id": "run-1",
+            "seq": 9
+        });
+        let diff = serde_json::json!({
+            "type": "diff_ready",
+            "run_id": "run-1",
+            "seq": 9
+        });
+
+        append_diff_ready_before_terminal(&mut events, &mut terminal, Some(diff));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "diff_ready");
+        assert_eq!(events[0]["seq"], 9);
+        assert_eq!(terminal["seq"], 10);
+
+        append_diff_ready_before_terminal(&mut events, &mut terminal, None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(terminal["seq"], 10);
     }
 
     #[test]
