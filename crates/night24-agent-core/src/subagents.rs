@@ -359,24 +359,20 @@ fn snapshot_records(
 
     SubAgentPoolSnapshot {
         total: subagents.len(),
-        running: subagents
-            .iter()
-            .filter(|item| item.status == SubAgentStatus::Running.as_str())
-            .count(),
-        completed: subagents
-            .iter()
-            .filter(|item| item.status == SubAgentStatus::Completed.as_str())
-            .count(),
-        failed: subagents
-            .iter()
-            .filter(|item| item.status == SubAgentStatus::Failed.as_str())
-            .count(),
-        cancelled: subagents
-            .iter()
-            .filter(|item| item.status == SubAgentStatus::Cancelled.as_str())
-            .count(),
+        running: count_status(&subagents, SubAgentStatus::Running),
+        completed: count_status(&subagents, SubAgentStatus::Completed),
+        failed: count_status(&subagents, SubAgentStatus::Failed),
+        cancelled: count_status(&subagents, SubAgentStatus::Cancelled),
         subagents,
     }
+}
+
+fn count_status(subagents: &[SubAgentSnapshot], status: SubAgentStatus) -> usize {
+    let status = status.as_str();
+    subagents
+        .iter()
+        .filter(|item| item.status == status)
+        .count()
 }
 
 fn snapshot_record(
@@ -417,5 +413,96 @@ fn preview(text: &str) -> String {
         compact
     } else {
         compact.chars().take(MAX_PREVIEW).collect::<String>() + "..."
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subagent_mode_accepts_sync_aliases_and_defaults_to_async() {
+        assert_eq!(SubAgentMode::from_value(Some("sync")), SubAgentMode::Sync);
+        assert_eq!(
+            SubAgentMode::from_value(Some(" synchronous ")),
+            SubAgentMode::Sync
+        );
+        assert_eq!(
+            SubAgentMode::from_value(Some("blocking")),
+            SubAgentMode::Sync
+        );
+        assert_eq!(SubAgentMode::from_value(Some("async")), SubAgentMode::Async);
+        assert_eq!(
+            SubAgentMode::from_value(Some("unknown")),
+            SubAgentMode::Async
+        );
+        assert_eq!(SubAgentMode::from_value(None), SubAgentMode::Async);
+    }
+
+    #[test]
+    fn pool_snapshot_counts_statuses_without_counting_queued() {
+        let pool = SubAgentPool::default();
+
+        let running = pool
+            .create(
+                "parent",
+                "child-running",
+                Some("running"),
+                "task",
+                SubAgentMode::Async,
+            )
+            .unwrap();
+        pool.mark_running(&running.id);
+
+        let completed = pool
+            .create(
+                "parent",
+                "child-completed",
+                Some("completed"),
+                "task",
+                SubAgentMode::Async,
+            )
+            .unwrap();
+        pool.mark_completed(&completed.id, "done".to_string(), Vec::new());
+
+        let failed = pool
+            .create(
+                "parent",
+                "child-failed",
+                Some("failed"),
+                "task",
+                SubAgentMode::Async,
+            )
+            .unwrap();
+        pool.mark_failed(&failed.id, "boom".to_string(), Vec::new());
+
+        let cancelled = pool
+            .create(
+                "parent",
+                "child-cancelled",
+                Some("cancelled"),
+                "task",
+                SubAgentMode::Async,
+            )
+            .unwrap();
+        pool.cancel(Some(&cancelled.id)).unwrap();
+
+        pool.create(
+            "parent",
+            "child-queued",
+            Some("queued"),
+            "task",
+            SubAgentMode::Async,
+        )
+        .unwrap();
+
+        let snapshot = pool.snapshot(None, false, false).unwrap();
+        let snapshot: SubAgentPoolSnapshot = serde_json::from_value(snapshot).unwrap();
+
+        assert_eq!(snapshot.total, 5);
+        assert_eq!(snapshot.running, 1);
+        assert_eq!(snapshot.completed, 1);
+        assert_eq!(snapshot.failed, 1);
+        assert_eq!(snapshot.cancelled, 1);
     }
 }

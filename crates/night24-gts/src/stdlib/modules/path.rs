@@ -163,15 +163,7 @@ pub(crate) fn path_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
 
 pub(crate) fn path_parse_object(value: &str) -> Object {
     let path = Path::new(value);
-    let base = path
-        .file_name()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let ext = path
-        .extension()
-        .map(|p| format!(".{}", p.to_string_lossy()))
-        .unwrap_or_default();
-    let name = base.strip_suffix(&ext).unwrap_or(&base).to_string();
+    let (base, name, ext) = path_name_parts(path);
     let dir = path
         .parent()
         .map(|p| p.to_string_lossy().to_string())
@@ -190,6 +182,19 @@ pub(crate) fn path_parse_object(value: &str) -> Object {
         .build()
 }
 
+fn path_name_parts(path: &Path) -> (String, String, String) {
+    let base = path
+        .file_name()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|p| format!(".{}", p.to_string_lossy()))
+        .unwrap_or_default();
+    let name = base.strip_suffix(&ext).unwrap_or(&base).to_string();
+    (base, name, ext)
+}
+
 pub(crate) fn path_format(ctx: &mut CallContext, args: &[Object]) -> Object {
     let reader = ArgReader::new(ctx, "path.format", args);
     let Some(hash) = reader.object_view(0) else {
@@ -204,15 +209,23 @@ pub(crate) fn path_format_object(hash: &HashData) -> Object {
     let base = hash_string(&hash, "base").unwrap_or_default();
     let name = hash_string(&hash, "name").unwrap_or_default();
     let ext = hash_string(&hash, "ext").unwrap_or_default();
-    let file = if !base.is_empty() {
+    let file = path_format_file_name(base, name, ext);
+    str_obj(path_format_join(dir, root, file))
+}
+
+fn path_format_file_name(base: String, name: String, ext: String) -> String {
+    if !base.is_empty() {
         base
     } else {
-        format!("{}{}", name, ext)
-    };
+        format!("{name}{ext}")
+    }
+}
+
+fn path_format_join(dir: String, root: String, file: String) -> String {
     if !dir.is_empty() {
-        str_obj(PathBuf::from(dir).join(file).to_string_lossy())
+        PathBuf::from(dir).join(file).to_string_lossy().to_string()
     } else {
-        str_obj(PathBuf::from(root).join(file).to_string_lossy())
+        PathBuf::from(root).join(file).to_string_lossy().to_string()
     }
 }
 
@@ -222,11 +235,13 @@ pub(crate) fn path_split_list(ctx: &mut CallContext, args: &[Object]) -> Object 
         Ok(value) => value,
         Err(err) => return err,
     };
-    array(
-        env::split_paths(&value)
-            .map(|p| str_obj(p.to_string_lossy()))
-            .collect(),
-    )
+    array(split_path_list(&value).into_iter().map(str_obj).collect())
+}
+
+fn split_path_list(value: &str) -> Vec<String> {
+    env::split_paths(value)
+        .map(|path| path.to_string_lossy().to_string())
+        .collect()
 }
 
 #[cfg(test)]
@@ -272,6 +287,18 @@ mod tests {
     }
 
     #[test]
+    fn path_name_parts_use_last_extension() {
+        assert_eq!(
+            path_name_parts(Path::new("archive.tar.gz")),
+            (
+                "archive.tar.gz".to_string(),
+                "archive.tar".to_string(),
+                ".gz".to_string()
+            )
+        );
+    }
+
+    #[test]
     fn path_format_object_prefers_base_over_name_ext() {
         let object = ObjectBuilder::new()
             .set("dir", str_obj("dir"))
@@ -290,6 +317,38 @@ mod tests {
     }
 
     #[test]
+    fn path_format_file_name_falls_back_to_name_ext() {
+        assert_eq!(
+            path_format_file_name(String::new(), "file".to_string(), ".txt".to_string()),
+            "file.txt"
+        );
+        assert_eq!(
+            path_format_file_name(
+                "base.md".to_string(),
+                "ignored".to_string(),
+                ".txt".to_string()
+            ),
+            "base.md"
+        );
+    }
+
+    #[test]
+    fn path_format_join_prefers_dir_over_root() {
+        assert_eq!(
+            path_format_join(
+                "dir".to_string(),
+                MAIN_SEPARATOR.to_string(),
+                "file.txt".to_string()
+            ),
+            "dir\\file.txt".replace('\\', MAIN_SEPARATOR_STR)
+        );
+        assert_eq!(
+            path_format_join(String::new(), "root".to_string(), "file.txt".to_string()),
+            "root\\file.txt".replace('\\', MAIN_SEPARATOR_STR)
+        );
+    }
+
+    #[test]
     fn path_format_object_ignores_non_string_fields() {
         let object = ObjectBuilder::new()
             .set("dir", str_obj("dir"))
@@ -303,6 +362,15 @@ mod tests {
         assert_eq!(
             object_as_string(path_format_object(&hash.borrow())),
             "dir\\file".replace('\\', MAIN_SEPARATOR_STR)
+        );
+    }
+
+    #[test]
+    fn split_path_list_uses_platform_delimiter() {
+        let delimiter = if cfg!(windows) { ';' } else { ':' };
+        assert_eq!(
+            split_path_list(&format!("alpha{delimiter}beta")),
+            vec!["alpha".to_string(), "beta".to_string()]
         );
     }
 }

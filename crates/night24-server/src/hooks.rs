@@ -161,43 +161,50 @@ fn validate_hook_definition(
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let event = hook.event.trim();
     if event.parse::<HookEvent>().is_err() {
-        return Err(json_error(
-            StatusCode::BAD_REQUEST,
-            format!("hooks[{index}].event is not supported: {}", hook.event),
+        return Err(hook_validation_error(
+            index,
+            format!(".event is not supported: {}", hook.event),
         ));
     }
 
     if let Some(engine) = hook.engine.as_deref().map(str::trim) {
         if !is_supported_hook_engine(engine) {
-            return Err(json_error(
-                StatusCode::BAD_REQUEST,
-                format!("hooks[{index}].engine is not supported: {engine}"),
+            return Err(hook_validation_error(
+                index,
+                format!(".engine is not supported: {engine}"),
             ));
         }
     }
 
     if !has_hook_entrypoint(hook) {
-        return Err(json_error(
-            StatusCode::BAD_REQUEST,
-            format!("hooks[{index}] must define script or inline_script"),
+        return Err(hook_validation_error(
+            index,
+            " must define script or inline_script",
         ));
     }
 
     if matches!(hook.timeout_ms, Some(0)) {
-        return Err(json_error(
-            StatusCode::BAD_REQUEST,
-            format!("hooks[{index}].timeout_ms must be greater than 0"),
+        return Err(hook_validation_error(
+            index,
+            ".timeout_ms must be greater than 0",
         ));
     }
 
     if matches!(hook.instruction_limit, Some(0)) {
-        return Err(json_error(
-            StatusCode::BAD_REQUEST,
-            format!("hooks[{index}].instruction_limit must be greater than 0"),
+        return Err(hook_validation_error(
+            index,
+            ".instruction_limit must be greater than 0",
         ));
     }
 
     Ok(())
+}
+
+fn hook_validation_error(
+    index: usize,
+    detail: impl std::fmt::Display,
+) -> (StatusCode, Json<serde_json::Value>) {
+    json_error(StatusCode::BAD_REQUEST, format!("hooks[{index}]{detail}"))
 }
 
 fn has_hook_entrypoint(hook: &HookDefinition) -> bool {
@@ -426,5 +433,41 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("instruction_limit"));
+    }
+
+    #[test]
+    fn reports_failing_hook_index_after_valid_hook() {
+        let config = HookConfig {
+            hooks: vec![
+                HookDefinition {
+                    event: "run_started".to_string(),
+                    name: None,
+                    engine: Some("gts".to_string()),
+                    script: Some("hooks/run-started.gs".to_string()),
+                    inline_script: None,
+                    enabled: true,
+                    timeout_ms: Some(5_000),
+                    instruction_limit: Some(1_000_000),
+                    allowed_modules: None,
+                },
+                HookDefinition {
+                    event: "before_tool".to_string(),
+                    name: None,
+                    engine: Some("gts".to_string()),
+                    script: Some("hooks/before-tool.gs".to_string()),
+                    inline_script: None,
+                    enabled: true,
+                    timeout_ms: Some(5_000),
+                    instruction_limit: Some(0),
+                    allowed_modules: None,
+                },
+            ],
+        };
+
+        let err = validate_hook_config(&config).unwrap_err();
+        assert!(err.1["error"]
+            .as_str()
+            .unwrap()
+            .contains("hooks[1].instruction_limit"));
     }
 }

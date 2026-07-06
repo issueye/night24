@@ -118,39 +118,8 @@ impl<'a> VmState<'a> {
                     "VMError: ran off the end of bytecode without RETURN",
                 );
             }
-            // Sample the execution deadline periodically so `--timeout` can
-            // interrupt tight CPU loops. Mirrors the per-statement check the
-            // tree-walker performs in `evaluator::eval_core`.
-            //
-            // Two-stage check: first the cheap deadline probe (no Position
-            // lookup, no `Rc<str>` clone, no error construction). Only when the
-            // deadline has actually elapsed do we pay for `position_at(ip)` and
-            // build the `TimeoutError`. In tight CPU loops this branch fires
-            // every `TIMEOUT_CHECK_INTERVAL` instructions but almost never
-            // times out, so the saving on the hot path is the Position lookup.
-            self.instruction_count = self.instruction_count.wrapping_add(1);
-            if self
-                .instruction_count
-                .is_multiple_of(TIMEOUT_CHECK_INTERVAL)
-            {
-                // D4.1: check instruction limit (resource guard) alongside timeout.
-                if self
-                    .vm
-                    .is_instruction_limit_exceeded(self.instruction_count)
-                {
-                    let pos = self.chunk.position_at(self.ip);
-                    if let Some(err) = self.vm.check_instruction_limit(self.instruction_count, pos)
-                    {
-                        return err;
-                    }
-                }
-                // Timeout check (existing).
-                if self.vm.is_deadline_exceeded() {
-                    let pos = self.chunk.position_at(self.ip);
-                    if let Some(timeout) = self.vm.check_timeout(pos) {
-                        return timeout;
-                    }
-                }
+            if let Some(err) = self.check_execution_budget() {
+                return err;
             }
             match self.step() {
                 Ok(Flow::Continue) => {}
@@ -163,6 +132,39 @@ impl<'a> VmState<'a> {
                 }
             }
         }
+    }
+
+    /// Sample timeout and instruction-limit guards without paying position
+    /// lookup cost on every instruction.
+    fn check_execution_budget(&mut self) -> Option<Object> {
+        self.instruction_count = self.instruction_count.wrapping_add(1);
+        if !self
+            .instruction_count
+            .is_multiple_of(TIMEOUT_CHECK_INTERVAL)
+        {
+            return None;
+        }
+
+        // D4.1: check instruction limit (resource guard) alongside timeout.
+        if self
+            .vm
+            .is_instruction_limit_exceeded(self.instruction_count)
+        {
+            let pos = self.chunk.position_at(self.ip);
+            if let Some(err) = self.vm.check_instruction_limit(self.instruction_count, pos) {
+                return Some(err);
+            }
+        }
+
+        // Timeout check (existing).
+        if self.vm.is_deadline_exceeded() {
+            let pos = self.chunk.position_at(self.ip);
+            if let Some(timeout) = self.vm.check_timeout(pos) {
+                return Some(timeout);
+            }
+        }
+
+        None
     }
 
     /// Decode and execute one instruction. Returning `Result` lets opcode

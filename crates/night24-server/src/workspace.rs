@@ -249,10 +249,7 @@ fn parse_git_status_line(line: &str) -> Option<WorkspaceStatusFile> {
         return None;
     }
 
-    let path = line.get(3..)?.split(" -> ").last().unwrap_or("");
-    if path.is_empty() {
-        return None;
-    }
+    let path = git_status_path(line)?;
 
     Some(WorkspaceStatusFile {
         path: path.to_string(),
@@ -266,6 +263,13 @@ fn is_git_status_byte(byte: u8) -> bool {
         byte,
         b' ' | b'M' | b'A' | b'D' | b'R' | b'C' | b'U' | b'?' | b'!'
     )
+}
+
+fn git_status_path(line: &str) -> Option<&str> {
+    line.get(3..)?
+        .split(" -> ")
+        .last()
+        .filter(|path| !path.is_empty())
 }
 
 pub(crate) fn diff_stats(diff: &str) -> (usize, usize, usize) {
@@ -696,6 +700,16 @@ mod tests {
         assert!(parse_git_status_line(" M").is_none());
         assert!(parse_git_status_line(" M ").is_none());
         assert!(parse_git_status_line("✓ M src/main.rs").is_none());
+    }
+
+    #[test]
+    fn git_status_path_extracts_plain_and_rename_destinations() {
+        assert_eq!(git_status_path(" M src/main.rs"), Some("src/main.rs"));
+        assert_eq!(
+            git_status_path("R  src/old.rs -> src/new.rs"),
+            Some("src/new.rs")
+        );
+        assert_eq!(git_status_path(" M "), None);
     }
 
     #[test]

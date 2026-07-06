@@ -32,6 +32,7 @@
 @import "./styles/desktop-responsive.css";
 @import "./styles/desktop-conversation.css";
 @import "./styles/desktop-overlays.css";
+@import "./styles/desktop-events.css";
 @import "./styles/markdown.css";
 @import "./styles/diff.css";
 @import "./styles/theme.css";

@@ -139,6 +139,32 @@ fn state_for_upvalue_tests() -> VmState<'static> {
     VmState::new(chunk, env, Vec::new(), vm)
 }
 
+fn state_for_budget_tests() -> VmState<'static> {
+    let chunk = Box::leak(Box::new(Chunk::new()));
+    let vm = VirtualMachine::new();
+    vm.set_instruction_limit(TIMEOUT_CHECK_INTERVAL - 1);
+    let env = Environment::new_root(vm.clone());
+    VmState::new(chunk, env, Vec::new(), vm)
+}
+
+#[test]
+fn execution_budget_is_sampled_at_interval_boundary() {
+    let mut state = state_for_budget_tests();
+    for _ in 0..(TIMEOUT_CHECK_INTERVAL - 1) {
+        assert!(state.check_execution_budget().is_none());
+    }
+
+    let err = state
+        .check_execution_budget()
+        .expect("instruction limit should trip at sample boundary");
+    let Object::Error(data) = err else {
+        panic!("expected instruction limit error");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.starts_with("MemoryLimitError:"));
+}
+
 #[test]
 fn throw_opcode_wraps_non_error_value() {
     let result = run_src("throw \"boom\";");

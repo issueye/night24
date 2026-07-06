@@ -64,7 +64,7 @@ pub(crate) fn text_truncate_width(ctx: &mut CallContext, args: &[Object]) -> Obj
         Ok(v) => v,
         Err(e) => return e,
     };
-    let limit = if width < 0.0 { 0 } else { width as usize };
+    let limit = width_limit(width);
     str_obj(truncate_visible_width(&value, limit))
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn text_pad_right_width(ctx: &mut CallContext, args: &[Object]) -> Ob
         Ok(v) => v,
         Err(e) => return e,
     };
-    let target = if width < 0.0 { 0 } else { width as usize };
+    let target = width_limit(width);
     let stripped = strip_ansi(&value);
     let mut current = visible_width(&stripped);
     let mut out = stripped;
@@ -102,7 +102,7 @@ pub(crate) fn text_wrap_width(ctx: &mut CallContext, args: &[Object]) -> Object 
     let limit = if width <= 0.0 {
         return array(vec![str_obj(String::new())]);
     } else {
-        width as usize
+        width_limit(width)
     };
     array(
         wrap_visible_width(&value, limit)
@@ -134,6 +134,14 @@ fn truncate_visible_width(value: &str, limit: usize) -> String {
         used += w;
     }
     out
+}
+
+fn width_limit(width: f64) -> usize {
+    if width < 0.0 {
+        0
+    } else {
+        width as usize
+    }
 }
 
 fn wrap_visible_width(value: &str, limit: usize) -> Vec<String> {
@@ -169,6 +177,13 @@ mod tests {
     #[test]
     fn truncate_width_strips_ansi_before_applying_display_limit() {
         assert_eq!(truncate_visible_width("\x1b[32mA界B\x1b[0m", 3), "A界");
+    }
+
+    #[test]
+    fn width_limit_clamps_negative_values_to_zero() {
+        assert_eq!(width_limit(-1.0), 0);
+        assert_eq!(width_limit(0.0), 0);
+        assert_eq!(width_limit(4.8), 4);
     }
 
     #[test]

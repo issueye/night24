@@ -109,6 +109,7 @@
 - 已完成：从 `desktop-shell.css` 抽出 `desktop-workspace.css`，承接 `.workspace-grid` 桌面壳布局覆盖，导入位置紧跟 desktop shell 以稳定后续覆盖。
 - 已完成：从 `desktop-shell.css` 抽出 `desktop-chrome.css`，承接桌面壳 app frame、顶部栏、品牌区、状态 pill 和共享按钮覆盖，导入位置保持在 desktop shell 后。
 - 已完成：从 `desktop-shell.css` 抽出 `desktop-theme.css`，承接桌面壳 `:root` 主题变量，导入位置保持在 desktop shell 后、desktop chrome 前。
+- 已完成：从 `desktop-overlays.css` 抽出 `desktop-events.css`，承接 TimelinePanel 事件浮窗、事件列表和事件行样式，桌面覆盖层文件保留设置条、上下文浮窗和共享浮窗头部。
 - 待后续：继续审计 `workspace.css` 与 `desktop-shell.css`，优先只迁移边界清晰的功能块，避免一次性重排级联顺序。
 
 ### Phase 3：Server/Core 结构隔离
@@ -159,6 +160,7 @@
 - 已完成：补充子代理工具权限拒绝回归测试，覆盖拒绝后不触发 `tool_started`、不创建子代理记录、finish tool_response 记录拒绝原因。
 - 已完成：补充 skill 工具严格权限拒绝回归测试，覆盖拒绝后不触发 `tool_started`、不读取技能正文、finish tool_response 记录拒绝原因。
 - 已完成：补充子代理取消工具回归测试，覆盖 `developer__subagent_cancel` 事件顺序、池状态变为 cancelled 和 finish payload。
+- 已完成：`subagents.rs` 抽出 `count_status`，收敛子代理池 snapshot 状态统计逻辑，并补充 sync alias 解析与 queued 不计入终态统计的边界测试。
 - 下一步：继续 GTS stdlib helper 收敛，或建立桌面端 CSS 迁移前的最小视觉检查清单。
 
 ### Phase 5：GTS 引擎模块化
@@ -218,8 +220,13 @@
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 `gzip.compressFileSync` / `gzip.decompressFileSync` 的低风险路径参数读取，并补充 gzip bytes round-trip 测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 `template.render` / `template.renderHTML` / `template.renderFileSync` / `template.escapeHTML` 的低风险字符串参数读取，并补充 HTML escape 与模板 lookup 测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 text 模块字符串/数字参数读取，抽出宽度截断与换行纯函数，并补充 ANSI strip 后宽度、截断、换行测试。
+- 已完成：继续收敛 text 模块宽度参数处理，抽出 `width_limit` 统一负数归零和小数截断语义，并补充边界测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 `sse.parse` 的低风险字符串参数读取，并补充 SSE event/data/id/retry 解析测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 net_ip 模块低风险字符串参数读取，抽出 `join_host_port` 纯函数，并补充 CIDR contains 与 IPv6 host:port 测试。
+- 已完成：继续收敛 path 模块 helper，抽出 `path_format_file_name` 统一 `base` 优先和 `name + ext` fallback 逻辑，并补充纯函数边界测试。
+- 已完成：继续收敛 path 模块 helper，抽出 `split_path_list` 统一 `path.splitList` 的平台路径列表拆分，并补充平台分隔符测试。
+- 已完成：继续收敛 path 模块 helper，抽出 `path_name_parts` 统一 `path.parse` 的 base/name/ext 字段提取，并补充多扩展名边界测试。
+- 已完成：继续收敛 path 模块 helper，抽出 `path_format_join` 统一 `path.format` 的 dir/root 拼接选择，并补充 dir 优先于 root 的边界测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 terminal 模块 moveTo/setTitle/style/hyperlink 参数读取，抽出 terminal style/hyperlink 纯字符串 helper，并补充 ANSI/OSC 输出测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 cache 实例方法 key 参数读取，抽出 cache entry/expiration helper，并补充 TTL 边界测试。
 - 已完成：继续扩大 `ArgReader` 覆盖面，迁移 prometheus 实例方法 name/value 参数读取，并补充 set/inc/get 与 snapshot entry 测试。
@@ -286,6 +293,7 @@
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_try.rs`，承接 try/catch/finally protected region 发码、catch 绑定和 exceptional finally 路径；主编译器进一步收敛为顶层编译与语句分发。
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_stmt.rs`，承接语句级分发、表达式语句保留值处理和 block 递归编译；主编译器进一步只保留程序级入口、共享 re-export 与测试。
 - 已完成：将 `bytecode/compiler.rs` 中测试移动到 `bytecode/compiler/tests.rs`，主 compiler 文件进一步只保留编译入口、共享 re-export 和测试模块声明。
+- 已完成：从 `bytecode/interp.rs` 主循环抽出 `check_execution_budget`，集中 timeout / instruction limit 采样检查，并补充采样边界回归测试。
 - 下一步：继续拆 compiler 中剩余复合 expression emitter，或拆 interpreter 中剩余小型栈操作 helper；每步继续核对 `try/finally` 保护线没有语义回退。
 - 中期建议：将 `evaluator::expressions` 中被 bytecode 复用的语义迁移到 `semantics` 或 `runtime_ops`，再处理更大的 interpreter/compiler 主循环拆分。
 - Phase 5 固定验证：每个 compiler/interpreter 拆分批次必须运行 `cargo fmt --check`、`cargo test -p night24-gts`、`npm run build`（`tauri-app` 目录）、`git diff --check`；文档-only 批次至少运行 `git diff --check`。
@@ -424,6 +432,7 @@
 - `tauri-app/src/styles/desktop-sidebar.css`：从 `desktop-shell.css` 抽出桌面侧栏、导航、项目树和会话列表覆盖样式。
 - `tauri-app/src/styles/desktop-status.css`、`desktop-responsive.css`：从 `desktop-shell.css` 抽出状态栏和独立响应式覆盖样式。
 - `tauri-app/src/styles/desktop-chrome.css`：从 `desktop-shell.css` 抽出桌面壳 app frame、顶部栏、品牌区、状态 pill 和共享按钮覆盖样式。
+- `tauri-app/src/styles/desktop-events.css`：从 `desktop-overlays.css` 抽出 TimelinePanel 事件浮窗、事件列表和事件行样式。
 - `tauri-app/src/styles/settings-providers.css`、`settings-hooks-skills.css`：从 `settings.css` 抽出 Provider 和 Hook/Skill 设置管理样式。
 - `tauri-app/src/styles/settings-hooks.css`、`settings-skills.css`：从 `settings-hooks-skills.css` 继续抽出 Hook 和 Skill 管理专属样式。
 - `tauri-app/src/styles/chat-permissions.css`、`chat-tools.css`、`chat-composer.css`：从 `chat.css` 抽出聊天权限卡、工具调用块和输入区相关样式。
@@ -607,6 +616,10 @@
 
 追加完成：`workspace.rs` 已将 `parse_git_status` 的单行解析抽成 `parse_git_status_line`，集中 porcelain v1 状态字符校验，并补充普通修改、rename、Unicode 路径和畸形行测试。
 
+追加完成：`hooks.rs` 已抽出 hook 配置校验错误构造 helper，收敛 `hooks[index]` 错误前缀拼接，并补充多 hook 配置中后续 hook 失败时保留准确 index 的边界测试。
+
+追加完成：`workspace.rs` 已抽出 `git_status_path`，集中 porcelain 路径与 rename 目标路径提取逻辑，并补充普通路径、rename 目标和空路径边界测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：
@@ -721,6 +734,20 @@
 
 - 从 `desktop-shell.css` 抽出桌面端 `:root` 主题变量到 `desktop-theme.css`。
 - 在 `styles.css` 中将 `desktop-theme.css` 放在 `desktop-shell.css` 之后、`desktop-chrome.css` 之前，保持原级联顺序。
+
+验收：
+
+- `npm run build` 通过。
+- `git diff --check` 通过。
+
+### CSS 优化批次：desktop 事件浮窗抽取
+
+状态：已完成。
+
+范围：
+
+- 从 `desktop-overlays.css` 抽出 TimelinePanel 事件浮窗、事件列表和事件行规则到 `desktop-events.css`。
+- 在 `styles.css` 中将 `desktop-events.css` 放在 `desktop-overlays.css` 之后，共享 `.float-head` 等覆盖层样式继续留在 `desktop-overlays.css`。
 
 验收：
 
