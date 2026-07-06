@@ -483,6 +483,7 @@
 - `tauri-app/src/styles/chat-permissions.css`、`chat-tools.css`、`chat-composer.css`：从 `chat.css` 抽出聊天权限卡、工具调用块和输入区相关样式。
 - `tauri-app/src/styles/subagents-list.css`、`subagents-detail.css`：从 `subagents.css` 抽出子代理列表和详情区域样式。
 - `tauri-app/src/components/subagents/status.js`：抽出子代理状态展示元数据和摘要文本 helper，列表/详情复用同一状态映射；统计栏补充 cancelled 计数展示。
+- `crates/night24-agent-core/src/subagents.rs`、`tauri-app/src/components/subagents/SubAgentStats.jsx`：子代理池 snapshot 增加 queued 计数，桌面端统计栏补充排队中状态展示。
 - `crates/night24-server/src/reply.rs`：抽出 `sse_stream_response`，统一 reply SSE 标准响应 headers。
 - `crates/night24-server/src/reply.rs`：抽出 `json_error_response`，统一 reply session 准备阶段 JSON 错误响应。
 - `crates/night24-server/src/core_client.rs`：抽出终止事件识别 helper，并补充 finish/error 分类测试。

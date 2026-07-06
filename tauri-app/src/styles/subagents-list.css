@@ -89,6 +89,10 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+.subagent-dot.queued {
+  background: var(--amber);
+}
+
 .subagent-dot.completed {
   background: var(--green);
 }

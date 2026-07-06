@@ -121,6 +121,7 @@ pub(super) struct SubAgentSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct SubAgentPoolSnapshot {
     pub(super) total: usize,
+    pub(super) queued: usize,
     pub(super) running: usize,
     pub(super) completed: usize,
     pub(super) failed: usize,
@@ -359,6 +360,7 @@ fn snapshot_records(
 
     SubAgentPoolSnapshot {
         total: subagents.len(),
+        queued: count_status(&subagents, SubAgentStatus::Queued),
         running: count_status(&subagents, SubAgentStatus::Running),
         completed: count_status(&subagents, SubAgentStatus::Completed),
         failed: count_status(&subagents, SubAgentStatus::Failed),
@@ -440,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_snapshot_counts_statuses_without_counting_queued() {
+    fn pool_snapshot_counts_all_statuses() {
         let pool = SubAgentPool::default();
 
         let running = pool
@@ -500,6 +502,7 @@ mod tests {
         let snapshot: SubAgentPoolSnapshot = serde_json::from_value(snapshot).unwrap();
 
         assert_eq!(snapshot.total, 5);
+        assert_eq!(snapshot.queued, 1);
         assert_eq!(snapshot.running, 1);
         assert_eq!(snapshot.completed, 1);
         assert_eq!(snapshot.failed, 1);

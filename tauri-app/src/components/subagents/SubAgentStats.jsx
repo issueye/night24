@@ -19,6 +19,7 @@ export function SubAgentStats({
     <div className="subagent-toolbar">
       <div className="subagent-stats">
         <Stat label="总数" value={pool?.total} />
+        <Stat label="排队" value={pool?.queued} tone="queued" />
         <Stat label="运行中" value={pool?.running} tone="running" />
         <Stat label="完成" value={pool?.completed} tone="completed" />
         <Stat label="失败" value={pool?.failed} tone="failed" />
