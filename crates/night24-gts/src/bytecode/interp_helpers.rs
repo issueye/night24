@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use super::chunk::Chunk;
-use super::closure::FunctionProto;
+use super::closure::{FunctionProto, UpvalueSource};
 use super::upvalue::Upvalue;
 
 pub(super) fn read_byte_operand(
@@ -101,6 +101,31 @@ pub(super) fn read_u32_operand_with_pos(
     Ok((value, pos))
 }
 
+pub(super) fn jump_to_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    opcode: &'static str,
+) -> Result<(), Object> {
+    let target = read_u32_operand(chunk, ip, opcode)? as usize;
+    *ip = target;
+    Ok(())
+}
+
+pub(super) fn conditional_jump_from_stack(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    opcode: &'static str,
+    jump_when_truthy: bool,
+) -> Result<(), Object> {
+    let (target, pos) = read_u32_operand_with_pos(chunk, ip, opcode)?;
+    let cond = stack.pop().ok_or_else(|| stack_underflow(pos))?;
+    if cond.is_truthy() == jump_when_truthy {
+        *ip = target as usize;
+    }
+    Ok(())
+}
+
 pub(super) fn read_string_operand(
     chunk: &Chunk,
     ip: &mut usize,
@@ -180,6 +205,11 @@ pub(super) fn throw_value(value: Object, pos: Position) -> Object {
             err
         }
     }
+}
+
+pub(super) fn throw_from_stack(stack: &mut Vec<Object>, pos: Position) -> Result<Object, Object> {
+    let value = stack.pop().ok_or_else(|| stack_underflow(pos.clone()))?;
+    Err(throw_value(value, pos))
 }
 
 pub(super) fn catch_value(value: Object) -> Object {
@@ -300,6 +330,57 @@ pub(super) fn close_open_upvalues_from(
     }
 }
 
+pub(super) fn capture_proto_upvalues(
+    proto: &Rc<FunctionProto>,
+    env: &EnvRef,
+    open_upvalues: &mut BTreeMap<usize, Vec<Rc<Upvalue>>>,
+    current_upvalues: &[Rc<Upvalue>],
+) -> Result<Vec<Rc<Upvalue>>, Object> {
+    let mut captured = Vec::with_capacity(proto.upvalue_desc.len());
+    for desc in &proto.upvalue_desc {
+        match desc.source {
+            UpvalueSource::LocalSlot(slot) => {
+                if let Some(value) = env.borrow().get(&desc.name) {
+                    captured.push(Upvalue::new_closed(value));
+                } else {
+                    captured.push(capture_open_upvalue(open_upvalues, slot as usize));
+                }
+            }
+            UpvalueSource::ParentUpvalue(index) => {
+                let Some(parent) = current_upvalues.get(index as usize) else {
+                    return Err(new_error(
+                        proto.pos.clone(),
+                        format!(
+                            "VMError: missing parent upvalue {} for closure {}",
+                            index, proto.name
+                        ),
+                    ));
+                };
+                captured.push(parent.clone());
+            }
+        }
+    }
+    Ok(captured)
+}
+
+pub(super) fn capture_open_upvalue(
+    open_upvalues: &mut BTreeMap<usize, Vec<Rc<Upvalue>>>,
+    slot: usize,
+) -> Rc<Upvalue> {
+    let entry = open_upvalues.entry(slot).or_default();
+    if let Some(existing) = entry.iter().find(|upvalue| upvalue.is_open()) {
+        return existing.clone();
+    }
+    let upvalue = Upvalue::new_open(slot);
+    entry.push(upvalue.clone());
+    upvalue
+}
+
+pub(super) fn load_this(stack: &mut Vec<Object>, env: &EnvRef) {
+    let value = env.borrow().this.clone().unwrap_or(Object::Undefined);
+    stack.push(value);
+}
+
 pub(super) fn load_local(
     stack: &mut Vec<Object>,
     slot: usize,
@@ -328,6 +409,24 @@ pub(super) fn store_local(
         ));
     };
     *target = value;
+    Ok(())
+}
+
+pub(super) fn super_method_stack(
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+    name: &str,
+    pos: Position,
+) -> Result<(), Object> {
+    let value = if name == "constructor" {
+        crate::evaluator::methods::get_super_constructor(env, pos)
+    } else {
+        crate::evaluator::methods::get_super_method(env, name, pos)
+    };
+    if value.is_runtime_error() {
+        return Err(value);
+    }
+    stack.push(value);
     Ok(())
 }
 
@@ -811,6 +910,23 @@ pub(super) fn push_packed_arg(
     Ok(())
 }
 
+pub(super) fn call_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (encoded_arg_count, pos) = read_u16_operand_with_pos(chunk, ip, "CALL")?;
+    let has_this_receiver = encoded_arg_count & 0x8000 != 0;
+    let arg_count = (encoded_arg_count & 0x7fff) as usize;
+    call_stack(stack, env, arg_count, has_this_receiver, pos)
+}
+
+pub(super) fn push_arg_stack(stack: &mut Vec<Object>, pos: Position) -> Result<(), Object> {
+    let value = stack.pop().ok_or_else(|| stack_underflow(pos.clone()))?;
+    push_packed_arg(stack, value, false, pos)
+}
+
 pub(super) fn spread_stack(stack: &mut Vec<Object>, pos: Position) -> Result<(), Object> {
     let value = stack.pop().ok_or_else(|| stack_underflow(pos.clone()))?;
     let target = stack
@@ -899,6 +1015,25 @@ pub(super) fn construct_stack(
     let result = construct_value(env, callee, &args, pos)?;
     stack.push(result);
     Ok(())
+}
+
+pub(super) fn construct_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (arg_count, pos) = read_usize_operand_with_pos(chunk, ip, "NEW")?;
+    construct_stack(stack, env, arg_count, pos)
+}
+
+pub(super) fn new_array_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+) -> Result<(), Object> {
+    let (count, pos) = read_usize_operand_with_pos(chunk, ip, "NEW_ARRAY")?;
+    new_array_from_stack(stack, count, pos)
 }
 
 pub(super) fn call_value(
@@ -1011,6 +1146,16 @@ pub(super) fn build_class_to_stack(
     )?;
     stack.push(class);
     Ok(())
+}
+
+pub(super) fn build_class_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (class_idx, pos) = read_usize_operand_with_pos(chunk, ip, "NEW_CLASS")?;
+    build_class_to_stack(stack, chunk, env, class_idx, pos)
 }
 
 pub(super) fn closure_from_proto(

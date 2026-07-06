@@ -19,20 +19,22 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use super::chunk::Chunk;
-use super::closure::UpvalueSource;
+#[cfg(test)]
+use super::interp_helpers::capture_open_upvalue as capture_open_upvalue_ref;
 use super::interp_helpers::{
     apply_binary_stack_op, apply_unary_stack_op, array_slice_from_stack, assign_name, await_stack,
-    build_class_to_stack, call_spread_stack, call_stack,
-    close_open_upvalues_from as close_open_upvalues_range, closure_from_proto, construct_stack,
-    export_all_stack, export_name_stack, get_index_stack, get_property_stack, import_module_stack,
-    iter_keys_stack, iter_next_stack, iter_values_stack, len_stack, load_global, load_local,
-    load_name, load_upvalue, new_array_from_stack, new_object_to_stack, push_packed_arg,
+    build_class_from_operand, call_from_operand, call_spread_stack,
+    capture_proto_upvalues as capture_proto_upvalues_ref,
+    close_open_upvalues_from as close_open_upvalues_range, closure_from_proto,
+    conditional_jump_from_stack, construct_from_operand, export_all_stack, export_name_stack,
+    get_index_stack, get_property_stack, import_module_stack, iter_keys_stack, iter_next_stack,
+    iter_values_stack, jump_to_operand, len_stack, load_global, load_local, load_name, load_this,
+    load_upvalue, new_array_from_operand, new_object_to_stack, push_arg_stack,
     read_byte_operand_with_pos, read_const_operand, read_function_proto_operand, read_name_operand,
-    read_string_operand, read_type_operand, read_u16_operand_with_pos, read_u32_operand,
-    read_u32_operand_with_pos, read_usize_operand_with_pos, set_index_stack, set_property_stack,
-    spread_stack, stack_underflow, store_global, store_local, store_name, store_typed_name,
-    store_upvalue, throw_match_error_from_stack, throw_value, to_string_stack, type_of_stack,
-    unwind_to_handler as unwind_stack_to_handler, wrap_resolved_promise_stack,
+    read_string_operand, read_type_operand, set_index_stack, set_property_stack, spread_stack,
+    stack_underflow, store_global, store_local, store_name, store_typed_name, store_upvalue,
+    super_method_stack, throw_from_stack, throw_match_error_from_stack, to_string_stack,
+    type_of_stack, unwind_to_handler as unwind_stack_to_handler, wrap_resolved_promise_stack,
 };
 use super::opcode::Opcode;
 use super::upvalue::Upvalue;
@@ -233,29 +235,28 @@ impl<'a> VmState<'a> {
 
             // —— control flow ——
             Opcode::Jump => {
-                let target = read_u32_operand(self.chunk, &mut self.ip, "JUMP")? as usize;
-                self.ip = target;
+                jump_to_operand(self.chunk, &mut self.ip, "JUMP")?;
             }
             Opcode::Loop => {
-                // Backwards jump (loop back-edge). Same encoding as Jump.
-                let target = read_u32_operand(self.chunk, &mut self.ip, "LOOP")? as usize;
-                self.ip = target;
+                jump_to_operand(self.chunk, &mut self.ip, "LOOP")?;
             }
             Opcode::JumpIfFalse => {
-                let (target, pos) =
-                    read_u32_operand_with_pos(self.chunk, &mut self.ip, "JUMP_IF_FALSE")?;
-                let cond = self.stack.pop().ok_or_else(|| stack_underflow(pos))?;
-                if !cond.is_truthy() {
-                    self.ip = target as usize;
-                }
+                conditional_jump_from_stack(
+                    self.chunk,
+                    &mut self.ip,
+                    &mut self.stack,
+                    "JUMP_IF_FALSE",
+                    false,
+                )?;
             }
             Opcode::JumpIfTrue => {
-                let (target, pos) =
-                    read_u32_operand_with_pos(self.chunk, &mut self.ip, "JUMP_IF_TRUE")?;
-                let cond = self.stack.pop().ok_or_else(|| stack_underflow(pos))?;
-                if cond.is_truthy() {
-                    self.ip = target as usize;
-                }
+                conditional_jump_from_stack(
+                    self.chunk,
+                    &mut self.ip,
+                    &mut self.stack,
+                    "JUMP_IF_TRUE",
+                    true,
+                )?;
             }
 
             Opcode::Return => {
@@ -305,25 +306,11 @@ impl<'a> VmState<'a> {
                 wrap_resolved_promise_stack(&mut self.stack, pos)?;
             }
             Opcode::Call => {
-                let (encoded_arg_count, pos) =
-                    read_u16_operand_with_pos(self.chunk, &mut self.ip, "CALL")?;
-                let has_this_receiver = encoded_arg_count & 0x8000 != 0;
-                let arg_count = (encoded_arg_count & 0x7fff) as usize;
-                call_stack(
-                    &mut self.stack,
-                    &self.env,
-                    arg_count,
-                    has_this_receiver,
-                    pos,
-                )?;
+                call_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::PushArg => {
                 let pos = self.chunk.position_at(self.ip - 1);
-                let value = self
-                    .stack
-                    .pop()
-                    .ok_or_else(|| stack_underflow(pos.clone()))?;
-                push_packed_arg(&self.stack, value, false, pos)?;
+                push_arg_stack(&mut self.stack, pos)?;
             }
             Opcode::Spread => {
                 let pos = self.chunk.position_at(self.ip - 1);
@@ -334,14 +321,10 @@ impl<'a> VmState<'a> {
                 call_spread_stack(&mut self.stack, &self.env, pos)?;
             }
             Opcode::New => {
-                let (arg_count, pos) =
-                    read_usize_operand_with_pos(self.chunk, &mut self.ip, "NEW")?;
-                construct_stack(&mut self.stack, &self.env, arg_count, pos)?;
+                construct_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::NewClass => {
-                let (class_idx, pos) =
-                    read_usize_operand_with_pos(self.chunk, &mut self.ip, "NEW_CLASS")?;
-                build_class_to_stack(&mut self.stack, self.chunk, &self.env, class_idx, pos)?;
+                build_class_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::Closure => {
                 let (proto, _pos) =
@@ -351,9 +334,7 @@ impl<'a> VmState<'a> {
                     .push(closure_from_proto(proto, upvalues, self.env.clone()));
             }
             Opcode::NewArray => {
-                let (count, pos) =
-                    read_usize_operand_with_pos(self.chunk, &mut self.ip, "NEW_ARRAY")?;
-                new_array_from_stack(&mut self.stack, count, pos)?;
+                new_array_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
             }
             Opcode::NewObject => {
                 new_object_to_stack(&mut self.stack);
@@ -413,8 +394,7 @@ impl<'a> VmState<'a> {
                 assign_name(&mut self.stack, &self.env, &name, pos)?;
             }
             Opcode::LoadThis => {
-                let value = self.env.borrow().this.clone().unwrap_or(Object::Undefined);
-                self.stack.push(value);
+                load_this(&mut self.stack, &self.env);
             }
             // —— fast paths for resolved variable bindings ——
             //
@@ -455,15 +435,7 @@ impl<'a> VmState<'a> {
             }
             Opcode::SuperMethod => {
                 let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "SUPER_METHOD")?;
-                let value = if name == "constructor" {
-                    crate::evaluator::methods::get_super_constructor(&self.env, pos)
-                } else {
-                    crate::evaluator::methods::get_super_method(&self.env, &name, pos)
-                };
-                if value.is_runtime_error() {
-                    return Err(value);
-                }
-                self.stack.push(value);
+                super_method_stack(&mut self.stack, &self.env, &name, pos)?;
             }
             Opcode::LoadUpvalue => {
                 let (index, pos) =
@@ -477,11 +449,7 @@ impl<'a> VmState<'a> {
             }
             Opcode::Throw => {
                 let pos = self.chunk.position_at(instruction_ip);
-                let value = self
-                    .stack
-                    .pop()
-                    .ok_or_else(|| stack_underflow(pos.clone()))?;
-                return Err(throw_value(value, pos));
+                return Err(throw_from_stack(&mut self.stack, pos)?);
             }
             Opcode::ThrowMatchError => {
                 let pos = self.chunk.position_at(instruction_ip);
@@ -514,45 +482,17 @@ impl<'a> VmState<'a> {
         &mut self,
         proto: &Rc<crate::bytecode::closure::FunctionProto>,
     ) -> Result<Vec<Rc<Upvalue>>, Object> {
-        let mut captured = Vec::with_capacity(proto.upvalue_desc.len());
-        for desc in &proto.upvalue_desc {
-            match desc.source {
-                UpvalueSource::LocalSlot(slot) => {
-                    if let Some(value) = self.capture_env_value(&desc.name) {
-                        captured.push(Upvalue::new_closed(value));
-                    } else {
-                        captured.push(self.capture_open_upvalue(slot as usize));
-                    }
-                }
-                UpvalueSource::ParentUpvalue(index) => {
-                    let Some(parent) = self.current_upvalues.get(index as usize) else {
-                        return Err(new_error(
-                            proto.pos.clone(),
-                            format!(
-                                "VMError: missing parent upvalue {} for closure {}",
-                                index, proto.name
-                            ),
-                        ));
-                    };
-                    captured.push(parent.clone());
-                }
-            }
-        }
-        Ok(captured)
+        capture_proto_upvalues_ref(
+            proto,
+            &self.env,
+            &mut self.open_upvalues,
+            &self.current_upvalues,
+        )
     }
 
+    #[cfg(test)]
     fn capture_open_upvalue(&mut self, slot: usize) -> Rc<Upvalue> {
-        let entry = self.open_upvalues.entry(slot).or_default();
-        if let Some(existing) = entry.iter().find(|upvalue| upvalue.is_open()) {
-            return existing.clone();
-        }
-        let upvalue = Upvalue::new_open(slot);
-        entry.push(upvalue.clone());
-        upvalue
-    }
-
-    fn capture_env_value(&self, name: &str) -> Option<Object> {
-        self.env.borrow().get(name)
+        capture_open_upvalue_ref(&mut self.open_upvalues, slot)
     }
 
     fn close_open_upvalues_from(&mut self, first_slot: usize) {

@@ -793,6 +793,97 @@ fn jump_if_false_missing_operand_is_vmerror() {
 }
 
 #[test]
+fn jump_if_true_without_condition_is_stack_underflow() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::JumpIfTrue, Position::default());
+    chunk.write_u32(0, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("stack underflow"));
+}
+
+#[test]
+fn throw_without_value_is_stack_underflow() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::Throw, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("stack underflow"));
+}
+
+#[test]
+fn call_missing_operand_is_vmerror() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::Call, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("CALL missing operand"));
+}
+
+#[test]
+fn push_arg_without_value_is_stack_underflow() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::PushArg, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("stack underflow"));
+}
+
+#[test]
+fn new_missing_operand_is_vmerror() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::New, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("NEW missing operand"));
+}
+
+#[test]
+fn new_class_missing_operand_is_vmerror() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::NewClass, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("NEW_CLASS missing operand"));
+}
+
+#[test]
 fn closure_missing_proto_is_vmerror() {
     let mut chunk = Chunk::new();
     chunk.write_op(Opcode::Closure, Position::default());

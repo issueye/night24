@@ -281,6 +281,13 @@
 - 已完成：从 `bytecode/interp.rs` 继续抽出 `read_byte_operand_with_pos` 到 `bytecode/interp_helpers.rs`，统一 local/upvalue 单字节 operand 与位置计算，并补充截断 upvalue operand 回归测试。
 - 已完成：从 `bytecode/interp.rs` 继续抽出 `read_u16_operand_with_pos` / `read_u32_operand_with_pos` 到 `bytecode/interp_helpers.rs`，统一 Call/New/NewArray/NewClass/JumpIf* 操作数位置计算，并补充截断 jump operand 与缺失 closure proto VMError 回归测试。
 - 已完成：从 `bytecode/interp.rs` 继续抽出 `read_usize_operand_with_pos` 与 `read_function_proto_operand` 到 `bytecode/interp_helpers.rs`，统一 16 位索引转 usize 和 closure prototype 缺失错误处理，并补充截断 closure operand 回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 closure upvalue 捕获 helper 到 `bytecode/interp_helpers.rs`，集中 open upvalue 复用、env closed capture 和 parent upvalue 缺失错误处理，保留现有闭包/upvalue 回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 jump/loop/conditional jump helper 到 `bytecode/interp_helpers.rs`，统一控制流目标读取、条件出栈和栈空错误处理，并补充 `JumpIfTrue` 条件缺失回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 `LoadThis` / `SuperMethod` / `Throw` helper 到 `bytecode/interp_helpers.rs`，集中 this 读取、super 方法解析和 throw 出栈封装，并补充 `Throw` 缺失值回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 `Call` operand 解码 helper 到 `bytecode/interp_helpers.rs`，统一参数数量与 this receiver 标记解析，并补充 `Call` 缺失 operand 回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 `PushArg` 栈操作 helper 到 `bytecode/interp_helpers.rs`，统一参数值出栈与 packed args 追加路径，并补充 `PushArg` 空栈回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 `New` / `NewArray` operand helper 到 `bytecode/interp_helpers.rs`，统一构造调用和数组字面量计数读取路径，并补充 `New` 缺失 operand 回归测试。
+- 已完成：从 `bytecode/interp.rs` 继续抽出 `NewClass` operand helper 到 `bytecode/interp_helpers.rs`，统一 class declaration 索引读取和 class 构建分派，并补充 `NewClass` 缺失 operand 回归测试。
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_access.rs`，承接 dynamic import、await、member/index read、this/super 等访问类表达式发码。
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_conditionals.rs`，承接 ternary、optional chain、logical operator 和 nullish coalescing 等条件/短路表达式发码。
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_modules.rs`，承接 import、re-export、export declaration 和 export default 发码。
