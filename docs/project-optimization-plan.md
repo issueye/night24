@@ -687,6 +687,8 @@
 
 追加完成：`core_client.rs` 抽出 core runtime status 写入 helper，收敛 spawn、status 检查、restart、write failure 与 stdout 关闭路径中的状态更新逻辑，并补充共享状态写入测试。
 
+追加完成：`reply.rs` 抽出 session not found / load failed / create failed 错误响应 helper，收敛 `prepare_reply_session` 前置链路的 JSON 错误构造，并补充 HTTP contract 测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

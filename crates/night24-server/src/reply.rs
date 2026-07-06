@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use std::time::Duration;
 use axum::{
     body::Body,
     extract::State,
-    http::header,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -212,14 +213,8 @@ async fn load_or_create_reply_session(
     if let Some(session_id) = session_id {
         return match state.session_manager.get(session_id).await {
             Ok(Some(existing)) => Ok(existing),
-            Ok(None) => Err(json_error_response(
-                axum::http::StatusCode::BAD_REQUEST,
-                format!("session not found: {session_id}"),
-            )),
-            Err(err) => Err(json_error_response(
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to load session: {err}"),
-            )),
+            Ok(None) => Err(session_not_found_response(session_id)),
+            Err(err) => Err(session_operation_error_response("load", err)),
         };
     }
 
@@ -230,12 +225,7 @@ async fn load_or_create_reply_session(
         .session_manager
         .create("session", working_dir, SessionType::User)
         .await
-        .map_err(|err| {
-            json_error_response(
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to create session: {err}"),
-            )
-        })
+        .map_err(|err| session_operation_error_response("create", err))
 }
 
 fn compact_session_for_reply(session: &mut Session, threshold: Option<usize>) {
@@ -493,7 +483,21 @@ fn sse_error_response(
     sse_stream_response(Body::from_stream(stream))
 }
 
-fn json_error_response(status: axum::http::StatusCode, message: impl Into<String>) -> Response {
+fn session_not_found_response(session_id: &str) -> Response {
+    json_error_response(
+        StatusCode::BAD_REQUEST,
+        format!("session not found: {session_id}"),
+    )
+}
+
+fn session_operation_error_response(action: &str, err: impl Display) -> Response {
+    json_error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("failed to {action} session: {err}"),
+    )
+}
+
+fn json_error_response(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(serde_json::json!({ "error": message.into() }))).into_response()
 }
 
@@ -866,6 +870,36 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_slice(&body).expect("response body should be json");
         assert_eq!(value, serde_json::json!({ "error": "not found" }));
+    }
+
+    #[tokio::test]
+    async fn session_error_responses_keep_http_contract() {
+        let not_found = session_not_found_response("session-1");
+        assert_eq!(not_found.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(not_found.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body should be json");
+        assert_eq!(
+            value,
+            serde_json::json!({ "error": "session not found: session-1" })
+        );
+
+        let failed = session_operation_error_response("load", "database unavailable");
+        assert_eq!(
+            failed.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = axum::body::to_bytes(failed.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body should be json");
+        assert_eq!(
+            value,
+            serde_json::json!({ "error": "failed to load session: database unavailable" })
+        );
     }
 
     #[tokio::test]
