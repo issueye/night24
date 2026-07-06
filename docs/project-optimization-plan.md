@@ -699,6 +699,8 @@
 
 追加完成：`reply.rs` 抽出 session 自动命名 helper，新 SSE pump 和旧兼容 reply 路径复用同一默认名派生规则，并补充默认名/自定义名边界测试。
 
+追加完成：`reply.rs` 旧兼容 `reply` 路径复用 session not found / create failed 响应 helper，并将 session 创建失败从 panic 改为 JSON 500 响应。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

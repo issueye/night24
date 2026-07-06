@@ -619,13 +619,7 @@ pub(crate) async fn reply(
         match state.session_manager.get(&session_id).await {
             Ok(Some(existing)) => existing,
             Ok(None) => {
-                return (
-                    axum::http::StatusCode::BAD_REQUEST,
-                    Json(
-                        serde_json::json!({"error": format!("session not found: {}", session_id)}),
-                    ),
-                )
-                    .into_response();
+                return session_not_found_response(&session_id);
             }
             Err(_) => {
                 return (
@@ -639,11 +633,14 @@ pub(crate) async fn reply(
         let working_dir = current_workspace_path(&state)
             .await
             .unwrap_or_else(|| PathBuf::from("."));
-        state
+        match state
             .session_manager
             .create("session", working_dir, SessionType::User)
             .await
-            .expect("failed to create session")
+        {
+            Ok(session) => session,
+            Err(err) => return session_operation_error_response("create", err),
+        }
     };
 
     let user_message = Message {
@@ -936,6 +933,21 @@ mod tests {
         assert_eq!(
             value,
             serde_json::json!({ "error": "failed to load session: database unavailable" })
+        );
+
+        let failed = session_operation_error_response("create", "disk full");
+        assert_eq!(
+            failed.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = axum::body::to_bytes(failed.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body should be json");
+        assert_eq!(
+            value,
+            serde_json::json!({ "error": "failed to create session: disk full" })
         );
     }
 
