@@ -168,7 +168,7 @@
 - 已完成：修复 `permission.resolve` 在 run_id 不匹配时误删 pending permission 的问题；现在仅在 run_id 校验通过后移除请求，并补充错误 run_id 后仍可正确批准的回归测试。
 - 已完成：敏感输出二次确认现在也触发 `permission_required` hook，补齐审计脚本对敏感输出审批的可观测性，并补充 hook 输出不泄露原始敏感值的回归测试。
 - 已完成：`run_started` / `run_finished` / `run_failed` 生命周期 Hook 补齐 provider、model、message_count、tool_count 基础上下文，并补充工作区 hook 回归测试。
-- 下一步：继续围绕子代理/Skill/Hook 可观测性和服务端稳定性做小步补强；GTS 脚本引擎只处理明确缺陷、验证失败或阻塞主链路的问题。
+- 收尾边界：本轮 Agent Core、子代理、Skill、Hook 可观测性补强已收尾；后续只处理明确缺陷、验证失败、阻塞主链路的问题，或用户明确指定的新需求。
 
 ### Phase 5：GTS 引擎模块化
 
@@ -673,7 +673,9 @@
 
 ### 服务端继续优化
 
-目标：继续收敛 `reply.rs` 和 `core_client.rs` 的职责，把会话准备、SSE 转发、事件持久化拆成可测试单元，同时不改变 HTTP API。
+状态：当前批次已收尾。后续不再主动拆分新的微优化项，只处理明确缺陷、验证失败、阻塞主链路的问题，或用户明确指定的新需求。
+
+本批目标：收敛 `reply.rs` 和 `core_client.rs` 的职责，把会话准备、SSE 转发、事件持久化拆成可测试单元，同时不改变 HTTP API。
 
 追加完成：`workspace.rs` 已将 `parse_git_status` 的单行解析抽成 `parse_git_status_line`，集中 porcelain v1 状态字符校验，并补充普通修改、rename、Unicode 路径和畸形行测试。
 
@@ -796,6 +798,13 @@
   - `npm run build`
   - `cargo test -p night24-server`
   - `cargo test -p night24-agent-core`
+
+### 本轮收尾状态
+
+- 状态：已收尾。
+- 范围：桌面端结构拆分、设置与子代理 UI 基础能力、Hook/Skill/子代理主链路、服务端 reply/core client 稳定性、GTS 最小必要整理均已进入冻结状态。
+- 后续入口：只接受明确缺陷、验证失败、阻塞 Hook/Skill/子代理主链路的问题，或用户明确指定的新需求。
+- GTS 边界：不再继续投入通用模块化拆分；脚本引擎仅在影响钩子系统、技能系统、子代理执行或构建验证时做最小修复。
 
 ### CSS 优化批次：workspace 面板样式抽取
 
