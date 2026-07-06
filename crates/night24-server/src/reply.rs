@@ -582,28 +582,22 @@ pub(crate) async fn reply(
         }
         state.provider_registry.create_with_model(
             "openai",
-            req.model
-                .clone()
-                .unwrap_or_else(|| "gpt-4o-mini".to_string()),
+            legacy_provider_model("openai", req.model.as_deref()),
         )
     } else if provider_name == "anthropic" {
         state.provider_registry.create_with_model(
             "anthropic",
-            req.model
-                .clone()
-                .unwrap_or_else(|| "step-3.7-flash".to_string()),
+            legacy_provider_model("anthropic", req.model.as_deref()),
         )
     } else if provider_name == "ollama" {
         state.provider_registry.create_with_model(
             "ollama",
-            req.model.clone().unwrap_or_else(|| "llama3.2".to_string()),
+            legacy_provider_model("ollama", req.model.as_deref()),
         )
     } else if provider_name == "stepfun" {
         state.provider_registry.create_with_model(
             "stepfun",
-            req.model
-                .clone()
-                .unwrap_or_else(|| "step-3.7-flash".to_string()),
+            legacy_provider_model("stepfun", req.model.as_deref()),
         )
     } else if provider_name == "echo" {
         state.provider_registry.create("echo")
@@ -741,6 +735,17 @@ pub(crate) async fn reply(
     sse_stream_response(Body::from_stream(stream))
 }
 
+fn legacy_provider_model(provider_name: &str, requested_model: Option<&str>) -> String {
+    requested_model
+        .map(str::to_string)
+        .unwrap_or_else(|| match provider_name {
+            "openai" => "gpt-4o-mini".to_string(),
+            "anthropic" | "stepfun" => "step-3.7-flash".to_string(),
+            "ollama" => "llama3.2".to_string(),
+            _ => "echo-v1".to_string(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,6 +814,16 @@ mod tests {
         assert_eq!(normalize_provider_name(Some("   ")), "echo");
         assert_eq!(normalize_provider_name(Some(" OpenAI ")), "openai");
         assert_eq!(normalize_provider_name(Some("STEPFUN")), "stepfun");
+    }
+
+    #[test]
+    fn legacy_provider_model_uses_provider_defaults_and_request_override() {
+        assert_eq!(legacy_provider_model("openai", None), "gpt-4o-mini");
+        assert_eq!(legacy_provider_model("anthropic", None), "step-3.7-flash");
+        assert_eq!(legacy_provider_model("stepfun", None), "step-3.7-flash");
+        assert_eq!(legacy_provider_model("ollama", None), "llama3.2");
+        assert_eq!(legacy_provider_model("echo", None), "echo-v1");
+        assert_eq!(legacy_provider_model("openai", Some("custom")), "custom");
     }
 
     #[test]

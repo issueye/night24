@@ -701,6 +701,8 @@
 
 追加完成：`reply.rs` 旧兼容 `reply` 路径复用 session not found / create failed 响应 helper，并将 session 创建失败从 panic 改为 JSON 500 响应。
 
+追加完成：`reply.rs` 抽出旧兼容 `reply` 路径 provider 默认模型 helper，集中维护 openai / anthropic / stepfun / ollama / echo 默认模型，并补充覆盖测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：
