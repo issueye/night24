@@ -17,3 +17,16 @@ export function compactSubAgentText(value, max = 120) {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 3)}...`;
 }
+
+export function deriveSubAgentStats(pool) {
+  const agents = Array.isArray(pool?.subagents) ? pool.subagents : [];
+  const count = (status) => agents.filter((agent) => agent?.status === status).length;
+  return {
+    total: Number.isFinite(pool?.total) ? pool.total : agents.length,
+    queued: Number.isFinite(pool?.queued) ? pool.queued : count('queued'),
+    running: Number.isFinite(pool?.running) ? pool.running : count('running'),
+    completed: Number.isFinite(pool?.completed) ? pool.completed : count('completed'),
+    failed: Number.isFinite(pool?.failed) ? pool.failed : count('failed'),
+    cancelled: Number.isFinite(pool?.cancelled) ? pool.cancelled : count('cancelled'),
+  };
+}

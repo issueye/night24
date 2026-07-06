@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { classNames } from '../../utils/format.js';
+import { deriveSubAgentStats } from './status.js';
 
 function Stat({ label, value, tone }) {
   return (
@@ -15,15 +16,16 @@ export function SubAgentStats({
   loading,
   onRefresh,
 }) {
+  const stats = deriveSubAgentStats(pool);
   return (
     <div className="subagent-toolbar">
       <div className="subagent-stats">
-        <Stat label="总数" value={pool?.total} />
-        <Stat label="排队" value={pool?.queued} tone="queued" />
-        <Stat label="运行中" value={pool?.running} tone="running" />
-        <Stat label="完成" value={pool?.completed} tone="completed" />
-        <Stat label="失败" value={pool?.failed} tone="failed" />
-        <Stat label="取消" value={pool?.cancelled} tone="cancelled" />
+        <Stat label="总数" value={stats.total} />
+        <Stat label="排队" value={stats.queued} tone="queued" />
+        <Stat label="运行中" value={stats.running} tone="running" />
+        <Stat label="完成" value={stats.completed} tone="completed" />
+        <Stat label="失败" value={stats.failed} tone="failed" />
+        <Stat label="取消" value={stats.cancelled} tone="cancelled" />
       </div>
       <button className="icon-button compact" disabled={loading} onClick={onRefresh} title="刷新子代理" type="button">
         <RefreshCw className={loading ? 'spin' : ''} size={13} />
