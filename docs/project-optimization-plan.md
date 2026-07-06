@@ -689,6 +689,8 @@
 
 追加完成：`reply.rs` 抽出 session not found / load failed / create failed 错误响应 helper，收敛 `prepare_reply_session` 前置链路的 JSON 错误构造，并补充 HTTP contract 测试。
 
+追加完成：`reply.rs` 抽出 core event payload 中 message / messages 解析 helper，收敛 `message` 与 `finish` 持久化分支的反序列化逻辑，并补充 malformed payload 过滤测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

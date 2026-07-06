@@ -321,11 +321,7 @@ fn persist_core_event(conversation: &mut Vec<Message>, event: &serde_json::Value
 
     match event_type {
         "message" => {
-            if let Some(message) = payload
-                .get("message")
-                .cloned()
-                .and_then(|value| serde_json::from_value::<Message>(value).ok())
-            {
+            if let Some(message) = payload_message(payload) {
                 merge_conversation_message(conversation, message);
             }
         }
@@ -348,16 +344,28 @@ fn persist_core_event(conversation: &mut Vec<Message>, event: &serde_json::Value
             }
         }
         "finish" => {
-            if let Some(messages) = payload.get("messages").and_then(|value| value.as_array()) {
-                for message in messages {
-                    if let Ok(message) = serde_json::from_value::<Message>(message.clone()) {
-                        merge_conversation_message(conversation, message);
-                    }
-                }
+            for message in payload_messages(payload) {
+                merge_conversation_message(conversation, message);
             }
         }
         _ => {}
     }
+}
+
+fn payload_message(payload: &serde_json::Value) -> Option<Message> {
+    parse_message_value(payload.get("message")?)
+}
+
+fn payload_messages(payload: &serde_json::Value) -> Vec<Message> {
+    payload
+        .get("messages")
+        .and_then(|value| value.as_array())
+        .map(|messages| messages.iter().filter_map(parse_message_value).collect())
+        .unwrap_or_default()
+}
+
+fn parse_message_value(value: &serde_json::Value) -> Option<Message> {
+    serde_json::from_value::<Message>(value.clone()).ok()
 }
 
 fn merge_conversation_message(conversation: &mut Vec<Message>, message: Message) {
@@ -1019,6 +1027,37 @@ mod tests {
             ContentBlock::Text { text } => assert_eq!(text, "final reply"),
             _ => panic!("expected text block"),
         }
+    }
+
+    #[test]
+    fn payload_message_helpers_ignore_malformed_values() {
+        let payload = serde_json::json!({
+            "message": {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": [{ "type": "text", "text": "hello" }],
+                "created_at": "2026-07-03T01:02:03Z"
+            }
+        });
+        assert_eq!(payload_message(&payload).unwrap().id, "assistant-1");
+
+        let finish_payload = serde_json::json!({
+            "messages": [
+                {
+                    "id": "assistant-2",
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "final" }],
+                    "created_at": "2026-07-03T01:02:04Z"
+                },
+                { "id": "broken", "content": [] }
+            ]
+        });
+        let messages = payload_messages(&finish_payload);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, "assistant-2");
+
+        assert!(payload_message(&serde_json::json!({})).is_none());
+        assert!(payload_messages(&serde_json::json!({ "messages": "bad" })).is_empty());
     }
 
     #[test]
