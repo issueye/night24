@@ -703,6 +703,8 @@
 
 追加完成：`reply.rs` 抽出旧兼容 `reply` 路径 provider 默认模型 helper，集中维护 openai / anthropic / stepfun / ollama / echo 默认模型，并补充覆盖测试。
 
+追加完成：`reply.rs` 旧兼容 `reply` 路径 provider 配置错误与 session load failed 错误复用统一 JSON error response helper，收敛手写 `(StatusCode, Json)` 响应。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

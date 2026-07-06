@@ -574,11 +574,10 @@ pub(crate) async fn reply(
             .api_key
             .unwrap_or_else(|| std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "".to_string()));
         if api_key.is_empty() {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "api_key is required for openai provider"})),
-            )
-                .into_response();
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                "api_key is required for openai provider",
+            );
         }
         state.provider_registry.create_with_model(
             "openai",
@@ -602,11 +601,10 @@ pub(crate) async fn reply(
     } else if provider_name == "echo" {
         state.provider_registry.create("echo")
     } else {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": format!("unknown provider: {}", provider_name)})),
-        )
-            .into_response();
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            format!("unknown provider: {provider_name}"),
+        );
     };
 
     let session = if let Some(session_id) = req.session_id {
@@ -616,11 +614,10 @@ pub(crate) async fn reply(
                 return session_not_found_response(&session_id);
             }
             Err(_) => {
-                return (
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "failed to load session"})),
-                )
-                    .into_response();
+                return json_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to load session",
+                );
             }
         }
     } else {
