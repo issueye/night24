@@ -1,8 +1,9 @@
 use crate::ast::{Expr, MatchBody, MatchExpr, Pattern, Stmt};
-use crate::object::{bool_obj, str_obj, Object};
+use crate::object::{bool_obj, Object};
 
 use super::chunk::Chunk;
 use super::compiler::{FinallyFrame, LoopFrame};
+use super::emit::emit_string_operand;
 use super::emit::{emit_const, emit_jump_placeholder, emit_load_name, patch_jump_here};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
@@ -26,9 +27,12 @@ pub(super) fn compile_match(
 ) -> Result<(), Object> {
     let subject_name = format!("__gts_bc_match_subject_{}_{}", m.pos.line, m.pos.col);
     compile_expr(&m.expr, chunk, resolutions)?;
-    let subject_idx = chunk.add_constant(str_obj(subject_name.clone()));
-    chunk.write_op(Opcode::StoreName, m.pos.clone());
-    chunk.write_u16(subject_idx, m.pos.clone());
+    emit_string_operand(
+        chunk,
+        Opcode::StoreName,
+        subject_name.clone(),
+        m.pos.clone(),
+    );
 
     let mut to_end = Vec::new();
     for arm in &m.arms {
@@ -38,15 +42,16 @@ pub(super) fn compile_match(
 
         if let Pattern::Ident(ip) = &arm.pattern {
             emit_load_name(chunk, &subject_name, ip.pos.clone());
-            let name_idx = chunk.add_constant(str_obj(ip.name.clone()));
-            chunk.write_op(Opcode::StoreName, ip.pos.clone());
-            chunk.write_u16(name_idx, ip.pos.clone());
+            emit_string_operand(chunk, Opcode::StoreName, ip.name.clone(), ip.pos.clone());
         }
         if !arm.binding_name.is_empty() {
             emit_load_name(chunk, &subject_name, arm.binding_pos.clone());
-            let name_idx = chunk.add_constant(str_obj(arm.binding_name.clone()));
-            chunk.write_op(Opcode::StoreName, arm.binding_pos.clone());
-            chunk.write_u16(name_idx, arm.binding_pos.clone());
+            emit_string_operand(
+                chunk,
+                Opcode::StoreName,
+                arm.binding_name.clone(),
+                arm.binding_pos.clone(),
+            );
         }
         if let Some(guard) = &arm.guard {
             compile_expr(guard, chunk, resolutions)?;

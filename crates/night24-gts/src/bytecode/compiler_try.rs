@@ -1,8 +1,9 @@
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::{Chunk, ProtectedRegion};
 use super::compiler::{compile_stmt, FinallyFrame, LoopFrame};
 use super::compiler_abrupt::emit_pending_finally_exits;
+use super::emit::emit_string_operand;
 use super::emit::{emit_jump_placeholder, emit_load_name, patch_jump_here};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
@@ -32,9 +33,12 @@ pub(super) fn compile_try(
         if catch.name.is_empty() {
             chunk.write_op(Opcode::Pop, catch.pos.clone());
         } else {
-            let name_idx = chunk.add_constant(str_obj(catch.name.clone()));
-            chunk.write_op(Opcode::StoreName, catch.pos.clone());
-            chunk.write_u16(name_idx, catch.pos.clone());
+            emit_string_operand(
+                chunk,
+                Opcode::StoreName,
+                catch.name.clone(),
+                catch.pos.clone(),
+            );
         }
         for stmt in &catch.body.statements {
             compile_stmt(stmt, chunk, loops, finalizers, false, resolutions)?;
@@ -64,9 +68,12 @@ pub(super) fn compile_try(
     let exceptional_finally_ip = s.finalizer.as_ref().map(|_| chunk.code.len() as u32);
     if let Some(finalizer) = &s.finalizer {
         let pending_name = format!("__gts_bc_pending_error_{}_{}", s.pos.line, s.pos.col);
-        let pending_idx = chunk.add_constant(str_obj(pending_name.clone()));
-        chunk.write_op(Opcode::StoreName, s.pos.clone());
-        chunk.write_u16(pending_idx, s.pos.clone());
+        emit_string_operand(
+            chunk,
+            Opcode::StoreName,
+            pending_name.clone(),
+            s.pos.clone(),
+        );
         for stmt in &finalizer.statements {
             compile_stmt(stmt, chunk, loops, finalizers, false, resolutions)?;
         }

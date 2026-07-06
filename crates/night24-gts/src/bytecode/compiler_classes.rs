@@ -1,15 +1,14 @@
 use crate::ast::ClassDecl;
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler_helpers::add_class_decl;
+use super::emit::emit_string_operand;
 use super::opcode::Opcode;
 
 pub(super) fn compile_class_decl(c: &ClassDecl, chunk: &mut Chunk) -> Result<(), Object> {
     emit_class_value(c, chunk);
-    let name_idx = chunk.add_constant(str_obj(c.name.clone()));
-    chunk.write_op(Opcode::StoreName, c.pos.clone());
-    chunk.write_u16(name_idx, c.pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, c.name.clone(), c.pos.clone());
     Ok(())
 }
 

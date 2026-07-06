@@ -80,16 +80,19 @@ fn compile_template_interpolated(
             i += 1;
         }
         let text = crate::evaluator::string_lit::unescape_string(&inner[start..i]);
-        let idx = chunk.add_constant(str_obj(text));
-        emit_const(chunk, idx, t.pos.clone());
+        emit_template_string_const(chunk, text, t.pos.clone());
         finish_template_segment(chunk, &mut segments_emitted, t.pos.clone());
     }
 
     if segments_emitted == 0 {
-        let idx = chunk.add_constant(str_obj(""));
-        emit_const(chunk, idx, t.pos.clone());
+        emit_template_string_const(chunk, "", t.pos.clone());
     }
     Ok(())
+}
+
+fn emit_template_string_const(chunk: &mut Chunk, value: impl Into<String>, pos: Position) {
+    let idx = chunk.add_constant(str_obj(value.into()));
+    emit_const(chunk, idx, pos);
 }
 
 fn finish_template_segment(chunk: &mut Chunk, segments_emitted: &mut usize, pos: Position) {

@@ -302,6 +302,16 @@
 - 已完成：将 `bytecode/compiler.rs` 中测试移动到 `bytecode/compiler/tests.rs`，主 compiler 文件进一步只保留编译入口、共享 re-export 和测试模块声明。
 - 已完成：继续收敛 `bytecode/compiler_templates.rs`，抽出模板片段收尾 helper，统一 `${...}` 表达式片段和文本片段的 `Concat` 发射路径，并补充模板插值 opcode 编译测试。
 - 已完成：继续收敛 `bytecode/compiler_calls.rs`，抽出 `super()` 构造调用发码 helper，集中 `LoadThis` / `SuperMethod("constructor")` / 带 this receiver 的 `Call` 发射路径，并补充 super constructor opcode 编译测试。
+- 已完成：继续收敛 `bytecode/compiler_assign.rs`，抽出名称 operand 发射和复合赋值 opcode 解析 helper，统一简单/复合名称赋值的 `LoadName` / `AssignName` 写入路径，并补充复合赋值 opcode 编译测试。
+- 已完成：继续收敛 compiler 字符串 operand 发码，将 `Opcode + string constant + u16 operand` 写入抽到 `compiler_helpers::emit_string_operand`，并接入 assign/access/calls/conditionals/collections 中的 name/property/module/super operand 路径。
+- 已完成：继续收敛 `bytecode/compiler_modules.rs`，复用 `emit_string_operand` 统一 import/export/re-export 中 `ImportModule` / `GetProperty` / `StoreName` / `ExportName` 的字符串 operand 发码。
+- 已完成：继续收敛声明与临时绑定发码，`compiler_expr` / `compiler_classes` / `compiler_functions` / `compiler_match` / `compiler_try` / `compiler_abrupt` 复用 `emit_string_operand` 统一 identifier load、声明存名、match/try/finally 临时绑定的字符串 operand 写入。
+- 已完成：继续收敛 `bytecode/compiler_control.rs`，for-in/for-of 的迭代临时变量、循环变量存名、迭代结果 `done` / `value` 属性读取复用 `emit_string_operand`，保留循环跳转与 break/continue patch 语义不变。
+- 已完成：继续收敛 `bytecode/compiler_declarations.rs`，抽出 const-aware 声明名 operand helper，保留 const 高位标记编码，并让对象解构属性读取复用 `emit_string_operand`。
+- 已完成：继续收敛 `bytecode/compiler_templates.rs`，抽出 template literal 文本片段字符串常量发码 helper，统一普通文本片段和空模板 fallback 的 `Const` 写入路径。
+- 已完成：将字符串 operand 发码 helper 从 `compiler_helpers` 迁移到 `bytecode/emit.rs`，让 `emit_load_name` 与各 compiler 模块复用同一个底层 `emit_string_operand`。
+- 已完成：继续收敛 `bytecode/compiler_declarations.rs` 的常量发码，默认 `undefined`、数组解构索引和默认值比较统一复用 `emit_value_constant`，移除局部手写 `Const + operand` 路径。
+- 已完成：继续收敛 `bytecode/compiler_assign.rs` / `bytecode/compiler_operators.rs` 的常量发码，`++/--` 的 `1`、`delete` 的 `true` 和 `void` 的 `undefined` 统一复用 `emit_value_constant`，compiler 模块内不再散落手写 `Opcode::Const`。
 - 已完成：从 `bytecode/interp.rs` 主循环抽出 `check_execution_budget`，集中 timeout / instruction limit 采样检查，并补充采样边界回归测试。
 - 下一步：继续拆 compiler 中剩余复合 expression emitter，或拆 interpreter 中剩余小型栈操作 helper；每步继续核对 `try/finally` 保护线没有语义回退。
 - 中期建议：将 `evaluator::expressions` 中被 bytecode 复用的语义迁移到 `semantics` 或 `runtime_ops`，再处理更大的 interpreter/compiler 主循环拆分。

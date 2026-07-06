@@ -133,6 +133,15 @@ fn compiles_prefix_increment_uses_load_assign() {
 }
 
 #[test]
+fn compiles_compound_assignment_as_load_binary_assign() {
+    let chunk = compile_src("let x = 1; x += 2");
+    let spine = decode_opcode_spine(&chunk);
+    assert!(spine.contains(&Opcode::LoadName));
+    assert!(spine.contains(&Opcode::Add));
+    assert!(spine.contains(&Opcode::AssignName));
+}
+
+#[test]
 fn compiles_postfix_increment_preserves_old_value() {
     // x++ → LOAD_NAME x ; DUP ; CONST 1 ; ADD ; ASSIGN_NAME x ; POP
     // The trailing Pop drops the new value, leaving the old as the result.

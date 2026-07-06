@@ -5,8 +5,17 @@ use super::chunk::Chunk;
 use super::opcode::Opcode;
 
 pub(super) fn emit_load_name(chunk: &mut Chunk, name: &str, pos: Position) {
-    let idx = chunk.add_constant(str_obj(name.to_string()));
-    chunk.write_op(Opcode::LoadName, pos.clone());
+    emit_string_operand(chunk, Opcode::LoadName, name, pos);
+}
+
+pub(super) fn emit_string_operand(
+    chunk: &mut Chunk,
+    op: Opcode,
+    value: impl Into<String>,
+    pos: Position,
+) {
+    let idx = chunk.add_constant(str_obj(value.into()));
+    chunk.write_op(op, pos.clone());
     chunk.write_u16(idx, pos);
 }
 

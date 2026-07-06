@@ -5,6 +5,7 @@ use super::chunk::Chunk;
 use super::compiler::unsupported;
 use super::compiler_assign::compile_update_operator;
 use super::compiler_conditionals::{compile_and, compile_nullish_coalescing, compile_or};
+use super::emit::emit_value_constant;
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -44,9 +45,7 @@ pub(super) fn compile_prefix_expr(
             // `delete x` evaluates its operand for side effects and returns true.
             compile_expr(&p.right, chunk, resolutions)?;
             chunk.write_op(Opcode::Pop, p.pos.clone());
-            let true_idx = chunk.add_constant(Object::Boolean(true));
-            chunk.write_op(Opcode::Const, p.pos.clone());
-            chunk.write_u16(true_idx, p.pos.clone());
+            emit_value_constant(chunk, Object::Boolean(true), p.pos.clone())?;
             return Ok(());
         }
         _ => {}
@@ -62,9 +61,7 @@ pub(super) fn compile_prefix_expr(
         "void" => {
             // `void x` evaluates its operand for side effects and returns undefined.
             chunk.write_op(Opcode::Pop, p.pos.clone());
-            let und_idx = chunk.add_constant(Object::Undefined);
-            chunk.write_op(Opcode::Const, p.pos.clone());
-            chunk.write_u16(und_idx, p.pos.clone());
+            emit_value_constant(chunk, Object::Undefined, p.pos.clone())?;
             return Ok(());
         }
         _ => {

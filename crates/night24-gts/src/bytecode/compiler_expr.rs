@@ -1,5 +1,5 @@
 use crate::ast::Expr;
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::{compile_stmt, unsupported};
@@ -15,6 +15,7 @@ use super::compiler_conditionals::{compile_optional, compile_ternary};
 use super::compiler_functions::{compile_arrow_expr, compile_func_expr};
 use super::compiler_literals::compile_literal_expr;
 use super::compiler_operators::{compile_infix_expr, compile_prefix_expr};
+use super::emit::emit_string_operand;
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -30,9 +31,7 @@ pub(super) fn compile_expr(
     match expr {
         // —— identifier read ——
         Expr::Ident(i) => {
-            let name_idx = chunk.add_constant(str_obj(i.name.clone()));
-            chunk.write_op(Opcode::LoadName, i.pos.clone());
-            chunk.write_u16(name_idx, i.pos.clone());
+            emit_string_operand(chunk, Opcode::LoadName, i.name.clone(), i.pos.clone());
             Ok(())
         }
         // —— assignment `name = expr` (and compound `+=` etc.) ——

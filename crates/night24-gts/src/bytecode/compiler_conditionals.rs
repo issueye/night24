@@ -1,10 +1,11 @@
 use crate::ast::{Expr, InfixExpr, OptionalExpr, Position, TernaryExpr};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::unsupported;
 use super::compiler_calls::compile_call_args;
 use super::compiler_helpers::object_property_key_expr;
+use super::emit::emit_string_operand;
 use super::emit::{emit_const, emit_jump_placeholder, patch_jump_here, patch_jump_to};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
@@ -53,9 +54,7 @@ pub(super) fn compile_optional(
         if name.is_empty() {
             return Err(unsupported(o.pos.clone(), "optional property key"));
         }
-        let name_idx = chunk.add_constant(str_obj(name));
-        chunk.write_op(Opcode::GetProperty, o.pos.clone());
-        chunk.write_u16(name_idx, o.pos.clone());
+        emit_string_operand(chunk, Opcode::GetProperty, name, o.pos.clone());
     }
 
     let to_end = emit_jump_placeholder(chunk, Opcode::Jump, o.pos.clone());

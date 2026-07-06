@@ -1,10 +1,11 @@
 use crate::ast::{Expr, Stmt};
-use crate::object::{num_obj, str_obj, Object};
+use crate::object::{num_obj, Object};
 
 use super::chunk::Chunk;
 use super::compiler::{
     compile_break_continue, compile_expr, compile_stmt, FinallyFrame, LoopFrame,
 };
+use super::emit::emit_string_operand;
 use super::emit::{
     emit_const, emit_jump_placeholder, emit_load_name, patch_jump_here, patch_jump_to,
 };
@@ -157,16 +158,12 @@ pub(super) fn compile_for_in(
     // items = ITER_KEYS/ITER_VALUES(iterable)
     compile_expr(iterable, chunk, resolutions)?;
     chunk.write_op(Opcode::IterKeys, pos.clone());
-    let items_idx = chunk.add_constant(str_obj(items_name.clone()));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(items_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, items_name.clone(), pos.clone());
 
     // idx = 0
     let zero = chunk.add_constant(num_obj(0.0));
     emit_const(chunk, zero, pos.clone());
-    let idx_idx = chunk.add_constant(str_obj(idx_name.clone()));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(idx_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, idx_name.clone(), pos.clone());
 
     // start: idx < len(items)
     let start = chunk.code.len() as u32;
@@ -180,9 +177,7 @@ pub(super) fn compile_for_in(
     emit_load_name(chunk, &items_name, pos.clone());
     emit_load_name(chunk, &idx_name, pos.clone());
     chunk.write_op(Opcode::GetIndex, pos.clone());
-    let name_idx = chunk.add_constant(str_obj(name.to_string()));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(name_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, name, pos.clone());
 
     let id = loops.len();
     loops.push(LoopFrame {
@@ -203,9 +198,7 @@ pub(super) fn compile_for_in(
     emit_const(chunk, one, pos.clone());
     chunk.write_op(Opcode::Add, pos.clone());
     chunk.write_op(Opcode::Dup, pos.clone());
-    let idx_idx = chunk.add_constant(str_obj(idx_name));
-    chunk.write_op(Opcode::AssignName, pos.clone());
-    chunk.write_u16(idx_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::AssignName, idx_name, pos.clone());
     chunk.write_op(Opcode::Pop, pos.clone());
     chunk.write_op(Opcode::Loop, pos.clone());
     chunk.write_u32(start, pos.clone());
@@ -239,30 +232,20 @@ pub(super) fn compile_for_of(
 
     compile_expr(iterable, chunk, resolutions)?;
     chunk.write_op(Opcode::IterValues, pos.clone());
-    let iter_idx = chunk.add_constant(str_obj(iter_name.clone()));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(iter_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, iter_name.clone(), pos.clone());
 
     let start = chunk.code.len() as u32;
     emit_load_name(chunk, &iter_name, pos.clone());
     chunk.write_op(Opcode::IterNext, pos.clone());
-    let next_idx = chunk.add_constant(str_obj(next_name.clone()));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(next_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, next_name.clone(), pos.clone());
 
     emit_load_name(chunk, &next_name, pos.clone());
-    let done_idx = chunk.add_constant(str_obj("done"));
-    chunk.write_op(Opcode::GetProperty, pos.clone());
-    chunk.write_u16(done_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::GetProperty, "done", pos.clone());
     let to_end = emit_jump_placeholder(chunk, Opcode::JumpIfTrue, pos.clone());
 
     emit_load_name(chunk, &next_name, pos.clone());
-    let value_idx = chunk.add_constant(str_obj("value"));
-    chunk.write_op(Opcode::GetProperty, pos.clone());
-    chunk.write_u16(value_idx, pos.clone());
-    let name_idx = chunk.add_constant(str_obj(name.to_string()));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(name_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::GetProperty, "value", pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, name, pos.clone());
 
     let id = loops.len();
     loops.push(LoopFrame {

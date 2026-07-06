@@ -1,10 +1,10 @@
 use crate::ast::{AwaitExpr, DynamicImportExpr, Expr, IndexExpr, MemberExpr, SuperExpr, ThisExpr};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::unsupported;
 use super::compiler_helpers::object_property_key_expr;
-use super::emit::emit_const;
+use super::emit::{emit_const, emit_string_operand};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -24,9 +24,7 @@ pub(super) fn compile_dynamic_import(
             ));
         }
     };
-    let source_idx = chunk.add_constant(str_obj(source));
-    chunk.write_op(Opcode::ImportModule, d.pos.clone());
-    chunk.write_u16(source_idx, d.pos.clone());
+    emit_string_operand(chunk, Opcode::ImportModule, source, d.pos.clone());
     chunk.write_op(Opcode::WrapResolvedPromise, d.pos.clone());
     Ok(())
 }
@@ -57,9 +55,7 @@ pub(super) fn compile_member_read(
         if name.is_empty() {
             return Err(unsupported(m.pos.clone(), "member property key"));
         }
-        let name_idx = chunk.add_constant(str_obj(name));
-        chunk.write_op(Opcode::GetProperty, m.pos.clone());
-        chunk.write_u16(name_idx, m.pos.clone());
+        emit_string_operand(chunk, Opcode::GetProperty, name, m.pos.clone());
     }
     Ok(())
 }
@@ -86,9 +82,7 @@ pub(super) fn compile_super_expr(s: &SuperExpr, chunk: &mut Chunk) -> Result<(),
         let idx = chunk.add_constant(Object::Undefined);
         emit_const(chunk, idx, s.pos.clone());
     } else {
-        let name_idx = chunk.add_constant(str_obj(s.method.clone()));
-        chunk.write_op(Opcode::SuperMethod, s.pos.clone());
-        chunk.write_u16(name_idx, s.pos.clone());
+        emit_string_operand(chunk, Opcode::SuperMethod, s.method.clone(), s.pos.clone());
     }
     Ok(())
 }

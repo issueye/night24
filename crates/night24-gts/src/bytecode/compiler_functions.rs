@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
 use crate::ast::{ArrowBody, ArrowFuncExpr, BlockStmt, FuncDecl, FuncExpr, ReturnStmt, Stmt};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::closure::FunctionProto;
 use super::compiler::{compile_stmt, FinallyFrame, LoopFrame};
+use super::emit::emit_string_operand;
 use super::emit::matches_last_opcode;
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
@@ -125,9 +126,7 @@ pub(super) fn compile_func_decl(
     )?;
     chunk.write_op(Opcode::Closure, f.pos.clone());
     chunk.write_u16(proto_idx, f.pos.clone());
-    let name_idx = chunk.add_constant(str_obj(f.name.clone()));
-    chunk.write_op(Opcode::StoreName, f.pos.clone());
-    chunk.write_u16(name_idx, f.pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, f.name.clone(), f.pos.clone());
     Ok(())
 }
 

@@ -1,9 +1,10 @@
 use crate::ast::{ArrayLit, Expr, ObjectLit};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::unsupported;
 use super::compiler_helpers::object_property_key;
+use super::emit::emit_string_operand;
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -68,9 +69,7 @@ pub(super) fn compile_object_lit(
         } else {
             compile_expr(&prop.value, chunk, resolutions)?;
             let key = object_property_key(prop)?;
-            let key_idx = chunk.add_constant(str_obj(key));
-            chunk.write_op(Opcode::SetProperty, prop.pos.clone());
-            chunk.write_u16(key_idx, prop.pos.clone());
+            emit_string_operand(chunk, Opcode::SetProperty, key, prop.pos.clone());
         }
         chunk.write_op(Opcode::Pop, prop.pos.clone());
     }

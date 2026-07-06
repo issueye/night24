@@ -1,9 +1,10 @@
 use crate::ast::{CallExpr, Expr, NewExpr, Position};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::unsupported;
 use super::compiler_helpers::object_property_key_expr;
+use super::emit::emit_string_operand;
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -37,9 +38,7 @@ fn compile_super_constructor_call(
     compile_expr: CompileExprFn,
 ) -> Result<(), Object> {
     chunk.write_op(Opcode::LoadThis, c.pos.clone());
-    let name_idx = chunk.add_constant(str_obj("constructor"));
-    chunk.write_op(Opcode::SuperMethod, c.pos.clone());
-    chunk.write_u16(name_idx, c.pos.clone());
+    emit_string_operand(chunk, Opcode::SuperMethod, "constructor", c.pos.clone());
     for arg in &c.args {
         compile_expr(arg, chunk, resolutions)?;
     }
@@ -119,9 +118,7 @@ fn compile_call_callee(
             if name.is_empty() {
                 return Err(unsupported(m.pos.clone(), "super method key"));
             }
-            let name_idx = chunk.add_constant(str_obj(name));
-            chunk.write_op(Opcode::SuperMethod, m.pos.clone());
-            chunk.write_u16(name_idx, m.pos.clone());
+            emit_string_operand(chunk, Opcode::SuperMethod, name, m.pos.clone());
             Ok(true)
         }
         Expr::Member(m) if !m.computed => {
@@ -131,9 +128,7 @@ fn compile_call_callee(
             if name.is_empty() {
                 return Err(unsupported(m.pos.clone(), "member property key"));
             }
-            let name_idx = chunk.add_constant(str_obj(name));
-            chunk.write_op(Opcode::GetProperty, m.pos.clone());
-            chunk.write_u16(name_idx, m.pos.clone());
+            emit_string_operand(chunk, Opcode::GetProperty, name, m.pos.clone());
             Ok(true)
         }
         Expr::Index(i) => {

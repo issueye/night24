@@ -1,10 +1,11 @@
 use crate::ast::{AssignExpr, Expr, IndexExpr, MemberExpr, Position};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::unsupported;
 use super::compiler_helpers::object_property_key_expr;
 use super::compiler_operators::binary_opcode;
+use super::emit::{emit_string_operand, emit_value_constant};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -41,29 +42,25 @@ fn compile_name_assign(
         // DUP so the assigned value is both stored and left on the stack as
         // the expression result (assignment evaluates to the value).
         chunk.write_op(Opcode::Dup, a.pos.clone());
-        let name_idx = chunk.add_constant(str_obj(name.to_string()));
-        chunk.write_op(Opcode::AssignName, a.pos.clone());
-        chunk.write_u16(name_idx, a.pos.clone());
+        emit_string_operand(chunk, Opcode::AssignName, name, a.pos.clone());
         Ok(())
     } else {
         // Compound: read current, combine with right, store.
         // LOAD_NAME name ; <right> ; <op> ; DUP ; ASSIGN_NAME name
-        let name_idx_load = chunk.add_constant(str_obj(name.to_string()));
-        chunk.write_op(Opcode::LoadName, a.pos.clone());
-        chunk.write_u16(name_idx_load, a.pos.clone());
+        emit_string_operand(chunk, Opcode::LoadName, name, a.pos.clone());
         compile_expr(&a.right, chunk, resolutions)?;
-        // Strip the `=` suffix to get the binary op (`+=` -> `+`).
-        let bin_op: String = a.op[..a.op.len() - 1].to_string();
-        let op = binary_opcode(&bin_op).ok_or_else(|| {
-            unsupported(a.pos.clone(), &format!("compound assignment `{}`", a.op))
-        })?;
-        chunk.write_op(op, a.pos.clone());
+        chunk.write_op(compound_assignment_opcode(a)?, a.pos.clone());
         chunk.write_op(Opcode::Dup, a.pos.clone());
-        let name_idx_store = chunk.add_constant(str_obj(name.to_string()));
-        chunk.write_op(Opcode::AssignName, a.pos.clone());
-        chunk.write_u16(name_idx_store, a.pos.clone());
+        emit_string_operand(chunk, Opcode::AssignName, name, a.pos.clone());
         Ok(())
     }
+}
+
+fn compound_assignment_opcode(a: &AssignExpr) -> Result<Opcode, Object> {
+    // Strip the `=` suffix to get the binary op (`+=` -> `+`).
+    let bin_op = &a.op[..a.op.len() - 1];
+    binary_opcode(bin_op)
+        .ok_or_else(|| unsupported(a.pos.clone(), &format!("compound assignment `{}`", a.op)))
 }
 
 fn compile_member_assign(
@@ -84,9 +81,7 @@ fn compile_member_assign(
         if name.is_empty() {
             return Err(unsupported(m.pos.clone(), "member property key"));
         }
-        let name_idx = chunk.add_constant(str_obj(name));
-        chunk.write_op(Opcode::SetProperty, a.pos.clone());
-        chunk.write_u16(name_idx, a.pos.clone());
+        emit_string_operand(chunk, Opcode::SetProperty, name, a.pos.clone());
     }
     Ok(())
 }
@@ -130,20 +125,16 @@ pub(super) fn compile_update_operator(
     resolutions: &ResolutionMap,
     compile_expr: CompileExprFn,
 ) -> Result<(), Object> {
-    let one_idx = chunk.add_constant(crate::object::num_obj(1.0));
     match target {
         Expr::Ident(i) => {
-            let name_idx = chunk.add_constant(str_obj(i.name.to_string()));
-            chunk.write_op(Opcode::LoadName, pos.clone());
-            chunk.write_u16(name_idx, pos.clone());
+            let name = i.name.to_string();
+            emit_string_operand(chunk, Opcode::LoadName, name.clone(), pos.clone());
             if !is_prefix {
                 chunk.write_op(Opcode::Dup, pos.clone());
             }
-            chunk.write_op(Opcode::Const, pos.clone());
-            chunk.write_u16(one_idx, pos.clone());
+            emit_value_constant(chunk, crate::object::num_obj(1.0), pos.clone())?;
             chunk.write_op(delta_op, pos.clone());
-            chunk.write_op(Opcode::AssignName, pos.clone());
-            chunk.write_u16(name_idx, pos.clone());
+            emit_string_operand(chunk, Opcode::AssignName, name, pos.clone());
             if !is_prefix {
                 chunk.write_op(Opcode::Pop, pos.clone());
             }
@@ -168,14 +159,10 @@ pub(super) fn compile_update_operator(
             if name.is_empty() {
                 return Err(unsupported(m.pos.clone(), "member property key"));
             }
-            let name_idx = chunk.add_constant(str_obj(name));
-            chunk.write_op(Opcode::GetProperty, pos.clone());
-            chunk.write_u16(name_idx, pos.clone());
-            chunk.write_op(Opcode::Const, pos.clone());
-            chunk.write_u16(one_idx, pos.clone());
+            emit_string_operand(chunk, Opcode::GetProperty, name.clone(), pos.clone());
+            emit_value_constant(chunk, crate::object::num_obj(1.0), pos.clone())?;
             chunk.write_op(delta_op, pos.clone());
-            chunk.write_op(Opcode::SetProperty, pos.clone());
-            chunk.write_u16(name_idx, pos.clone());
+            emit_string_operand(chunk, Opcode::SetProperty, name, pos.clone());
             Ok(())
         }
         Expr::Index(_) => Err(unsupported(

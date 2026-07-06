@@ -1,26 +1,23 @@
 use crate::ast::{ExportDecl, ExportSpec, ImportDecl, Position, Stmt};
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::{compile_expr, compile_stmt, FinallyFrame, LoopFrame};
 use super::emit::emit_load_name;
+use super::emit::emit_string_operand;
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
 pub(super) fn compile_import(s: &ImportDecl, chunk: &mut Chunk) -> Result<(), Object> {
     let source = crate::evaluator::eval_core::strip_quotes(&s.source);
-    let source_idx = chunk.add_constant(str_obj(source));
-    chunk.write_op(Opcode::ImportModule, s.pos.clone());
-    chunk.write_u16(source_idx, s.pos.clone());
+    emit_string_operand(chunk, Opcode::ImportModule, source, s.pos.clone());
 
     if !s.default.is_empty() {
         compile_import_binding("default", &s.default, s.pos.clone(), chunk);
     }
     if !s.namespace.is_empty() {
         chunk.write_op(Opcode::Dup, s.pos.clone());
-        let name_idx = chunk.add_constant(str_obj(s.namespace.clone()));
-        chunk.write_op(Opcode::StoreName, s.pos.clone());
-        chunk.write_u16(name_idx, s.pos.clone());
+        emit_string_operand(chunk, Opcode::StoreName, s.namespace.clone(), s.pos.clone());
     }
     for name in &s.names {
         compile_import_binding(name, name, s.pos.clone(), chunk);
@@ -45,18 +42,14 @@ pub(super) fn compile_export(
     if s.is_star {
         // `export * from "..."` aggregates every named export from the source.
         let source = crate::evaluator::eval_core::strip_quotes(&s.from);
-        let source_idx = chunk.add_constant(str_obj(source));
-        chunk.write_op(Opcode::ImportModule, s.pos.clone());
-        chunk.write_u16(source_idx, s.pos.clone());
+        emit_string_operand(chunk, Opcode::ImportModule, source, s.pos.clone());
         chunk.write_op(Opcode::ExportAll, s.pos.clone());
         return Ok(());
     }
 
     if !s.from.is_empty() {
         let source = crate::evaluator::eval_core::strip_quotes(&s.from);
-        let source_idx = chunk.add_constant(str_obj(source));
-        chunk.write_op(Opcode::ImportModule, s.pos.clone());
-        chunk.write_u16(source_idx, s.pos.clone());
+        emit_string_operand(chunk, Opcode::ImportModule, source, s.pos.clone());
         for spec in &s.specifiers {
             compile_reexport_spec(spec, s.pos.clone(), chunk);
         }
@@ -88,12 +81,8 @@ pub(super) fn compile_export(
 
 fn compile_import_binding(exported_name: &str, local_name: &str, pos: Position, chunk: &mut Chunk) {
     chunk.write_op(Opcode::Dup, pos.clone());
-    let property_idx = chunk.add_constant(str_obj(exported_name));
-    chunk.write_op(Opcode::GetProperty, pos.clone());
-    chunk.write_u16(property_idx, pos.clone());
-    let local_idx = chunk.add_constant(str_obj(local_name));
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(local_idx, pos);
+    emit_string_operand(chunk, Opcode::GetProperty, exported_name, pos.clone());
+    emit_string_operand(chunk, Opcode::StoreName, local_name, pos);
 }
 
 fn exported_decl_name(stmt: &Stmt) -> Option<String> {
@@ -109,9 +98,7 @@ fn exported_decl_name(stmt: &Stmt) -> Option<String> {
 
 fn compile_reexport_spec(spec: &ExportSpec, pos: Position, chunk: &mut Chunk) {
     chunk.write_op(Opcode::Dup, pos.clone());
-    let property_idx = chunk.add_constant(str_obj(spec.name.clone()));
-    chunk.write_op(Opcode::GetProperty, pos.clone());
-    chunk.write_u16(property_idx, pos.clone());
+    emit_string_operand(chunk, Opcode::GetProperty, spec.name.clone(), pos.clone());
     compile_export_stack_value(&spec.alias, pos, chunk);
 }
 
@@ -126,7 +113,5 @@ fn compile_export_local_name(
 }
 
 fn compile_export_stack_value(exported_name: &str, pos: Position, chunk: &mut Chunk) {
-    let exported_idx = chunk.add_constant(str_obj(exported_name));
-    chunk.write_op(Opcode::ExportName, pos.clone());
-    chunk.write_u16(exported_idx, pos);
+    emit_string_operand(chunk, Opcode::ExportName, exported_name, pos);
 }

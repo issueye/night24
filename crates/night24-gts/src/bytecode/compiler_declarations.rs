@@ -3,7 +3,9 @@ use crate::object::{num_obj, str_obj, Object};
 
 use super::chunk::Chunk;
 use super::compiler::compile_expr;
-use super::emit::{emit_const, emit_jump_placeholder, patch_jump_here};
+use super::emit::{
+    emit_jump_placeholder, emit_string_operand, emit_value_constant, patch_jump_here,
+};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
 
@@ -91,18 +93,9 @@ fn compile_decl(
         compile_expr(v, chunk, resolutions)?;
     } else {
         // Declaration without initializer -> undefined.
-        let idx = chunk.add_constant(Object::Undefined);
-        emit_const(chunk, idx, pos.clone());
+        emit_value_constant(chunk, Object::Undefined, pos.clone())?;
     }
-    let name_idx = chunk.add_constant(str_obj(name));
-    // Encode const-ness in the high bit of the name index operand so the
-    // interpreter knows which binding flavor to create. (Name pools stay
-    // small; a u16 with a flag bit is plenty.)
-    let operand = if is_const {
-        name_idx | 0x8000
-    } else {
-        name_idx
-    };
+    let operand = decl_name_operand(chunk, name, is_const);
     if let Some(type_anno) = type_anno {
         let type_idx = chunk.types.len() as u16;
         chunk.types.push(type_anno.clone());
@@ -114,6 +107,24 @@ fn compile_decl(
         chunk.write_u16(operand, pos);
     }
     Ok(())
+}
+
+fn decl_name_operand(chunk: &mut Chunk, name: &str, is_const: bool) -> u16 {
+    let name_idx = chunk.add_constant(str_obj(name.to_string()));
+    // Encode const-ness in the high bit of the name index operand so the
+    // interpreter knows which binding flavor to create. (Name pools stay
+    // small; a u16 with a flag bit is plenty.)
+    if is_const {
+        name_idx | 0x8000
+    } else {
+        name_idx
+    }
+}
+
+fn emit_decl_store(chunk: &mut Chunk, name: &str, is_const: bool, pos: Position) {
+    let operand = decl_name_operand(chunk, name, is_const);
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(operand, pos);
 }
 
 /// Compile a destructuring declaration: evaluate the source once, then bind
@@ -131,20 +142,8 @@ fn compile_destructure(
     if let Some(v) = value {
         compile_expr(v, chunk, resolutions)?;
     } else {
-        let idx = chunk.add_constant(Object::Undefined);
-        emit_const(chunk, idx, pos.clone());
+        emit_value_constant(chunk, Object::Undefined, pos.clone())?;
     }
-
-    let store = |name: &str, chunk: &mut Chunk, pos: &Position| {
-        let name_idx = chunk.add_constant(str_obj(name.to_string()));
-        let operand = if is_const {
-            name_idx | 0x8000
-        } else {
-            name_idx
-        };
-        chunk.write_op(Opcode::StoreName, pos.clone());
-        chunk.write_u16(operand, pos.clone());
-    };
 
     match binding {
         BindingPattern::Array(elems) => {
@@ -152,37 +151,31 @@ fn compile_destructure(
                 if elem.is_rest {
                     // `...rest`: collect elements [i..] into a new array.
                     chunk.write_op(Opcode::Dup, pos.clone());
-                    let start_const = chunk.add_constant(num_obj(i as f64));
-                    chunk.write_op(Opcode::Const, pos.clone());
-                    chunk.write_u16(start_const, pos.clone());
+                    emit_value_constant(chunk, num_obj(i as f64), pos.clone())?;
                     chunk.write_op(Opcode::ArraySliceFrom, pos.clone());
-                    store(&elem.name, chunk, &pos);
+                    emit_decl_store(chunk, &elem.name, is_const, pos.clone());
                     break;
                 }
                 if elem.name.is_empty() {
                     continue;
                 }
                 chunk.write_op(Opcode::Dup, pos.clone());
-                let idx_const = chunk.add_constant(num_obj(i as f64));
-                chunk.write_op(Opcode::Const, pos.clone());
-                chunk.write_u16(idx_const, pos.clone());
+                emit_value_constant(chunk, num_obj(i as f64), pos.clone())?;
                 chunk.write_op(Opcode::GetIndex, pos.clone());
                 if let Some(def) = &elem.default {
                     emit_undefined_replace(def, chunk, resolutions, &pos)?;
                 }
-                store(&elem.name, chunk, &pos);
+                emit_decl_store(chunk, &elem.name, is_const, pos.clone());
             }
         }
         BindingPattern::Object(elems) => {
             for elem in elems {
                 chunk.write_op(Opcode::Dup, pos.clone());
-                let key_idx = chunk.add_constant(str_obj(elem.key.clone()));
-                chunk.write_op(Opcode::GetProperty, pos.clone());
-                chunk.write_u16(key_idx, pos.clone());
+                emit_string_operand(chunk, Opcode::GetProperty, elem.key.clone(), pos.clone());
                 if let Some(def) = &elem.default {
                     emit_undefined_replace(def, chunk, resolutions, &pos)?;
                 }
-                store(&elem.target, chunk, &pos);
+                emit_decl_store(chunk, &elem.target, is_const, pos.clone());
             }
         }
     }
@@ -200,9 +193,7 @@ fn emit_undefined_replace(
     pos: &Position,
 ) -> Result<(), Object> {
     chunk.write_op(Opcode::Dup, pos.clone());
-    let und = chunk.add_constant(Object::Undefined);
-    chunk.write_op(Opcode::Const, pos.clone());
-    chunk.write_u16(und, pos.clone());
+    emit_value_constant(chunk, Object::Undefined, pos.clone())?;
     chunk.write_op(Opcode::Eq, pos.clone());
     let keep_ip = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, pos.clone());
     chunk.write_op(Opcode::Pop, pos.clone());

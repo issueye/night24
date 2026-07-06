@@ -1,7 +1,8 @@
-use crate::object::{str_obj, Object};
+use crate::object::Object;
 
 use super::chunk::Chunk;
 use super::compiler::{compile_expr, compile_stmt, unsupported};
+use super::emit::emit_string_operand;
 use super::emit::{emit_const, emit_jump_placeholder, emit_load_name, patch_jump_here};
 use super::opcode::Opcode;
 use super::resolve::ResolutionMap;
@@ -76,9 +77,7 @@ pub(super) fn compile_return_stmt(
         Ok(())
     } else {
         let temp_name = format!("__gts_bc_return_{}_{}", r.pos.line, r.pos.col);
-        let temp_idx = chunk.add_constant(str_obj(temp_name.clone()));
-        chunk.write_op(Opcode::StoreName, r.pos.clone());
-        chunk.write_u16(temp_idx, r.pos.clone());
+        emit_string_operand(chunk, Opcode::StoreName, temp_name.clone(), r.pos.clone());
         emit_abrupt_action(
             AbruptAction::Return { temp_name },
             r.pos.clone(),
