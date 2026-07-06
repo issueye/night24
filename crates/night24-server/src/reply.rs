@@ -177,21 +177,31 @@ fn append_diff_ready_before_terminal(
 }
 
 fn finalize_pumped_session(mut session: Session, run_id: &str, user_message_id: &str) -> Session {
-    if !conversation_has_assistant_after_current_user(&session.conversation, user_message_id) {
+    if should_append_no_reply_placeholder(&session.conversation, user_message_id) {
         session.conversation.push(text_message(
             Role::Assistant,
             format!("Run {run_id} completed without assistant message."),
         ));
     }
 
-    if session.name == "session" || session.name.is_empty() {
-        let derived = session.derived_name();
-        if derived != session.name {
-            session.rename(derived);
-        }
-    }
+    apply_derived_session_name(&mut session);
 
     session
+}
+
+fn should_append_no_reply_placeholder(conversation: &[Message], user_message_id: &str) -> bool {
+    !conversation_has_assistant_after_current_user(conversation, user_message_id)
+}
+
+fn apply_derived_session_name(session: &mut Session) {
+    if session.name != "session" && !session.name.is_empty() {
+        return;
+    }
+
+    let derived = session.derived_name();
+    if derived != session.name {
+        session.rename(derived);
+    }
 }
 
 async fn prepare_reply_session(
@@ -678,12 +688,7 @@ pub(crate) async fn reply(
                 let _ = tx.send(Err(format!("agent error: {}", e))).await;
             }
         }
-        if session_for_task.name == "session" || session_for_task.name.is_empty() {
-            let derived = session_for_task.derived_name();
-            if derived != session_for_task.name {
-                session_for_task.rename(derived);
-            }
-        }
+        apply_derived_session_name(&mut session_for_task);
         let _ = session_manager.save(&session_for_task).await;
     });
 
@@ -1186,6 +1191,35 @@ mod tests {
             &conversation,
             &current_user.id,
         ));
+    }
+
+    #[test]
+    fn apply_derived_session_name_only_updates_default_names() {
+        let mut default_session = Session::new(
+            "session",
+            PathBuf::from("E:/codes/project"),
+            SessionType::User,
+        );
+        default_session
+            .conversation
+            .push(Message::user("Build the dashboard"));
+
+        apply_derived_session_name(&mut default_session);
+
+        assert_eq!(default_session.name, "build the dashboard");
+
+        let mut custom_session = Session::new(
+            "Custom Name",
+            PathBuf::from("E:/codes/project"),
+            SessionType::User,
+        );
+        custom_session
+            .conversation
+            .push(Message::user("replace should not happen"));
+
+        apply_derived_session_name(&mut custom_session);
+
+        assert_eq!(custom_session.name, "Custom Name");
     }
 
     #[test]
