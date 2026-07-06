@@ -313,6 +313,18 @@
 - 已完成：继续收敛 `bytecode/compiler_declarations.rs` 的常量发码，默认 `undefined`、数组解构索引和默认值比较统一复用 `emit_value_constant`，移除局部手写 `Const + operand` 路径。
 - 已完成：继续收敛 `bytecode/compiler_assign.rs` / `bytecode/compiler_operators.rs` 的常量发码，`++/--` 的 `1`、`delete` 的 `true` 和 `void` 的 `undefined` 统一复用 `emit_value_constant`，compiler 模块内不再散落手写 `Opcode::Const`。
 - 已完成：从 `bytecode/interp.rs` 主循环抽出 `check_execution_budget`，集中 timeout / instruction limit 采样检查，并补充采样边界回归测试。
+- 已完成：继续收敛 `bytecode/interp.rs` 栈操作分支，抽出 `dup_stack` helper，统一 `Dup` 的栈顶复制与 underflow 错误处理，并补充空栈 `Dup` 回归测试。
+- 已完成：继续收敛 `bytecode/interp.rs` 返回分支，抽出 `return_from_stack` / `return_value` 内部 helper，统一 `Return` / `ReturnNull` 的 upvalue 关闭路径，并补充空栈 `Return` 默认 `undefined` 回归测试。
+- 已完成：继续收敛 `bytecode/interp.rs` 闭包分支，抽出 `push_closure_from_operand` 内部 helper，集中函数原型 operand 读取、upvalue 捕获和闭包压栈路径。
+- 已完成：继续收敛 `bytecode/interp.rs` 指令位置计算，抽出 `current_instruction_pos` 内部 helper，统一 operandless opcode、二元/一元 op 和 throw 分支的当前位置读取。
+- 已完成：继续收敛 `bytecode/interp.rs` 字符串 operand 分支，抽出 `set_property_from_operand` / `get_property_from_operand` / `super_method_from_operand`，集中 property 与 super method 的 operand 读取和 stack helper 调用。
+- 已完成：继续收敛 `bytecode/interp.rs` 模块字符串 operand 分支，抽出 `import_module_from_operand` / `export_name_from_operand`，集中 import/export name operand 读取和 stack helper 调用。
+- 已完成：继续收敛 `bytecode/interp.rs` 变量字符串 operand 分支，抽出 `load_name_from_operand` / `assign_name_from_operand`，集中动态名称读取和 stack/env helper 调用。
+- 已完成：继续收敛 `bytecode/interp.rs` 全局变量 operand 分支，抽出 `load_global_from_operand` / `store_global_from_operand`，集中 global name operand 读取并保留 const 标记兼容语义。
+- 已完成：继续收敛 `bytecode/interp.rs` byte operand 分支，抽出 `load_local_from_operand` / `store_local_from_operand` / `load_upvalue_from_operand` / `store_upvalue_from_operand`，集中 local/upvalue operand 读取和 stack helper 调用。
+- 已完成：继续收敛 `bytecode/interp.rs` store name operand 分支，抽出 `store_name_from_operand` / `store_typed_name_from_operand`，集中普通/类型声明存名的 name/type operand 读取和 stack/env helper 调用。
+- 已完成：继续收敛 `bytecode/interp.rs` 常量 operand 分支，抽出 `push_const_from_operand`，让主 opcode arm 不再直接读取 operand，只保留分发和 helper 调用。
+- 已完成：继续收敛 `bytecode/interp.rs` 闭包 operand 分支，将 `push_closure_from_operand` 下沉到 `interp_helpers`，集中函数原型读取、upvalue 捕获和闭包压栈路径。
 - 下一步：继续拆 compiler 中剩余复合 expression emitter，或拆 interpreter 中剩余小型栈操作 helper；每步继续核对 `try/finally` 保护线没有语义回退。
 - 中期建议：将 `evaluator::expressions` 中被 bytecode 复用的语义迁移到 `semantics` 或 `runtime_ops`，再处理更大的 interpreter/compiler 主循环拆分。
 - Phase 5 固定验证：每个 compiler/interpreter 拆分批次必须运行 `cargo fmt --check`、`cargo test -p night24-gts`、`npm run build`（`tauri-app` 目录）、`git diff --check`；文档-only 批次至少运行 `git diff --check`。

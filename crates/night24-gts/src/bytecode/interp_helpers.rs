@@ -165,6 +165,15 @@ pub(super) fn read_const_operand(
     })
 }
 
+pub(super) fn push_const_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+) -> Result<(), Object> {
+    stack.push(read_const_operand(chunk, ip, "CONST")?);
+    Ok(())
+}
+
 pub(super) fn read_type_operand(
     chunk: &Chunk,
     ip: &mut usize,
@@ -246,6 +255,12 @@ pub(super) fn unwind_to_handler(
 
 pub(super) fn stack_underflow(pos: Position) -> Object {
     new_error(pos, "VMError: stack underflow")
+}
+
+pub(super) fn dup_stack(stack: &mut Vec<Object>, pos: Position) -> Result<(), Object> {
+    let value = stack.last().cloned().ok_or_else(|| stack_underflow(pos))?;
+    stack.push(value);
+    Ok(())
 }
 
 pub(super) fn apply_binary_stack_op(
@@ -396,6 +411,15 @@ pub(super) fn load_local(
     Ok(())
 }
 
+pub(super) fn load_local_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+) -> Result<(), Object> {
+    let (slot, pos) = read_byte_operand_with_pos(chunk, ip, "LOAD_LOCAL")?;
+    load_local(stack, slot, pos)
+}
+
 pub(super) fn store_local(
     stack: &mut Vec<Object>,
     slot: usize,
@@ -410,6 +434,15 @@ pub(super) fn store_local(
     };
     *target = value;
     Ok(())
+}
+
+pub(super) fn store_local_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+) -> Result<(), Object> {
+    let (slot, pos) = read_byte_operand_with_pos(chunk, ip, "STORE_LOCAL")?;
+    store_local(stack, slot, pos)
 }
 
 pub(super) fn super_method_stack(
@@ -428,6 +461,16 @@ pub(super) fn super_method_stack(
     }
     stack.push(value);
     Ok(())
+}
+
+pub(super) fn super_method_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "SUPER_METHOD")?;
+    super_method_stack(stack, env, &name, pos)
 }
 
 pub(super) fn load_upvalue(
@@ -450,6 +493,16 @@ pub(super) fn load_upvalue(
     };
     stack.push(value);
     Ok(())
+}
+
+pub(super) fn load_upvalue_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    upvalues: &[Rc<Upvalue>],
+) -> Result<(), Object> {
+    let (index, pos) = read_byte_operand_with_pos(chunk, ip, "LOAD_UPVALUE")?;
+    load_upvalue(stack, upvalues, index, pos)
 }
 
 pub(super) fn store_upvalue(
@@ -477,6 +530,16 @@ pub(super) fn store_upvalue(
     Ok(())
 }
 
+pub(super) fn store_upvalue_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    upvalues: &[Rc<Upvalue>],
+) -> Result<(), Object> {
+    let (index, pos) = read_byte_operand_with_pos(chunk, ip, "STORE_UPVALUE")?;
+    store_upvalue(stack, upvalues, index, pos)
+}
+
 pub(super) fn load_name(
     stack: &mut Vec<Object>,
     env: &EnvRef,
@@ -496,6 +559,16 @@ pub(super) fn load_name(
     Ok(())
 }
 
+pub(super) fn load_name_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "LOAD_NAME")?;
+    load_name(stack, env, &name, pos)
+}
+
 pub(super) fn store_name(
     stack: &mut Vec<Object>,
     env: &EnvRef,
@@ -510,6 +583,16 @@ pub(super) fn store_name(
         env.borrow_mut().set_here(name, value);
     }
     Ok(())
+}
+
+pub(super) fn store_name_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, is_const, pos) = read_name_operand(chunk, ip, "STORE_NAME")?;
+    store_name(stack, env, name, is_const, pos)
 }
 
 pub(super) fn store_typed_name(
@@ -529,6 +612,17 @@ pub(super) fn store_typed_name(
         env.borrow_mut().set_typed(name, value, Some(type_anno));
     }
     Ok(())
+}
+
+pub(super) fn store_typed_name_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, is_const, pos) = read_name_operand(chunk, ip, "STORE_TYPED_NAME")?;
+    let type_anno = read_type_operand(chunk, ip, "STORE_TYPED_NAME", pos.clone())?;
+    store_typed_name(stack, env, name, is_const, type_anno, pos)
 }
 
 pub(super) fn assign_name(
@@ -562,6 +656,16 @@ pub(super) fn assign_name(
     Ok(())
 }
 
+pub(super) fn assign_name_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "ASSIGN_NAME")?;
+    assign_name(stack, env, &name, pos)
+}
+
 pub(super) fn load_global(
     stack: &mut Vec<Object>,
     env: &EnvRef,
@@ -580,6 +684,16 @@ pub(super) fn load_global(
     }
 }
 
+pub(super) fn load_global_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "LOAD_GLOBAL")?;
+    load_global(stack, env, &name, pos)
+}
+
 pub(super) fn store_global(
     stack: &mut Vec<Object>,
     env: &EnvRef,
@@ -589,6 +703,19 @@ pub(super) fn store_global(
     let value = stack.pop().ok_or_else(|| stack_underflow(pos))?;
     env.borrow().vm.set_global(name, value);
     Ok(())
+}
+
+pub(super) fn store_global_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, is_const, pos) = read_name_operand(chunk, ip, "STORE_GLOBAL")?;
+    // The high bit is accepted for parity with `StoreName`, but globals do not
+    // track const-ness here; declarations still go through `StoreName`.
+    let _ = is_const;
+    store_global(stack, env, name, pos)
 }
 
 pub(super) fn import_module_stack(
@@ -611,6 +738,16 @@ pub(super) fn import_module_stack(
     Ok(())
 }
 
+pub(super) fn import_module_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (source, pos) = read_string_operand(chunk, ip, "IMPORT_MODULE")?;
+    import_module_stack(stack, env, &source, pos)
+}
+
 pub(super) fn export_name_stack(
     stack: &mut Vec<Object>,
     env: &EnvRef,
@@ -629,6 +766,16 @@ pub(super) fn export_name_stack(
             format!("TypeError: cannot export from {}", other.type_tag()),
         )),
     }
+}
+
+pub(super) fn export_name_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "EXPORT_NAME")?;
+    export_name_stack(stack, env, name, pos)
 }
 
 pub(super) fn export_all_stack(
@@ -738,6 +885,15 @@ pub(super) fn set_property_stack(
     Ok(())
 }
 
+pub(super) fn set_property_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "SET_PROPERTY")?;
+    set_property_stack(stack, &name, pos)
+}
+
 pub(super) fn get_property_stack(
     stack: &mut Vec<Object>,
     name: &str,
@@ -750,6 +906,15 @@ pub(super) fn get_property_stack(
     }
     stack.push(value);
     Ok(())
+}
+
+pub(super) fn get_property_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+) -> Result<(), Object> {
+    let (name, pos) = read_string_operand(chunk, ip, "GET_PROPERTY")?;
+    get_property_stack(stack, &name, pos)
 }
 
 pub(super) fn get_index_stack(stack: &mut Vec<Object>, pos: Position) -> Result<(), Object> {
@@ -1188,6 +1353,20 @@ pub(super) fn read_function_proto_operand(
         ));
     };
     Ok((proto, pos))
+}
+
+pub(super) fn push_closure_from_operand(
+    chunk: &Chunk,
+    ip: &mut usize,
+    stack: &mut Vec<Object>,
+    env: &EnvRef,
+    open_upvalues: &mut BTreeMap<usize, Vec<Rc<Upvalue>>>,
+    current_upvalues: &[Rc<Upvalue>],
+) -> Result<(), Object> {
+    let (proto, _pos) = read_function_proto_operand(chunk, ip, "CLOSURE")?;
+    let upvalues = capture_proto_upvalues(&proto, env, open_upvalues, current_upvalues)?;
+    stack.push(closure_from_proto(proto, upvalues, env.clone()));
+    Ok(())
 }
 
 pub(super) fn assign_property(

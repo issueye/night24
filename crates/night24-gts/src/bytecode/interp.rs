@@ -22,19 +22,19 @@ use super::chunk::Chunk;
 #[cfg(test)]
 use super::interp_helpers::capture_open_upvalue as capture_open_upvalue_ref;
 use super::interp_helpers::{
-    apply_binary_stack_op, apply_unary_stack_op, array_slice_from_stack, assign_name, await_stack,
-    build_class_from_operand, call_from_operand, call_spread_stack,
-    capture_proto_upvalues as capture_proto_upvalues_ref,
-    close_open_upvalues_from as close_open_upvalues_range, closure_from_proto,
-    conditional_jump_from_stack, construct_from_operand, export_all_stack, export_name_stack,
-    get_index_stack, get_property_stack, import_module_stack, iter_keys_stack, iter_next_stack,
-    iter_values_stack, jump_to_operand, len_stack, load_global, load_local, load_name, load_this,
-    load_upvalue, new_array_from_operand, new_object_to_stack, push_arg_stack,
-    read_byte_operand_with_pos, read_const_operand, read_function_proto_operand, read_name_operand,
-    read_string_operand, read_type_operand, set_index_stack, set_property_stack, spread_stack,
-    stack_underflow, store_global, store_local, store_name, store_typed_name, store_upvalue,
-    super_method_stack, throw_from_stack, throw_match_error_from_stack, to_string_stack,
-    type_of_stack, unwind_to_handler as unwind_stack_to_handler, wrap_resolved_promise_stack,
+    apply_binary_stack_op, apply_unary_stack_op, array_slice_from_stack, assign_name_from_operand,
+    await_stack, build_class_from_operand, call_from_operand, call_spread_stack,
+    close_open_upvalues_from as close_open_upvalues_range, conditional_jump_from_stack,
+    construct_from_operand, dup_stack, export_all_stack, export_name_from_operand, get_index_stack,
+    get_property_from_operand, import_module_from_operand, iter_keys_stack, iter_next_stack,
+    iter_values_stack, jump_to_operand, len_stack, load_global_from_operand,
+    load_local_from_operand, load_name_from_operand, load_this, load_upvalue_from_operand,
+    new_array_from_operand, new_object_to_stack, push_arg_stack, push_closure_from_operand,
+    push_const_from_operand, set_index_stack, set_property_from_operand, spread_stack,
+    store_global_from_operand, store_local_from_operand, store_name_from_operand,
+    store_typed_name_from_operand, store_upvalue_from_operand, super_method_from_operand,
+    throw_from_stack, throw_match_error_from_stack, to_string_stack, type_of_stack,
+    unwind_to_handler as unwind_stack_to_handler, wrap_resolved_promise_stack,
 };
 use super::opcode::Opcode;
 use super::upvalue::Upvalue;
@@ -172,8 +172,7 @@ impl<'a> VmState<'a> {
     /// Decode and execute one instruction. Returning `Result` lets opcode
     /// handlers use `?` for error propagation; `run` translates the outcomes.
     fn step(&mut self) -> Result<Flow, Object> {
-        let instruction_ip = self.ip;
-        self.last_ip = instruction_ip;
+        self.last_ip = self.ip;
         let byte = self.chunk.code[self.ip];
         let op = match Opcode::from_byte(byte) {
             Some(op) => op,
@@ -187,19 +186,14 @@ impl<'a> VmState<'a> {
         self.ip += 1;
         match op {
             Opcode::Const => {
-                self.stack
-                    .push(read_const_operand(self.chunk, &mut self.ip, "CONST")?);
+                push_const_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
             }
             Opcode::Pop => {
                 self.stack.pop();
             }
             Opcode::Dup => {
-                let v = self
-                    .stack
-                    .last()
-                    .cloned()
-                    .ok_or_else(|| stack_underflow(self.chunk.position_at(self.ip - 1)))?;
-                self.stack.push(v);
+                let pos = self.current_instruction_pos();
+                dup_stack(&mut self.stack, pos)?;
             }
 
             // —— binary operators: delegate to the shared evaluator core ——
@@ -260,33 +254,28 @@ impl<'a> VmState<'a> {
             }
 
             Opcode::Return => {
-                let v = self.stack.pop().unwrap_or(Object::Undefined);
-                self.close_open_upvalues_from(0);
-                return Ok(Flow::Return(v));
+                return Ok(self.return_from_stack());
             }
             Opcode::ReturnNull => {
-                self.close_open_upvalues_from(0);
-                return Ok(Flow::Return(Object::Null));
+                return Ok(self.return_value(Object::Null));
             }
             Opcode::ToString => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 to_string_stack(&mut self.stack, pos)?;
             }
             Opcode::TypeOf => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 type_of_stack(&mut self.stack, pos)?;
             }
             Opcode::Await => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 await_stack(&mut self.stack, &self.env, pos)?;
             }
             Opcode::ImportModule => {
-                let (source, pos) = read_string_operand(self.chunk, &mut self.ip, "IMPORT_MODULE")?;
-                import_module_stack(&mut self.stack, &self.env, &source, pos)?;
+                import_module_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::ExportName => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "EXPORT_NAME")?;
-                export_name_stack(&mut self.stack, &self.env, name, pos)?;
+                export_name_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::ArraySliceFrom => {
                 // Stack: [..., array, start]. Pop start, pop array, push tail.
@@ -309,15 +298,15 @@ impl<'a> VmState<'a> {
                 call_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::PushArg => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 push_arg_stack(&mut self.stack, pos)?;
             }
             Opcode::Spread => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 spread_stack(&mut self.stack, pos)?;
             }
             Opcode::CallSpread => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 call_spread_stack(&mut self.stack, &self.env, pos)?;
             }
             Opcode::New => {
@@ -327,11 +316,14 @@ impl<'a> VmState<'a> {
                 build_class_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::Closure => {
-                let (proto, _pos) =
-                    read_function_proto_operand(self.chunk, &mut self.ip, "CLOSURE")?;
-                let upvalues = self.capture_proto_upvalues(&proto)?;
-                self.stack
-                    .push(closure_from_proto(proto, upvalues, self.env.clone()));
+                push_closure_from_operand(
+                    self.chunk,
+                    &mut self.ip,
+                    &mut self.stack,
+                    &self.env,
+                    &mut self.open_upvalues,
+                    &self.current_upvalues,
+                )?;
             }
             Opcode::NewArray => {
                 new_array_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
@@ -340,58 +332,53 @@ impl<'a> VmState<'a> {
                 new_object_to_stack(&mut self.stack);
             }
             Opcode::SetProperty => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "SET_PROPERTY")?;
-                set_property_stack(&mut self.stack, &name, pos)?;
+                set_property_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
             }
             Opcode::GetProperty => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "GET_PROPERTY")?;
-                get_property_stack(&mut self.stack, &name, pos)?;
+                get_property_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
             }
             Opcode::GetIndex => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 get_index_stack(&mut self.stack, pos)?;
             }
             Opcode::SetIndex => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 set_index_stack(&mut self.stack, pos)?;
             }
             Opcode::IterKeys => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 iter_keys_stack(&mut self.stack, pos)?;
             }
             Opcode::IterValues => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 iter_values_stack(&mut self.stack, &self.env, pos)?;
             }
             Opcode::IterNext => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 iter_next_stack(&mut self.stack, &self.env, pos)?;
             }
             Opcode::Len => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.current_instruction_pos();
                 len_stack(&mut self.stack, pos)?;
             }
 
             // —— variables (routed through the environment name table) ——
             Opcode::LoadName => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "LOAD_NAME")?;
-                load_name(&mut self.stack, &self.env, &name, pos)?;
+                load_name_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::StoreName => {
-                let (name, is_const, pos) =
-                    read_name_operand(self.chunk, &mut self.ip, "STORE_NAME")?;
-                store_name(&mut self.stack, &self.env, name, is_const, pos)?;
+                store_name_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::StoreTypedName => {
-                let (name, is_const, pos) =
-                    read_name_operand(self.chunk, &mut self.ip, "STORE_TYPED_NAME")?;
-                let type_anno =
-                    read_type_operand(self.chunk, &mut self.ip, "STORE_TYPED_NAME", pos.clone())?;
-                store_typed_name(&mut self.stack, &self.env, name, is_const, type_anno, pos)?;
+                store_typed_name_from_operand(
+                    self.chunk,
+                    &mut self.ip,
+                    &mut self.stack,
+                    &self.env,
+                )?;
             }
             Opcode::AssignName => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "ASSIGN_NAME")?;
-                assign_name(&mut self.stack, &self.env, &name, pos)?;
+                assign_name_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::LoadThis => {
                 load_this(&mut self.stack, &self.env);
@@ -408,57 +395,48 @@ impl<'a> VmState<'a> {
             //   * `LoadLocal`/`StoreLocal` index the value stack by slot, the
             //     same storage `LoadUpvalue` already reads from.
             Opcode::LoadGlobal => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "LOAD_GLOBAL")?;
-                load_global(&mut self.stack, &self.env, &name, pos)?;
+                load_global_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::StoreGlobal => {
-                let (name, is_const, pos) =
-                    read_name_operand(self.chunk, &mut self.ip, "STORE_GLOBAL")?;
-                // The high bit is accepted for parity with `StoreName`'s
-                // encoding (the const flag), but the global table has no
-                // per-binding const marker. Declarations still go through
-                // `StoreName` (which records const-ness in the environment), so
-                // a `StoreGlobal` is only ever emitted for assignment to an
-                // existing global; `is_const` is therefore informational here.
-                let _ = is_const;
-                store_global(&mut self.stack, &self.env, name, pos)?;
+                store_global_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::LoadLocal => {
-                let (slot, pos) =
-                    read_byte_operand_with_pos(self.chunk, &mut self.ip, "LOAD_LOCAL")?;
-                load_local(&mut self.stack, slot, pos)?;
+                load_local_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
             }
             Opcode::StoreLocal => {
-                let (slot, pos) =
-                    read_byte_operand_with_pos(self.chunk, &mut self.ip, "STORE_LOCAL")?;
-                store_local(&mut self.stack, slot, pos)?;
+                store_local_from_operand(self.chunk, &mut self.ip, &mut self.stack)?;
             }
             Opcode::SuperMethod => {
-                let (name, pos) = read_string_operand(self.chunk, &mut self.ip, "SUPER_METHOD")?;
-                super_method_stack(&mut self.stack, &self.env, &name, pos)?;
+                super_method_from_operand(self.chunk, &mut self.ip, &mut self.stack, &self.env)?;
             }
             Opcode::LoadUpvalue => {
-                let (index, pos) =
-                    read_byte_operand_with_pos(self.chunk, &mut self.ip, "LOAD_UPVALUE")?;
-                load_upvalue(&mut self.stack, &self.current_upvalues, index, pos)?;
+                load_upvalue_from_operand(
+                    self.chunk,
+                    &mut self.ip,
+                    &mut self.stack,
+                    &self.current_upvalues,
+                )?;
             }
             Opcode::StoreUpvalue => {
-                let (index, pos) =
-                    read_byte_operand_with_pos(self.chunk, &mut self.ip, "STORE_UPVALUE")?;
-                store_upvalue(&mut self.stack, &self.current_upvalues, index, pos)?;
+                store_upvalue_from_operand(
+                    self.chunk,
+                    &mut self.ip,
+                    &mut self.stack,
+                    &self.current_upvalues,
+                )?;
             }
             Opcode::Throw => {
-                let pos = self.chunk.position_at(instruction_ip);
+                let pos = self.current_instruction_pos();
                 return Err(throw_from_stack(&mut self.stack, pos)?);
             }
             Opcode::ThrowMatchError => {
-                let pos = self.chunk.position_at(instruction_ip);
+                let pos = self.current_instruction_pos();
                 return Err(throw_match_error_from_stack(&mut self.stack, pos)?);
             }
 
             other => {
                 return Err(new_error(
-                    self.chunk.position_at(self.ip - 1),
+                    self.current_instruction_pos(),
                     format!("VMError: opcode {:?} not implemented yet", other),
                 ));
             }
@@ -470,24 +448,18 @@ impl<'a> VmState<'a> {
     /// the result. The op string matches the GTS source operator so semantics
     /// are byte-identical to the tree-walker.
     fn bin_op(&mut self, op: &'static str) -> Result<(), Object> {
-        apply_binary_stack_op(&mut self.stack, op, self.chunk.position_at(self.ip - 1))
+        let pos = self.current_instruction_pos();
+        apply_binary_stack_op(&mut self.stack, op, pos)
     }
 
     /// Pop one operand, apply a unary op, push the result.
     fn un_op(&mut self, op: &'static str) -> Result<(), Object> {
-        apply_unary_stack_op(&mut self.stack, op, self.chunk.position_at(self.ip - 1))
+        let pos = self.current_instruction_pos();
+        apply_unary_stack_op(&mut self.stack, op, pos)
     }
 
-    fn capture_proto_upvalues(
-        &mut self,
-        proto: &Rc<crate::bytecode::closure::FunctionProto>,
-    ) -> Result<Vec<Rc<Upvalue>>, Object> {
-        capture_proto_upvalues_ref(
-            proto,
-            &self.env,
-            &mut self.open_upvalues,
-            &self.current_upvalues,
-        )
+    fn current_instruction_pos(&self) -> Position {
+        self.chunk.position_at(self.last_ip)
     }
 
     #[cfg(test)]
@@ -497,6 +469,16 @@ impl<'a> VmState<'a> {
 
     fn close_open_upvalues_from(&mut self, first_slot: usize) {
         close_open_upvalues_range(&mut self.open_upvalues, &self.stack, first_slot);
+    }
+
+    fn return_from_stack(&mut self) -> Flow {
+        let value = self.stack.pop().unwrap_or(Object::Undefined);
+        self.return_value(value)
+    }
+
+    fn return_value(&mut self, value: Object) -> Flow {
+        self.close_open_upvalues_from(0);
+        Flow::Return(value)
     }
 
     fn unwind_to_handler(&mut self, error: Object) -> bool {

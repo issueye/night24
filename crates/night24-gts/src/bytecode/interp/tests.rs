@@ -665,6 +665,13 @@ fn return_null_opcode_returns_null() {
 }
 
 #[test]
+fn return_without_value_yields_undefined() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::Return, Position::default());
+    assert!(matches!(run_chunk(chunk), Object::Undefined));
+}
+
+#[test]
 fn const_opcode_missing_constant_is_vmerror() {
     let mut chunk = Chunk::new();
     chunk.write_op(Opcode::Const, Position::default());
@@ -812,6 +819,21 @@ fn jump_if_true_without_condition_is_stack_underflow() {
 fn throw_without_value_is_stack_underflow() {
     let mut chunk = Chunk::new();
     chunk.write_op(Opcode::Throw, Position::default());
+
+    let result = run_chunk(chunk);
+
+    let Object::Error(data) = result else {
+        panic!("expected VMError, got {result:?}");
+    };
+    let data = data.borrow();
+    assert_eq!(data.name, "Error");
+    assert!(data.message.contains("stack underflow"));
+}
+
+#[test]
+fn dup_without_value_is_stack_underflow() {
+    let mut chunk = Chunk::new();
+    chunk.write_op(Opcode::Dup, Position::default());
 
     let result = run_chunk(chunk);
 
