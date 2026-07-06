@@ -19,6 +19,7 @@ import { useRunRegistry } from './hooks/useRunRegistry.js';
 import { classNames, isVisibleChatMessage } from './utils/format.js';
 import { estimateContextUsage } from './utils/context.js';
 import { normalizeError } from './utils/events.js';
+import { mergeVisibleMessagesById } from './utils/messages.js';
 import { buildReplyRequestBody } from './utils/reply.js';
 import { readSseStream } from './utils/sse.js';
 import {
@@ -79,6 +80,7 @@ export default function App() {
   const messageEndRef = useRef(null);
   const clearCurrentSessionRef = useRef(null);
   const runTerminalsRef = useRef(new Map());
+  const runEventListenersRef = useRef(new Map());
   const { headers, apiJson } = useApiClient(apiBase, apiKey);
 
   const {
@@ -230,10 +232,22 @@ export default function App() {
     markRunTerminal,
   });
 
-  async function refreshSessionHistory(sessionId) {
+  function mergeSessionHistory(sessionId, visibleMessages, { replace = false } = {}) {
+    if (replace) {
+      setSessionMessages(sessionId, visibleMessages);
+      return;
+    }
+    setSessionMessages(sessionId, (items) => mergeVisibleMessagesById(
+      items,
+      visibleMessages,
+      isVisibleChatMessage,
+    ));
+  }
+
+  async function refreshSessionHistory(sessionId, options = {}) {
     const history = await apiJson(`/sessions/${sessionId}/history`);
     const visibleMessages = Array.isArray(history) ? history.filter(isVisibleChatMessage) : [];
-    setSessionMessages(sessionId, visibleMessages);
+    mergeSessionHistory(sessionId, visibleMessages, options);
     return visibleMessages;
   }
 
@@ -268,6 +282,86 @@ export default function App() {
       const eventRunId = rememberStreamEvent(event, sessionId, runId);
       handleAgentEvent(event.eventName, event.payload, { sessionId, runId: eventRunId });
     });
+  }
+
+  function listenerKey(sessionId, runId) {
+    return `${sessionId || ''}:${runId || ''}`;
+  }
+
+  function ensureRunEventListener(sessionId, runId, options = {}) {
+    if (!sessionId || !runId || isPendingRunId(runId)) return null;
+    const key = listenerKey(sessionId, runId);
+    if (runEventListenersRef.current.has(key)) {
+      return runEventListenersRef.current.get(key);
+    }
+
+    let run = getSessionRun(sessionId);
+    if (!run || run.runId !== runId) {
+      const temporaryId = startPendingSessionRun(sessionId, {
+        controller: null,
+        status: options.status || 'reconnecting',
+        workspacePath: workspace?.root_path,
+      });
+      attachRunId(sessionId, temporaryId, runId);
+      run = { runId, sessionId };
+    }
+
+    const checkpoint = getSessionContext(sessionId).runCheckpoints[runId] || { runId, lastSeq: 0 };
+    const controller = new AbortController();
+    const listener = { sessionId, runId, controller };
+    runEventListenersRef.current.set(key, listener);
+
+    markRunEvent(runId, {
+      controller,
+      lastSeq: checkpoint.lastSeq || 0,
+      status: options.status || 'reconnecting',
+    });
+    setSessionRunCheckpoint(sessionId, runId, {
+      runId,
+      lastSeq: checkpoint.lastSeq || 0,
+      status: options.status || 'reconnecting',
+    });
+    if (options.timeline !== false) {
+      addSessionTimeline(
+        sessionId,
+        'stream_recovering',
+        options.title || '继续接收会话事件',
+        options.detail || runId,
+        'warning',
+      );
+    }
+
+    (async () => {
+      try {
+        await replayRunEvents(runId, checkpoint.lastSeq || 0, sessionId, controller.signal);
+        if (!runTerminalsRef.current.get(runId)) {
+          markRunEvent(runId, { status: 'detached' });
+          setSessionRunCheckpoint(sessionId, runId, {
+            runId,
+            lastSeq: getSessionContext(sessionId).runCheckpoints[runId]?.lastSeq || checkpoint.lastSeq || 0,
+            status: 'detached',
+          });
+          addSessionTimeline(sessionId, 'stream_detached', '会话事件暂未接上', runId, 'warning');
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          markRunEvent(runId, { status: 'detached' });
+          setSessionRunCheckpoint(sessionId, runId, {
+            runId,
+            lastSeq: getSessionContext(sessionId).runCheckpoints[runId]?.lastSeq || checkpoint.lastSeq || 0,
+            status: 'detached',
+          });
+          addSessionTimeline(sessionId, 'stream_detached', '会话事件暂未接上', normalizeError(error), 'warning');
+        }
+      } finally {
+        if (runEventListenersRef.current.get(key) === listener) {
+          runEventListenersRef.current.delete(key);
+        }
+        loadSessions();
+      }
+    })();
+
+    return listener;
   }
 
   async function recoverDisconnectedStream(sessionId, runId, baselineVisibleCount, detail, signal) {
@@ -326,50 +420,30 @@ export default function App() {
   async function handleSelectSession(id) {
     const visibleMessages = await selectSession(id);
     if (!visibleMessages) return;
-    setSessionMessages(id, visibleMessages);
+    mergeSessionHistory(id, visibleMessages);
 
-    if (getSessionRun(id)) return;
+    const activeRun = getSessionRun(id);
+    if (activeRun?.runId && !isPendingRunId(activeRun.runId)) {
+      if (
+        activeRun.status === 'detached' ||
+        activeRun.status === 'reconnecting' ||
+        !activeRun.controller
+      ) {
+        ensureRunEventListener(id, activeRun.runId, {
+          status: 'reconnecting',
+          detail: activeRun.runId,
+        });
+      }
+      return;
+    }
 
     const liveCheckpoint = Object.values(getSessionContext(id).runCheckpoints).find(isLiveCheckpoint);
     if (!liveCheckpoint?.runId || isPendingRunId(liveCheckpoint.runId)) return;
 
-    const controller = new AbortController();
-    const temporaryId = startPendingSessionRun(id, {
-      controller,
+    ensureRunEventListener(id, liveCheckpoint.runId, {
       status: 'reconnecting',
-      workspacePath: workspace?.root_path,
+      detail: liveCheckpoint.runId,
     });
-    attachRunId(id, temporaryId, liveCheckpoint.runId);
-    markRunEvent(liveCheckpoint.runId, {
-      controller,
-      lastSeq: liveCheckpoint.lastSeq || 0,
-      status: 'reconnecting',
-    });
-    setSessionRunCheckpoint(id, liveCheckpoint.runId, {
-      lastSeq: liveCheckpoint.lastSeq || 0,
-      status: 'reconnecting',
-    });
-    addSessionTimeline(id, 'stream_recovering', '继续接收会话事件', liveCheckpoint.runId, 'warning');
-
-    try {
-      await replayRunEvents(liveCheckpoint.runId, liveCheckpoint.lastSeq || 0, id, controller.signal);
-      if (!runTerminalsRef.current.get(liveCheckpoint.runId)) {
-        await refreshSessionHistory(id);
-        finishRun(liveCheckpoint.runId, 'synced');
-        clearSessionRunContext(id, liveCheckpoint.runId);
-      }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        markRunEvent(liveCheckpoint.runId, { status: 'detached' });
-        setSessionRunCheckpoint(id, liveCheckpoint.runId, {
-          lastSeq: liveCheckpoint.lastSeq || 0,
-          status: 'detached',
-        });
-        addSessionTimeline(id, 'stream_detached', '会话事件暂未接上', normalizeError(error), 'warning');
-      }
-    } finally {
-      loadSessions();
-    }
   }
 
   async function sendTask() {
