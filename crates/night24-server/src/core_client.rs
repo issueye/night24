@@ -72,9 +72,7 @@ impl AgentCoreClient {
         client.start_stdout_reader(stdout, 1);
         client.start_stderr_reader(stderr);
         client.initialize().await?;
-        if let Ok(mut status) = client.status.lock() {
-            *status = CoreRuntimeStatus::available();
-        }
+        store_core_status(&client.status, CoreRuntimeStatus::available());
         Ok(client)
     }
 
@@ -86,20 +84,14 @@ impl AgentCoreClient {
                         "agent-core exited with status {}",
                         status
                     ));
-                    if let Ok(mut guard) = self.status.lock() {
-                        *guard = status.clone();
-                    }
-                    return status;
+                    return store_core_status(&self.status, status);
                 }
                 Ok(None) => {}
                 Err(err) => {
                     let status = CoreRuntimeStatus::unavailable(format!(
                         "agent-core status check failed: {err}"
                     ));
-                    if let Ok(mut guard) = self.status.lock() {
-                        *guard = status.clone();
-                    }
-                    return status;
+                    return store_core_status(&self.status, status);
                 }
             }
         }
@@ -111,9 +103,10 @@ impl AgentCoreClient {
 
     pub(crate) async fn restart(&self) -> anyhow::Result<CoreRuntimeStatus> {
         let generation_id = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Ok(mut status) = self.status.lock() {
-            *status = CoreRuntimeStatus::unavailable("restarting agent-core");
-        }
+        store_core_status(
+            &self.status,
+            CoreRuntimeStatus::unavailable("restarting agent-core"),
+        );
 
         reject_pending_requests(&self.pending, "agent-core restarted");
         clear_event_senders(&self.event_senders);
@@ -130,10 +123,10 @@ impl AgentCoreClient {
         let (stdin, child, stdout, stderr) = match spawn_core_process() {
             Ok(parts) => parts,
             Err(err) => {
-                if let Ok(mut status) = self.status.lock() {
-                    *status =
-                        CoreRuntimeStatus::unavailable(format!("agent-core restart failed: {err}"));
-                }
+                store_core_status(
+                    &self.status,
+                    CoreRuntimeStatus::unavailable(format!("agent-core restart failed: {err}")),
+                );
                 return Err(err);
             }
         };
@@ -150,18 +143,17 @@ impl AgentCoreClient {
         self.start_stdout_reader(stdout, generation_id);
         self.start_stderr_reader(stderr);
         if let Err(err) = self.initialize().await {
-            if let Ok(mut status) = self.status.lock() {
-                *status =
-                    CoreRuntimeStatus::unavailable(format!("agent-core initialize failed: {err}"));
-            }
+            store_core_status(
+                &self.status,
+                CoreRuntimeStatus::unavailable(format!("agent-core initialize failed: {err}")),
+            );
             return Err(err);
         }
 
-        let status = CoreRuntimeStatus::available();
-        if let Ok(mut guard) = self.status.lock() {
-            *guard = status.clone();
-        }
-        Ok(status)
+        Ok(store_core_status(
+            &self.status,
+            CoreRuntimeStatus::available(),
+        ))
     }
 
     async fn initialize(&self) -> anyhow::Result<()> {
@@ -211,9 +203,10 @@ impl AgentCoreClient {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("agent-core pending lock poisoned"))?
                 .remove(&id);
-            if let Ok(mut status) = self.status.lock() {
-                *status = CoreRuntimeStatus::unavailable(format!("agent-core write failed: {err}"));
-            }
+            store_core_status(
+                &self.status,
+                CoreRuntimeStatus::unavailable(format!("agent-core write failed: {err}")),
+            );
             return Err(anyhow::anyhow!("agent-core write failed: {err}"));
         }
 
@@ -569,9 +562,10 @@ fn close_current_core_transport(
     if generation.load(Ordering::SeqCst) != generation_id {
         return false;
     }
-    if let Ok(mut guard) = status_ptr.lock() {
-        *guard = CoreRuntimeStatus::unavailable(reason.to_string());
-    }
+    store_core_status(
+        status_ptr,
+        CoreRuntimeStatus::unavailable(reason.to_string()),
+    );
     reject_pending_requests(pending, reason);
     clear_event_senders(event_senders);
     warn!(reason, "agent-core transport closed");
@@ -595,6 +589,16 @@ fn remove_event_sender(event_senders: &EventSenders, run_id: &str) -> bool {
         .is_some()
 }
 
+fn store_core_status(
+    status_ptr: &Arc<Mutex<CoreRuntimeStatus>>,
+    status: CoreRuntimeStatus,
+) -> CoreRuntimeStatus {
+    if let Ok(mut guard) = status_ptr.lock() {
+        *guard = status.clone();
+    }
+    status
+}
+
 fn agent_event_run_id(event: &serde_json::Value) -> Option<&str> {
     event.get("run_id").and_then(|run_id| run_id.as_str())
 }
@@ -615,9 +619,7 @@ fn set_core_status_if_current(
     if generation.load(Ordering::SeqCst) != generation_id {
         return;
     }
-    if let Ok(mut guard) = status_ptr.lock() {
-        *guard = status.clone();
-    }
+    store_core_status(status_ptr, status.clone());
     warn!(reason = ?status.reason, "agent-core became unavailable");
 }
 
@@ -958,6 +960,19 @@ mod tests {
         let guard = event_senders.lock().unwrap();
         assert!(!guard.contains_key("run-1"));
         assert!(guard.contains_key("run-2"));
+    }
+
+    #[test]
+    fn store_core_status_updates_shared_status_and_returns_snapshot() {
+        let status = Arc::new(Mutex::new(CoreRuntimeStatus::unavailable("initializing")));
+
+        let snapshot = store_core_status(&status, CoreRuntimeStatus::available());
+
+        assert!(snapshot.available);
+        assert!(snapshot.reason.is_none());
+        let stored = status.lock().unwrap();
+        assert!(stored.available);
+        assert!(stored.reason.is_none());
     }
 
     #[test]

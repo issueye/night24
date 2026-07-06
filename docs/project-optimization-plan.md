@@ -685,6 +685,8 @@
 
 追加完成：`core_client.rs` 抽出 event sender 清理 helper，重启、stdout 关闭、终止事件和接收端关闭复用同一清理入口，并补充批量清理与按 run_id 精确移除测试。
 
+追加完成：`core_client.rs` 抽出 core runtime status 写入 helper，收敛 spawn、status 检查、restart、write failure 与 stdout 关闭路径中的状态更新逻辑，并补充共享状态写入测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：
