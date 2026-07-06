@@ -22,6 +22,7 @@ export function SubAgentStats({
         <Stat label="运行中" value={pool?.running} tone="running" />
         <Stat label="完成" value={pool?.completed} tone="completed" />
         <Stat label="失败" value={pool?.failed} tone="failed" />
+        <Stat label="取消" value={pool?.cancelled} tone="cancelled" />
       </div>
       <button className="icon-button compact" disabled={loading} onClick={onRefresh} title="刷新子代理" type="button">
         <RefreshCw className={loading ? 'spin' : ''} size={13} />

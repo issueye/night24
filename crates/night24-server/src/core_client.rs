@@ -526,7 +526,12 @@ fn route_agent_event(event_senders: &EventSenders, params: serde_json::Value) {
         .ok()
         .and_then(|guard| guard.get(&run_id).cloned());
     if let Some(sender) = sender {
-        let _ = sender.blocking_send(params);
+        if sender.blocking_send(params).is_err() {
+            if let Ok(mut guard) = event_senders.lock() {
+                guard.remove(&run_id);
+            }
+            return;
+        }
     }
     if is_terminal {
         if let Ok(mut guard) = event_senders.lock() {
@@ -844,6 +849,24 @@ mod tests {
         route_agent_event(
             &event_senders,
             serde_json::json!({ "run_id": "run-1", "type": "error" }),
+        );
+
+        assert!(event_senders.lock().unwrap().get("run-1").is_none());
+    }
+
+    #[test]
+    fn route_agent_event_removes_closed_sender_for_non_terminal_event() {
+        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-1".to_string(), tx);
+
+        route_agent_event(
+            &event_senders,
+            serde_json::json!({ "run_id": "run-1", "type": "message" }),
         );
 
         assert!(event_senders.lock().unwrap().get("run-1").is_none());

@@ -1,21 +1,9 @@
-import { Ban, CheckCircle2, Circle, Clock3, Loader2, XCircle } from 'lucide-react';
 import { classNames, formatTime } from '../../utils/format.js';
 import { Placeholder } from '../Placeholder.jsx';
-
-const STATUS_META = {
-  queued: { label: '排队中', tone: 'queued', icon: Clock3 },
-  running: { label: '运行中', tone: 'running', icon: Loader2 },
-  completed: { label: '已完成', tone: 'completed', icon: CheckCircle2 },
-  failed: { label: '失败', tone: 'failed', icon: XCircle },
-  cancelled: { label: '已取消', tone: 'cancelled', icon: Ban },
-};
-
-function statusMeta(status) {
-  return STATUS_META[status] || { label: status || '未知', tone: 'unknown', icon: Circle };
-}
+import { subAgentStatusMeta } from './status.js';
 
 function StatusPill({ status }) {
-  const meta = statusMeta(status);
+  const meta = subAgentStatusMeta(status);
   const Icon = meta.icon;
   return (
     <span className={classNames('subagent-status', meta.tone)}>

@@ -17,7 +17,7 @@ use crate::object::{new_error, Object};
 use super::chunk::Chunk;
 pub(super) use super::compiler_abrupt::{compile_break_continue, FinallyFrame, LoopFrame};
 pub(super) use super::compiler_expr::compile_expr;
-pub(super) use super::compiler_functions::compile_method_proto;
+pub(super) use super::compiler_function_proto::compile_method_proto;
 pub(super) use super::compiler_stmt::compile_stmt;
 use super::opcode::Opcode;
 use super::resolve;

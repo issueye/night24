@@ -12,7 +12,7 @@
 
 - `tauri-app/src/App.jsx`：已通过 hook / utility 拆分降至约 419 行，当前主要保留发送任务、顶层页面布局和 hook 接线。
 - `tauri-app/src/styles/workspace.css`：承接工作区基础布局；左侧栏和时间线样式已拆至 `sidebar.css` / `timeline.css`，后续继续审计剩余 workspace 布局块。
-- `tauri-app/src/styles/desktop-shell.css`：承接 Codex-inspired 桌面壳变量与基础响应式覆盖；顶栏 chrome 已拆至 `desktop-chrome.css`，后续继续审计剩余布局微调。
+- `tauri-app/src/styles/desktop-shell.css`：已清空并移除；桌面壳变量、chrome、workspace、sidebar、status、conversation、overlay、event 和 responsive 规则已迁移到对应专用 CSS 文件。
 - `tauri-app/src/components/settings/SkillSettings.jsx` 与 `HookSettings.jsx`：已抽共享列表详情壳；样式已按 provider / hook-skill 分离，单组件仍保留各自请求、状态和表单细节。
 
 ### Server 与 Agent Core
@@ -110,7 +110,7 @@
 - 已完成：从 `desktop-shell.css` 抽出 `desktop-chrome.css`，承接桌面壳 app frame、顶部栏、品牌区、状态 pill 和共享按钮覆盖，导入位置保持在 desktop shell 后。
 - 已完成：从 `desktop-shell.css` 抽出 `desktop-theme.css`，承接桌面壳 `:root` 主题变量，导入位置保持在 desktop shell 后、desktop chrome 前。
 - 已完成：从 `desktop-overlays.css` 抽出 `desktop-events.css`，承接 TimelinePanel 事件浮窗、事件列表和事件行样式，桌面覆盖层文件保留设置条、上下文浮窗和共享浮窗头部。
-- 待后续：继续审计 `workspace.css` 与 `desktop-shell.css`，优先只迁移边界清晰的功能块，避免一次性重排级联顺序。
+- 已完成：完成 `workspace.css` 与 `desktop-shell.css` 收尾审计；`workspace.css` 仅保留基础 grid，`desktop-shell.css` 剩余规则已被后续专用文件覆盖并移除导入。
 
 ### Phase 3：Server/Core 结构隔离
 
@@ -336,7 +336,10 @@
 - 已完成：从 `bytecode/compiler_control.rs` 拆出 `bytecode/compiler_iterators.rs`，承接 `for-in` / `for-of` 迭代语句发码、临时迭代变量和 break/continue patch 逻辑，普通控制流文件只保留 if/while/for/labeled 分发。
 - 已完成：从 `bytecode/compiler_declarations.rs` 拆出 `bytecode/compiler_decl_store.rs`，承接声明存储 operand 选择和类型/普通声明写入发码，统一 `var` / `let` / `const` 的 store 边界。
 - 已完成：从 `bytecode/compiler_declarations.rs` 拆出 `bytecode/compiler_destructuring.rs`，承接数组/对象解构声明、默认值替换和 rest 绑定发码，声明主文件只保留普通声明分发。
-- 下一步：继续拆 compiler 中剩余复合 expression emitter，或拆 interpreter 中剩余小型栈操作 helper；每步继续核对 `try/finally` 保护线没有语义回退。
+- 已完成：从 `bytecode/compiler_match.rs` 拆出 `bytecode/compiler_match_patterns.rs`，承接 literal/ident/wildcard/or/range pattern test 发码，match 主文件只保留 subject、arm、guard 与 body 跳转编排。
+- 已完成：从 `bytecode/compiler_functions.rs` 拆出 `bytecode/compiler_function_proto.rs`，承接 method/function/lexical-this proto 构造和子 chunk 编译，函数模块只保留 function declaration/expression/arrow 的 Closure 发码。
+- 收尾策略：GTS 脚本语言引擎模块化本轮到此收口；后续只处理明确缺陷、验证失败或阻塞 Hook/Skill/子代理链路的问题，不再继续投入 compiler/interpreter 深拆。
+- 下一步：把优化重心转回桌面端体验、Hook/Skill/子代理可观测性和服务端稳定性；涉及 GTS 时只做最小必要改动，并继续核对 `try/finally` 保护线没有语义回退。
 - 中期建议：将 `evaluator::expressions` 中被 bytecode 复用的语义迁移到 `semantics` 或 `runtime_ops`，再处理更大的 interpreter/compiler 主循环拆分。
 - Phase 5 固定验证：每个 compiler/interpreter 拆分批次必须运行 `cargo fmt --check`、`cargo test -p night24-gts`、`npm run build`（`tauri-app` 目录）、`git diff --check`；文档-only 批次至少运行 `git diff --check`。
 
@@ -479,6 +482,7 @@
 - `tauri-app/src/styles/settings-hooks.css`、`settings-skills.css`：从 `settings-hooks-skills.css` 继续抽出 Hook 和 Skill 管理专属样式。
 - `tauri-app/src/styles/chat-permissions.css`、`chat-tools.css`、`chat-composer.css`：从 `chat.css` 抽出聊天权限卡、工具调用块和输入区相关样式。
 - `tauri-app/src/styles/subagents-list.css`、`subagents-detail.css`：从 `subagents.css` 抽出子代理列表和详情区域样式。
+- `tauri-app/src/components/subagents/status.js`：抽出子代理状态展示元数据和摘要文本 helper，列表/详情复用同一状态映射；统计栏补充 cancelled 计数展示。
 - `crates/night24-server/src/reply.rs`：抽出 `sse_stream_response`，统一 reply SSE 标准响应 headers。
 - `crates/night24-server/src/reply.rs`：抽出 `json_error_response`，统一 reply session 准备阶段 JSON 错误响应。
 - `crates/night24-server/src/core_client.rs`：抽出终止事件识别 helper，并补充 finish/error 分类测试。
@@ -661,6 +665,8 @@
 追加完成：`hooks.rs` 已抽出 hook 配置校验错误构造 helper，收敛 `hooks[index]` 错误前缀拼接，并补充多 hook 配置中后续 hook 失败时保留准确 index 的边界测试。
 
 追加完成：`workspace.rs` 已抽出 `git_status_path`，集中 porcelain 路径与 rename 目标路径提取逻辑，并补充普通路径、rename 目标和空路径边界测试。
+
+追加完成：`core_client.rs` 的 agent event 路由在消费端关闭时会移除对应 run sender，避免非终止事件继续保留无效 sender，并补充断开连接后的清理测试。
 
 #### S1：抽 session run 准备逻辑
 

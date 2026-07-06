@@ -16,7 +16,7 @@
 
 .subagent-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
 }
@@ -53,6 +53,11 @@
 .subagent-stat.failed strong,
 .subagent-status.failed {
   color: var(--red);
+}
+
+.subagent-stat.cancelled strong,
+.subagent-status.cancelled {
+  color: var(--amber);
 }
 
 .subagent-error {
