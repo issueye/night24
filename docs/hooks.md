@@ -1,6 +1,6 @@
 # Night24 Hooks
 
-Night24 Agent Core supports native GoScript hooks for run and tool lifecycle events. Hooks are disabled by default and only load when `NIGHT24_HOOKS_FILE` points to a JSON config file.
+Night24 Agent Core supports native GoScript hooks for run and tool lifecycle events. Hooks are disabled by default and load from the workspace `.night24/hooks.json` file, or from `NIGHT24_HOOKS_FILE` when that override is set.
 
 ## Events
 
@@ -92,6 +92,8 @@ function execute(args) {
 - `error`
 - `duration_ms`
 - `finish_status`
+
+Run lifecycle hooks include the selected provider, model, request message count, and available tool count. Tool and permission hooks also include tool-specific fields such as `tool_call_id`, `tool_name`, `summary`, and `arguments`.
 
 The `execute(args)` return value may include `outputs`, an array of `{ "stream": "stdout" | "stderr", "text": "..." }` objects. `println(...)`, `console.log(...)`, and stderr output from the VM are also collected as hook output.
 

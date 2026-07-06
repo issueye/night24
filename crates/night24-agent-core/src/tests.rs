@@ -98,6 +98,106 @@ async fn reply_returns_accepted_message_and_finish() {
 }
 
 #[tokio::test]
+async fn run_lifecycle_hooks_include_provider_model_and_counts() {
+    let temp_dir = test_temp_dir("run-lifecycle-hook-context").await;
+    let hook_dir = temp_dir.join(".night24");
+    tokio::fs::create_dir_all(&hook_dir).await.unwrap();
+    tokio::fs::write(
+        hook_dir.join("hooks.json"),
+        r#"{
+            "hooks": [
+                {
+                    "event": "run_started",
+                    "name": "started-context",
+                    "engine": "gts",
+                    "inline_script": "function execute(args) { return { outputs: [{ stream: \"stdout\", text: \"started provider=\" + args.provider + \" model=\" + args.model + \" messages=\" + String(args.message_count) + \" tools=\" + String(args.tool_count) }] }; }"
+                },
+                {
+                    "event": "run_finished",
+                    "name": "finished-context",
+                    "engine": "gts",
+                    "inline_script": "function execute(args) { return { outputs: [{ stream: \"stdout\", text: \"finished provider=\" + args.provider + \" model=\" + args.model + \" messages=\" + String(args.message_count) + \" tools=\" + String(args.tool_count) + \" status=\" + args.finish_status }] }; }"
+                }
+            ]
+        }"#,
+    )
+    .await
+    .unwrap();
+
+    let mut core = initialized_core().await;
+    let working_dir = temp_dir.to_string_lossy().to_string();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-lifecycle-hook-context",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": working_dir,
+                "conversation": [
+                    {
+                        "id": "previous-user",
+                        "role": "user",
+                        "content": [{ "type": "text", "text": "previous" }],
+                        "created_at": "2026-07-06T00:00:00Z"
+                    }
+                ]
+            },
+            "input": { "text": "hello" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let hook_texts = output
+        .iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .filter(|value| value["params"]["type"] == "run_output")
+        .filter_map(|value| {
+            value["params"]["payload"]["text"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+
+    let started = hook_texts
+        .iter()
+        .find(|text| text.starts_with("started provider=echo model=echo-v1 messages=2 tools="))
+        .unwrap_or_else(|| panic!("missing started lifecycle hook output: {hook_texts:?}"));
+    let finished = hook_texts
+        .iter()
+        .find(|text| {
+            text.starts_with("finished provider=echo model=echo-v1 messages=2 tools=")
+                && text.ends_with(" status=completed")
+        })
+        .unwrap_or_else(|| panic!("missing finished lifecycle hook output: {hook_texts:?}"));
+    assert_ne!(started.rsplit_once("tools=").unwrap().1, "null");
+    assert_ne!(
+        finished
+            .split("tools=")
+            .nth(1)
+            .and_then(|value| value.split_whitespace().next())
+            .unwrap(),
+        "null"
+    );
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn agent_skills_returns_workspace_registry() {
     let temp_dir = test_temp_dir("skills-registry").await;
     let skill_dir = temp_dir.join(".night24").join("skills").join("review");

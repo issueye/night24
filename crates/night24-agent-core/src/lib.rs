@@ -1298,21 +1298,22 @@ async fn reply_events(
     default_provider: String,
     context: RunContext,
 ) -> Vec<String> {
-    run_started_hook(&params, &context).await;
+    run_started_hook(&params, &default_provider, &context).await;
     let result = AgentCore::run_agent_with_events(&params, &default_provider, &context).await;
-    finish_reply_events(params, context, result).await
+    finish_reply_events(params, default_provider, context, result).await
 }
 
-async fn run_started_hook(params: &ReplyParams, context: &RunContext) {
+async fn run_started_hook(params: &ReplyParams, default_provider: &str, context: &RunContext) {
+    let meta = run_lifecycle_hook_meta(params, default_provider);
     context
         .run_hooks(HookContext {
             event: HookEvent::RunStarted,
             run_id: &params.run_id,
             working_dir: &params.session.working_dir,
-            provider: None,
-            model: None,
-            message_count: None,
-            tool_count: None,
+            provider: Some(&meta.provider),
+            model: Some(&meta.model),
+            message_count: Some(meta.message_count),
+            tool_count: Some(meta.tool_count),
             tool_call_id: None,
             tool_name: None,
             summary: None,
@@ -1327,6 +1328,7 @@ async fn run_started_hook(params: &ReplyParams, context: &RunContext) {
 
 async fn finish_reply_events(
     params: ReplyParams,
+    default_provider: String,
     context: RunContext,
     result: anyhow::Result<Vec<Message>>,
 ) -> Vec<String> {
@@ -1337,7 +1339,15 @@ async fn finish_reply_events(
             } else {
                 "completed"
             };
-            run_end_hook(&params, &context, HookEvent::RunFinished, status, None).await;
+            run_end_hook(
+                &params,
+                &default_provider,
+                &context,
+                HookEvent::RunFinished,
+                status,
+                None,
+            )
+            .await;
             let mut output = context.drain_collected();
             output.push(agent_event_notification(AgentEvent::new(
                 params.run_id.clone(),
@@ -1363,7 +1373,15 @@ async fn finish_reply_events(
             } else {
                 HookEvent::RunFinished
             };
-            run_end_hook(&params, &context, event, status, Some(&message)).await;
+            run_end_hook(
+                &params,
+                &default_provider,
+                &context,
+                event,
+                status,
+                Some(&message),
+            )
+            .await;
             let mut output = context.drain_collected();
             if is_cancelled {
                 output.push(agent_event_notification(AgentEvent::new(
@@ -1394,20 +1412,22 @@ async fn finish_reply_events(
 
 async fn run_end_hook(
     params: &ReplyParams,
+    default_provider: &str,
     context: &RunContext,
     event: HookEvent,
     status: &str,
     error: Option<&str>,
 ) {
+    let meta = run_lifecycle_hook_meta(params, default_provider);
     context
         .run_hooks(HookContext {
             event,
             run_id: &params.run_id,
             working_dir: &params.session.working_dir,
-            provider: None,
-            model: None,
-            message_count: None,
-            tool_count: None,
+            provider: Some(&meta.provider),
+            model: Some(&meta.model),
+            message_count: Some(meta.message_count),
+            tool_count: Some(meta.tool_count),
             tool_call_id: None,
             tool_name: None,
             summary: None,
@@ -1418,6 +1438,24 @@ async fn run_end_hook(
             finish_status: Some(status),
         })
         .await;
+}
+
+struct RunLifecycleHookMeta {
+    provider: String,
+    model: String,
+    message_count: usize,
+    tool_count: usize,
+}
+
+fn run_lifecycle_hook_meta(params: &ReplyParams, default_provider: &str) -> RunLifecycleHookMeta {
+    let provider = effective_provider(&params.provider, default_provider);
+    let model = effective_model(&provider);
+    RunLifecycleHookMeta {
+        provider: provider.provider,
+        model,
+        message_count: params.session.conversation.len() + 1,
+        tool_count: night24_core::tool_executor::builtin_tools().len(),
+    }
 }
 
 fn is_cancelled_error(context: &RunContext, message: &str) -> bool {
