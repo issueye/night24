@@ -29,3 +29,28 @@ export function withMessageText(message, text) {
   }
   return { ...message, content: nextContent };
 }
+
+export function mergeVisibleMessagesById(items, incomingMessages, isVisibleMessage) {
+  const next = [...items];
+  const indexById = new Map();
+  next.forEach((item, index) => {
+    if (item?.id && !indexById.has(item.id)) {
+      indexById.set(item.id, index);
+    }
+  });
+
+  incomingMessages.forEach((message) => {
+    if (!message?.role || !isVisibleMessage(message)) return;
+    if (message.id && indexById.has(message.id)) {
+      next[indexById.get(message.id)] = message;
+      return;
+    }
+
+    next.push(message);
+    if (message.id) {
+      indexById.set(message.id, next.length - 1);
+    }
+  });
+
+  return next;
+}

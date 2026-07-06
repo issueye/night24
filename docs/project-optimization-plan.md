@@ -58,6 +58,7 @@
 - 已完成：抽出 `estimateContextUsage` 纯函数，降低 `App.jsx` 计算逻辑密度。
 - 已完成：移除 `diff_ready` 分支的重复 diff 加载。
 - 已完成：移除 finish 分支的重复 session 刷新，保留 `sendTask finally` 统一刷新。
+- 已完成：`finish` 回传最终消息时按 message id 替换同 ID 的流式半成品，避免桌面端保留截断回复。
 - 已完成：抽 `useTimeline`，承接 `addTimeline` 和 timeline 截断策略。
 - 已完成：抽 `useSessions`，统一 session 列表、创建、选择、删除、ensure session。
 - 验证：每步运行 `npm run build`，涉及交互行为时补桌面端手工检查。
@@ -167,11 +168,11 @@
 - 已完成：修复 `permission.resolve` 在 run_id 不匹配时误删 pending permission 的问题；现在仅在 run_id 校验通过后移除请求，并补充错误 run_id 后仍可正确批准的回归测试。
 - 已完成：敏感输出二次确认现在也触发 `permission_required` hook，补齐审计脚本对敏感输出审批的可观测性，并补充 hook 输出不泄露原始敏感值的回归测试。
 - 已完成：`run_started` / `run_finished` / `run_failed` 生命周期 Hook 补齐 provider、model、message_count、tool_count 基础上下文，并补充工作区 hook 回归测试。
-- 下一步：继续围绕子代理/Skill/Hook 可观测性和服务端稳定性做小步补强；避免重新扩大 GTS 深拆范围。
+- 下一步：继续围绕子代理/Skill/Hook 可观测性和服务端稳定性做小步补强；GTS 脚本引擎只处理明确缺陷、验证失败或阻塞主链路的问题。
 
 ### Phase 5：GTS 引擎模块化
 
-- 状态：本轮已收尾。后续只处理明确缺陷、验证失败或阻塞 Hook/Skill/子代理链路的问题。
+- 状态：本轮已收尾。后续只处理明确缺陷、验证失败或阻塞 Hook/Skill/子代理链路的问题，不再继续投入通用模块化拆分。
 - 已完成：从 `evaluator/builtins.rs` 拆出 `builtins/json.rs`，承接 `JSON.stringify` / `JSON.parse` 与 JSON helper。
 - 已完成：从 `evaluator/builtins.rs` 拆出 `builtins/date.rs`，承接 Date 实例方法实现。
 - 已完成：从 `evaluator/builtins.rs` 拆出 `builtins/primitive.rs`，承接 Number / Boolean 全局对象与 Number 方法实现。

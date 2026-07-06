@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { isVisibleChatMessage, messageText, messageToolBlocks } from '../utils/format.js';
-import { appendMessageDelta } from '../utils/messages.js';
+import { appendMessageDelta, mergeVisibleMessagesById } from '../utils/messages.js';
 import {
   normalizeAgentEvent,
   normalizeDiffReadyEvent,
@@ -150,17 +150,7 @@ export function useAgentEvents({
       const finish = normalizeFinishEvent(eventPayload);
       const finishMessages = finish.messages;
       if (finishMessages.length) {
-        setMessages((items) => {
-          const seen = new Set(items.map((item) => item.id).filter(Boolean));
-          const next = [...items];
-          finishMessages.forEach((message) => {
-            if (message?.role && isVisibleChatMessage(message) && (!message.id || !seen.has(message.id))) {
-              next.push(message);
-              if (message.id) seen.add(message.id);
-            }
-          });
-          return next;
-        });
+        setMessages((items) => mergeVisibleMessagesById(items, finishMessages, isVisibleChatMessage));
       }
       setIsRunning(false);
       const finishStatus = finish.status;
