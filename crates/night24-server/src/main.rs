@@ -18,6 +18,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+mod agent_runner;
 mod api_types;
 mod auth;
 mod core_client;
@@ -28,6 +29,7 @@ mod sessions;
 mod state;
 mod workspace;
 
+use agent_runner::{build_agent_runner, AgentRunner, RunnerMode};
 use api_types::{
     AcceptedResponse, CancelAgentRequest, CompactSessionRequest, CompactSessionResponse,
     CoreRestartResponse, CoreStatusResponse, CreateSessionRequest, ForkSessionRequest,
@@ -181,6 +183,8 @@ async fn main() -> anyhow::Result<()> {
     let provider_registry = build_provider_registry();
     let permission_manager = build_permission_manager();
     let run_events = Arc::new(RunEventStore::new(data_dir().join("run-events")));
+    let runner_mode = RunnerMode::from_env();
+    info!(runner_mode = runner_mode.as_str(), "selected agent runner");
     let core_client = match AgentCoreClient::spawn().await {
         Ok(client) => {
             info!("agent-core initialized");
@@ -191,13 +195,17 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+    let core_client = Arc::new(tokio::sync::RwLock::new(core_client));
+    let agent_runner = build_agent_runner(runner_mode, core_client.clone());
 
     let app_state = AppState {
         session_manager,
         provider_registry: Arc::new(provider_registry),
         permission_manager: Arc::new(permission_manager),
         workspace_state: Arc::new(tokio::sync::RwLock::new(WorkspaceState::new())),
-        core_client: Arc::new(tokio::sync::RwLock::new(core_client)),
+        core_client,
+        agent_runner,
+        runner_mode,
         run_events,
     };
 
@@ -390,6 +398,10 @@ fn json_error(
 
 async fn current_core_client(state: &AppState) -> Option<Arc<AgentCoreClient>> {
     state.core_client.read().await.clone()
+}
+
+fn current_agent_runner(state: &AppState) -> Arc<dyn AgentRunner> {
+    state.agent_runner.clone()
 }
 
 #[utoipa::path(
@@ -629,10 +641,12 @@ async fn agent_cancel(
     State(state): State<AppState>,
     Json(req): Json<CancelAgentRequest>,
 ) -> Json<AcceptedResponse> {
-    if let (Some(core_client), Some(run_id)) =
-        (current_core_client(&state).await, req.run_id.clone())
-    {
-        match core_client.cancel(run_id.clone(), req.reason.clone()).await {
+    if let Some(run_id) = req.run_id.clone() {
+        let agent_runner = current_agent_runner(&state);
+        match agent_runner
+            .cancel(run_id.clone(), req.reason.clone())
+            .await
+        {
             Ok(_) => {
                 return accepted_response(true, None, Some(run_id), None);
             }
@@ -694,10 +708,9 @@ async fn handle_permission_decision(
     req: PermissionDecisionRequest,
     decision: PermissionDecision,
 ) -> Json<AcceptedResponse> {
-    if let (Some(core_client), Some(run_id)) =
-        (current_core_client(&state).await, req.run_id.clone())
-    {
-        match core_client
+    if let Some(run_id) = req.run_id.clone() {
+        let agent_runner = current_agent_runner(&state);
+        match agent_runner
             .resolve_permission(run_id.clone(), id.clone(), decision, req.reason.clone())
             .await
         {

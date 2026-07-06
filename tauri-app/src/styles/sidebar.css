@@ -1,6 +1,6 @@
 .left-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(160px, 1fr) auto;
+  grid-template-rows: auto minmax(160px, 1fr) auto auto;
   overflow: hidden;
 }
 
@@ -14,7 +14,8 @@
 }
 
 .tree-block,
-.sessions-block {
+.sessions-block,
+.project-block {
   display: flex;
   flex-direction: column;
 }
@@ -108,6 +109,172 @@
   background: var(--blue-soft);
 }
 
+.project-session-tree {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.project-tree-group {
+  display: grid;
+  gap: 2px;
+}
+
+.project-row,
+.project-session-main {
+  display: grid;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-row {
+  grid-template-columns: 14px 16px minmax(0, 1fr);
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.project-expand-icon {
+  color: var(--subtle);
+}
+
+.project-row span,
+.project-session-main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row:hover,
+.project-row.active,
+.project-session-row:hover,
+.project-session-row.active {
+  color: var(--text);
+  background: var(--blue-soft);
+  border-color: #d5e2ff;
+}
+
+.project-session-list {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  margin: 0 0 6px 25px;
+  padding-left: 8px;
+}
+
+.project-session-list::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -2px;
+  bottom: 14px;
+  width: 1px;
+  background: var(--line);
+}
+
+.project-session-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px;
+  align-items: center;
+  min-height: 30px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.project-session-row::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 15px;
+  width: 8px;
+  height: 1px;
+  background: var(--line);
+}
+
+.project-session-main {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 2px 0 10px;
+  color: inherit;
+}
+
+.project-session-main small,
+.session-running-icon,
+.session-delete {
+  color: var(--subtle);
+}
+
+.project-session-row.running .project-session-main {
+  color: var(--text);
+}
+
+.session-running-icon {
+  animation: spin 900ms linear infinite;
+}
+
+.session-delete {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 24px;
+  background: transparent;
+  border-radius: 5px;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.project-session-row:hover .session-delete,
+.project-session-row.active .session-delete {
+  opacity: 1;
+}
+
+.session-delete:hover {
+  color: var(--red);
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.empty-block.inline {
+  min-height: 26px;
+  padding-left: 10px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.sessions-block.compact {
+  flex: 0 0 auto;
+  min-height: auto;
+}
+
+.sidebar-fold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sidebar-fold span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .tree-scroll,
 .session-list {
   min-height: 0;
@@ -193,4 +360,10 @@
 
 .session-row svg:hover {
   color: var(--red);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

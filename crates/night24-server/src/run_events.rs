@@ -192,4 +192,68 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[tokio::test]
+    async fn persisted_events_are_isolated_by_run_id() {
+        let dir =
+            std::env::temp_dir().join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4()));
+        let store = RunEventStore::new(dir.clone());
+
+        store
+            .append_and_publish(
+                "run-1",
+                &serde_json::json!({ "type": "message_delta", "run_id": "run-1", "seq": 1 }),
+            )
+            .await
+            .unwrap();
+        store
+            .append_and_publish(
+                "run-2",
+                &serde_json::json!({ "type": "message_delta", "run_id": "run-2", "seq": 1 }),
+            )
+            .await
+            .unwrap();
+        store
+            .append_and_publish(
+                "run-1",
+                &serde_json::json!({ "type": "finish", "run_id": "run-1", "seq": 2 }),
+            )
+            .await
+            .unwrap();
+
+        let run_1_events = store.load_after("run-1", None).unwrap();
+        let run_2_events = store.load_after("run-2", None).unwrap();
+
+        assert_eq!(run_1_events.len(), 2);
+        assert!(run_1_events
+            .iter()
+            .all(|event| event["run_id"].as_str() == Some("run-1")));
+        assert_eq!(run_2_events.len(), 1);
+        assert_eq!(run_2_events[0]["run_id"], "run-2");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn subscribers_only_receive_events_for_matching_run_id() {
+        let dir =
+            std::env::temp_dir().join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4()));
+        let store = RunEventStore::new(dir.clone());
+        let mut run_1_rx = store.subscribe("run-1").await;
+        let mut run_2_rx = store.subscribe("run-2").await;
+
+        store
+            .append_and_publish(
+                "run-2",
+                &serde_json::json!({ "type": "message_delta", "run_id": "run-2", "seq": 1 }),
+            )
+            .await
+            .unwrap();
+
+        assert!(run_1_rx.try_recv().is_err());
+        let run_2_event = run_2_rx.try_recv().unwrap();
+        assert_eq!(run_2_event["run_id"], "run-2");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

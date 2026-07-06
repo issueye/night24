@@ -28,6 +28,7 @@ use night24_protocol::{
     ReplySession,
 };
 
+use crate::agent_runner::RunStart;
 use crate::api_types::RunEventsQuery;
 use crate::api_types::{ReplyRequest, WorkspaceChangeSnapshot};
 use crate::run_events::{event_seq, is_terminal_event, RunEventStore};
@@ -40,12 +41,7 @@ pub(crate) async fn reply_core(
     State(state): State<AppState>,
     Json(req): Json<ReplyRequest>,
 ) -> Response {
-    let core_client = match state.core_client.read().await.clone() {
-        Some(core_client) => core_client,
-        None => {
-            return sse_error_response(None, "core_unavailable", "no active core client", true);
-        }
-    };
+    let agent_runner = state.agent_runner.clone();
 
     let prepared = match prepare_reply_session(&state, req).await {
         Ok(prepared) => prepared,
@@ -58,9 +54,20 @@ pub(crate) async fn reply_core(
         reply_params,
     } = prepared;
 
-    let (_accepted, core_events) = match core_client.reply(reply_params).await {
-        Ok(value) => value,
+    let RunStart {
+        accepted: _accepted,
+        events: core_events,
+    } = match agent_runner.start_reply(reply_params).await {
+        Ok(run_start) => run_start,
         Err(err) => {
+            if err.to_string().contains("no active core client") {
+                return sse_error_response(
+                    Some(run_id),
+                    "core_unavailable",
+                    "no active core client",
+                    true,
+                );
+            }
             return sse_error_response(Some(run_id), "core_reply_failed", err.to_string(), true);
         }
     };
@@ -887,6 +894,7 @@ mod tests {
     }
 
     fn test_state_with_workspace(root_path: PathBuf) -> AppState {
+        let core_client = Arc::new(tokio::sync::RwLock::new(None));
         AppState {
             session_manager: Arc::new(SessionManager::new()),
             provider_registry: Arc::new(ProviderRegistry::new("echo").with_echo()),
@@ -901,7 +909,12 @@ mod tests {
                 }),
                 recent: Vec::new(),
             })),
-            core_client: Arc::new(tokio::sync::RwLock::new(None)),
+            core_client: core_client.clone(),
+            agent_runner: crate::agent_runner::build_agent_runner(
+                crate::agent_runner::RunnerMode::SingleCore,
+                core_client,
+            ),
+            runner_mode: crate::agent_runner::RunnerMode::SingleCore,
             run_events: Arc::new(RunEventStore::new(
                 std::env::temp_dir()
                     .join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4())),

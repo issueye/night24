@@ -1,5 +1,5 @@
 .left-panel {
-  grid-template-rows: auto auto minmax(160px, 1fr) auto;
+  grid-template-rows: auto minmax(160px, 1fr) auto auto;
   background: var(--sidebar-bg);
   border: 0;
   border-right: 1px solid var(--line);
@@ -32,6 +32,10 @@
   background: #ececea;
 }
 
+.nav-row.muted {
+  color: var(--muted);
+}
+
 .project-block,
 .tree-block,
 .sessions-block,
@@ -54,11 +58,14 @@
 
 .recent-list button,
 .session-row,
+.project-row,
+.project-session-row,
 .tree-row {
   border-radius: 6px;
 }
 
 .recent-list button,
+.project-session-row,
 .tree-row {
   color: var(--muted);
 }
@@ -70,6 +77,10 @@
 
 .session-row:hover,
 .session-row.active,
+.project-row:hover,
+.project-row.active,
+.project-session-row:hover,
+.project-session-row.active,
 .tree-row:hover,
 .tree-row.selected,
 .recent-list button:hover,
@@ -77,4 +88,34 @@
   color: var(--text);
   background: #ececea;
   border-color: transparent;
+}
+
+.project-session-tree {
+  padding-bottom: 8px;
+}
+
+.project-row {
+  min-height: 31px;
+  padding: 0 8px;
+}
+
+.project-session-list {
+  margin-left: 25px;
+}
+
+.project-session-row {
+  min-height: 30px;
+}
+
+.project-session-list::before,
+.project-session-row::before {
+  background: #d7d7d2;
+}
+
+.project-session-row.running .session-running-icon {
+  color: var(--text);
+}
+
+.sessions-block.compact {
+  border-bottom: 0;
 }

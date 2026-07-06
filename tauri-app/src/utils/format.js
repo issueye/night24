@@ -46,6 +46,18 @@ export function formatTime(value) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+export function formatRelativeShort(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60 * 1000) return '刚刚';
+  if (diffMs < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diffMs / (60 * 1000)))}分`;
+  if (diffMs < 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diffMs / (60 * 60 * 1000)))}时`;
+  if (diffMs < 30 * 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diffMs / (24 * 60 * 60 * 1000)))}天`;
+  return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+}
+
 export function formatBytes(size) {
   if (!Number.isFinite(size)) return '';
   if (size < 1024) return `${size} B`;

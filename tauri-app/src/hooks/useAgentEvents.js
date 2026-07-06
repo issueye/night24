@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { isVisibleChatMessage, messageText, messageToolBlocks } from '../utils/format.js';
-import { appendMessageDelta, mergeVisibleMessagesById } from '../utils/messages.js';
+import { appendMessageDelta, mergeVisibleMessagesById, withMessageText } from '../utils/messages.js';
 import {
   normalizeAgentEvent,
   normalizeDiffReadyEvent,
@@ -15,53 +15,105 @@ import {
   normalizeToolStartedEvent,
 } from '../utils/agentEvents.js';
 
+const findMessageIndex = (items, message) => (message.id ? items.findIndex((item) => item.id === message.id) : -1);
+
 export function useAgentEvents({
-  messages,
-  setMessages,
-  addTimeline,
+  getSessionContext,
+  setSessionMessages,
+  addSessionTimeline,
+  setSessionPermissions,
+  setSessionRunCheckpoint,
+  clearSessionRun,
+  currentSessionIdRef,
+  markRunEvent,
+  finishRun,
   openContextTab,
   loadWorkspaceDiff,
-  setIsRunning,
-  setActiveRun,
-  setPendingPermissions,
   showError,
-  addOrReplaceMessage,
-  addTypewriterMessage,
-  runTerminalRef,
+  markRunTerminal,
 }) {
-  const handleAgentEvent = useCallback((eventName, payload) => {
-    const { envelope, eventType, eventPayload, runId, runStatus, isBareMessage } = normalizeAgentEvent(eventName, payload);
+  const addOrReplaceSessionMessage = useCallback((sessionId, message) => {
+    if (!sessionId || !isVisibleChatMessage(message)) return;
+    setSessionMessages(sessionId, (items) => {
+      const index = findMessageIndex(items, message);
+      if (index < 0) return [...items, message];
+      return items.map((item, itemIndex) => (itemIndex === index ? message : item));
+    });
+  }, [setSessionMessages]);
+
+  const addTypewriterSessionMessage = useCallback((sessionId, message) => {
+    if (!sessionId || !message?.id) {
+      addOrReplaceSessionMessage(sessionId, message);
+      return;
+    }
+
+    const fullText = messageText(message);
+    if (!fullText.trim()) {
+      addOrReplaceSessionMessage(sessionId, message);
+      return;
+    }
+
+    const baseMessage = withMessageText(message, '');
+    setSessionMessages(sessionId, (items) => {
+      const index = findMessageIndex(items, message);
+      if (index >= 0) return items.map((item, itemIndex) => (itemIndex === index ? message : item));
+      return [...items, baseMessage];
+    });
+
+    let offset = 0;
+    const step = () => {
+      offset = Math.min(fullText.length, offset + Math.max(2, Math.ceil(fullText.length / 90)));
+      const visibleMessage = withMessageText(message, fullText.slice(0, offset));
+      setSessionMessages(sessionId, (items) => items.map((item) => (item.id === message.id ? visibleMessage : item)));
+      if (offset < fullText.length) {
+        window.setTimeout(step, 16);
+      }
+    };
+    window.setTimeout(step, 16);
+  }, [addOrReplaceSessionMessage, setSessionMessages]);
+
+  const handleAgentEvent = useCallback((eventName, payload, eventContext = {}) => {
+    const {
+      envelope,
+      eventType,
+      eventPayload,
+      runId: normalizedRunId,
+      runStatus,
+      isBareMessage,
+    } = normalizeAgentEvent(eventName, payload);
+    const sessionId = eventContext.sessionId;
+    const runId = eventContext.runId || normalizedRunId;
+    if (!sessionId) return;
+
+    const isCurrentSession = currentSessionIdRef.current === sessionId;
     if (runId) {
-      setActiveRun((run) => ({
-        ...(run || {}),
-        run_id: runId,
-        status: runStatus,
-      }));
+      markRunEvent(runId, { status: runStatus, runId });
+      setSessionRunCheckpoint(sessionId, runId, { status: runStatus });
     }
 
     if (isBareMessage) {
-      addOrReplaceMessage(envelope);
+      addOrReplaceSessionMessage(sessionId, envelope);
       return;
     }
 
     if (eventType === 'message') {
       const message = eventPayload?.message || eventPayload;
       if (message?.role) {
-        const existing = message.id && messages.some((item) => item.id === message.id);
+        const existing = message.id && getSessionContext(sessionId).messages.some((item) => item.id === message.id);
         const canType =
           !existing &&
           String(message.role).toLowerCase() === 'assistant' &&
           messageText(message).length > 0 &&
           messageToolBlocks(message).length === 0;
-        if (canType) {
-          addTypewriterMessage(message);
+        if (canType && isCurrentSession) {
+          addTypewriterSessionMessage(sessionId, message);
         } else {
-          addOrReplaceMessage(message);
+          addOrReplaceSessionMessage(sessionId, message);
         }
       } else {
         const text = normalizeMessageText(eventPayload);
         if (String(text || '').trim()) {
-          setMessages((items) => [
+          setSessionMessages(sessionId, (items) => [
             ...items,
             {
               id: `${Date.now()}`,
@@ -79,7 +131,7 @@ export function useAgentEvents({
       const messageId = eventPayload?.message_id || eventPayload?.id || `${runId || 'run'}-delta`;
       const delta = eventPayload?.delta || eventPayload?.text || '';
       if (!delta) return;
-      setMessages((items) => {
+      setSessionMessages(sessionId, (items) => {
         const existingIndex = items.findIndex((item) => item.id === messageId);
         if (existingIndex < 0) {
           return [
@@ -98,28 +150,34 @@ export function useAgentEvents({
     }
 
     if (eventType === 'permission_required') {
-      const permission = normalizePermissionEvent(eventPayload, envelope, runId, `${runId || 'run'}-${Date.now()}`);
-      setPendingPermissions((items) => [permission, ...items.filter((item) => item.permission_id !== permission.permission_id)]);
-      addTimeline(eventType, '等待权限确认', `${permission.tool_name} · ${permission.summary}`, 'warning');
+      const permission = {
+        ...normalizePermissionEvent(eventPayload, envelope, runId, `${runId || 'run'}-${Date.now()}`),
+        session_id: sessionId,
+      };
+      setSessionPermissions(sessionId, (items) => [
+        permission,
+        ...items.filter((item) => item.permission_id !== permission.permission_id),
+      ]);
+      addSessionTimeline(sessionId, eventType, '等待权限确认', `${permission.tool_name} · ${permission.summary}`, 'warning');
       return;
     }
 
     if (eventType === 'tool_started') {
       const timeline = normalizeToolStartedEvent(eventPayload);
-      addTimeline(eventType, timeline.title, timeline.detail, timeline.tone);
+      addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
       return;
     }
 
     if (eventType === 'tool_finished') {
       const timeline = normalizeToolFinishedEvent(eventPayload);
-      addTimeline(eventType, timeline.title, timeline.detail, timeline.tone);
+      addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
       return;
     }
 
     if (eventType === 'tool_failed') {
       const tool = normalizeToolFailedEvent(eventPayload);
-      addTimeline(eventType, tool.title, tool.detail, tool.tone);
-      setMessages((items) => [
+      addSessionTimeline(sessionId, eventType, tool.title, tool.detail, tool.tone);
+      setSessionMessages(sessionId, (items) => [
         ...items,
         {
           id: `tool-error-${eventPayload?.tool_call_id || Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -134,61 +192,68 @@ export function useAgentEvents({
 
     if (eventType === 'run_output') {
       const timeline = normalizeRunOutputEvent(eventPayload);
-      addTimeline(eventType, timeline.title, timeline.detail, timeline.tone);
+      addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
       return;
     }
 
     if (eventType === 'diff_ready') {
       const timeline = normalizeDiffReadyEvent(eventPayload);
-      openContextTab('diff');
-      addTimeline(eventType, timeline.title, timeline.detail, timeline.tone);
+      if (isCurrentSession) {
+        openContextTab('diff');
+      }
+      addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
       return;
     }
 
     if (eventType === 'finish') {
-      runTerminalRef.current = { type: 'finish', runId };
+      markRunTerminal(sessionId, runId, 'finish');
       const finish = normalizeFinishEvent(eventPayload);
       const finishMessages = finish.messages;
       if (finishMessages.length) {
-        setMessages((items) => mergeVisibleMessagesById(items, finishMessages, isVisibleChatMessage));
+        setSessionMessages(sessionId, (items) => mergeVisibleMessagesById(items, finishMessages, isVisibleChatMessage));
       }
-      setIsRunning(false);
       const finishStatus = finish.status;
-      setActiveRun((run) => (run ? { ...run, status: finishStatus } : null));
       if (runId) {
-        setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
+        setSessionPermissions(sessionId, (items) => items.filter((item) => item.run_id !== runId));
+        finishRun(runId, finishStatus);
+        clearSessionRun(sessionId, runId);
       }
-      loadWorkspaceDiff();
-      addTimeline(eventType, '任务结束', finishStatus, finish.tone);
+      if (isCurrentSession) {
+        loadWorkspaceDiff();
+      }
+      addSessionTimeline(sessionId, eventType, '任务结束', finishStatus, finish.tone);
       return;
     }
 
     if (eventType === 'error') {
-      runTerminalRef.current = { type: 'error', runId };
+      markRunTerminal(sessionId, runId, 'error');
       const { detail } = normalizeErrorEvent(eventPayload);
-      addTimeline(eventType, '任务错误', detail, 'error');
+      addSessionTimeline(sessionId, eventType, '任务错误', detail, 'error');
       if (runId) {
-        setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
+        setSessionPermissions(sessionId, (items) => items.filter((item) => item.run_id !== runId));
+        finishRun(runId, 'error');
+        clearSessionRun(sessionId, runId);
       }
-      setIsRunning(false);
-      setActiveRun((run) => (run ? { ...run, status: 'error' } : { status: 'error' }));
-      showError(detail);
+      showError(detail, { sessionId });
       return;
     }
 
-    addTimeline(eventType, eventType, normalizeFallbackTimeline(eventPayload), 'neutral');
+    addSessionTimeline(sessionId, eventType, eventType, normalizeFallbackTimeline(eventPayload), 'neutral');
   }, [
-    addOrReplaceMessage,
-    addTimeline,
-    addTypewriterMessage,
+    addOrReplaceSessionMessage,
+    addSessionTimeline,
+    addTypewriterSessionMessage,
+    clearSessionRun,
+    currentSessionIdRef,
+    finishRun,
+    getSessionContext,
     loadWorkspaceDiff,
-    messages,
+    markRunEvent,
+    markRunTerminal,
     openContextTab,
-    runTerminalRef,
-    setActiveRun,
-    setIsRunning,
-    setMessages,
-    setPendingPermissions,
+    setSessionMessages,
+    setSessionPermissions,
+    setSessionRunCheckpoint,
     showError,
   ]);
 

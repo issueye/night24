@@ -400,6 +400,18 @@ impl AgentCoreClient {
     }
 }
 
+impl Drop for AgentCoreClient {
+    fn drop(&mut self) {
+        reject_pending_requests(&self.pending, "agent-core client dropped");
+        clear_event_senders(&self.event_senders);
+
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 fn spawn_core_process() -> anyhow::Result<(
     ChildStdin,
     Child,

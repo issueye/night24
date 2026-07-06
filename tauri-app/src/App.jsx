@@ -9,13 +9,13 @@ import { useApiClient } from './hooks/useApiClient.js';
 import { useProviderSettings } from './hooks/useProviderSettings.js';
 import { useRunControls } from './hooks/useRunControls.js';
 import { useSessions } from './hooks/useSessions.js';
-import { useMessageActions } from './hooks/useMessageActions.js';
 import { useAgentEvents } from './hooks/useAgentEvents.js';
 import { useAppSettingsPersistence } from './hooks/useAppSettingsPersistence.js';
 import { useServerStatus } from './hooks/useServerStatus.js';
 import { useSubAgents } from './hooks/useSubAgents.js';
-import { useTimeline } from './hooks/useTimeline.js';
 import { useWorkspaceState } from './hooks/useWorkspaceState.js';
+import { useSessionContexts } from './hooks/useSessionContexts.js';
+import { useRunRegistry } from './hooks/useRunRegistry.js';
 import { classNames, isVisibleChatMessage } from './utils/format.js';
 import { estimateContextUsage } from './utils/context.js';
 import { normalizeError } from './utils/events.js';
@@ -27,14 +27,24 @@ import {
   apiUrl,
   readAccessMode,
   readSetting,
-  sameWorkspacePath,
 } from './utils/settings.js';
 
+const NEW_SESSION_CONTEXT_ID = '__new_session__';
 const STREAM_RECOVERY_ATTEMPTS = 40;
 const STREAM_RECOVERY_DELAY_MS = 1500;
+const TERMINAL_RUN_EVENTS = new Set(['finish', 'error']);
+const LIVE_CHECKPOINT_STATUSES = new Set(['running', 'reconnecting', 'detached', 'cancelling']);
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isPendingRunId(runId) {
+  return typeof runId === 'string' && runId.startsWith('pending-');
+}
+
+function isLiveCheckpoint(checkpoint) {
+  return Boolean(checkpoint?.runId && LIVE_CHECKPOINT_STATUSES.has(checkpoint.status || 'running'));
 }
 
 export default function App() {
@@ -45,6 +55,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => readSetting(STORAGE_KEYS.theme, 'light'));
   const [fontSize, setFontSize] = useState(() => readSetting(STORAGE_KEYS.fontSize, 'normal'));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [eventsOpen, setEventsOpen] = useState(false);
   const {
     providerProfiles,
     providerProfileId,
@@ -64,26 +75,43 @@ export default function App() {
     deleteProviderProfile,
   } = useProviderSettings();
 
-  const [taskText, setTaskText] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
-  const [activeRun, setActiveRun] = useState(null);
-  const [pendingPermissions, setPendingPermissions] = useState([]);
-  const [eventsOpen, setEventsOpen] = useState(false);
-
-  const abortRef = useRef(null);
-  const runTerminalRef = useRef(null);
-  const streamCheckpointRef = useRef({ runId: null, lastSeq: 0 });
-  const runCheckpointBySessionRef = useRef(new Map());
-  const activeRunSessionIdRef = useRef(null);
+  const currentSessionIdRef = useRef(null);
   const messageEndRef = useRef(null);
-  const messageSetterRef = useRef(null);
   const clearCurrentSessionRef = useRef(null);
+  const runTerminalsRef = useRef(new Map());
   const { headers, apiJson } = useApiClient(apiBase, apiKey);
-  const { timeline, addTimeline, clearTimeline } = useTimeline();
 
-  const showError = useCallback((message) => {
+  const {
+    sessionContexts,
+    getSessionContext,
+    patchSessionContext,
+    setSessionMessages,
+    setSessionDraft,
+    addSessionTimeline,
+    setSessionPermissions,
+    setSessionRunCheckpoint,
+    clearSessionRun: clearSessionRunContext,
+  } = useSessionContexts();
+
+  const {
+    runRegistry,
+    startPendingSessionRun,
+    attachRunId,
+    markRunEvent,
+    finishRun,
+    cancelRunState,
+    getSessionRun,
+  } = useRunRegistry();
+
+  const markRunTerminal = useCallback((sessionId, runId, type) => {
+    if (!runId) return;
+    runTerminalsRef.current.set(runId, { sessionId, runId, type });
+  }, []);
+
+  const showError = useCallback((message, options = {}) => {
+    const sessionId = options.sessionId || currentSessionIdRef.current || NEW_SESSION_CONTEXT_ID;
     const text = String(message || '发生未知错误');
-    messageSetterRef.current?.((items) => [
+    setSessionMessages(sessionId, (items) => [
       ...items,
       {
         id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -93,27 +121,24 @@ export default function App() {
         created_at: new Date().toISOString(),
       },
     ]);
-  }, []);
+  }, [setSessionMessages]);
 
-  const clearConversationView = useCallback(({ abortActive = false, preserveRun = false } = {}) => {
-    if (abortActive) {
-      if (preserveRun) {
-        runTerminalRef.current = { type: 'detached', runId: streamCheckpointRef.current.runId };
-      }
-      abortRef.current?.abort();
-      abortRef.current = null;
-    }
+  const addCurrentTimeline = useCallback((type, title, detail, tone = 'neutral') => {
+    addSessionTimeline(currentSessionIdRef.current || NEW_SESSION_CONTEXT_ID, type, title, detail, tone);
+  }, [addSessionTimeline]);
+
+  const clearConversationView = useCallback(({ preserveRun = false } = {}) => {
+    const sessionId = currentSessionIdRef.current || NEW_SESSION_CONTEXT_ID;
+    patchSessionContext(sessionId, {
+      messages: [],
+      draftText: '',
+      timeline: [],
+      pendingPermissions: preserveRun ? getSessionContext(sessionId).pendingPermissions : [],
+    });
     if (!preserveRun) {
-      runTerminalRef.current = null;
-      streamCheckpointRef.current = { runId: null, lastSeq: 0 };
-      activeRunSessionIdRef.current = null;
+      clearSessionRunContext(sessionId);
     }
-    messageSetterRef.current?.([]);
-    setPendingPermissions([]);
-    clearTimeline();
-    setActiveRun(null);
-    setIsRunning(false);
-  }, [clearTimeline]);
+  }, [clearSessionRunContext, getSessionContext, patchSessionContext]);
 
   const {
     workspace,
@@ -134,7 +159,7 @@ export default function App() {
     openContextTab,
   } = useWorkspaceState({
     apiJson,
-    addTimeline,
+    addTimeline: addCurrentTimeline,
     showError,
     clearConversationView,
     onWorkspaceOpened: () => clearCurrentSessionRef.current?.(),
@@ -143,8 +168,6 @@ export default function App() {
   const {
     sessions,
     currentSessionId,
-    messages,
-    setMessages,
     loadSessions,
     createSession,
     selectSession,
@@ -155,17 +178,24 @@ export default function App() {
     apiJson,
     workspace,
     showError,
-    onBeforeSessionChange: clearConversationView,
+    onBeforeSessionChange: () => {},
   });
 
-  messageSetterRef.current = setMessages;
   clearCurrentSessionRef.current = clearCurrentSession;
+  currentSessionIdRef.current = currentSessionId;
 
-  const { addOrReplaceMessage, addTypewriterMessage } = useMessageActions(setMessages);
+  const currentContextId = currentSessionId || NEW_SESSION_CONTEXT_ID;
+  const currentContext = sessionContexts[currentContextId] || getSessionContext(currentContextId);
+  const currentSessionRun = currentSessionId ? getSessionRun(currentSessionId) : null;
+  const visibleSessionRunning = Boolean(currentSessionRun);
+  const visibleActiveRun = currentSessionRun ? {
+    run_id: currentSessionRun.runId,
+    status: currentSessionRun.status || 'running',
+  } : null;
 
   const { serverStatus, coreRestarting, checkServer, restartCore } = useServerStatus({
     apiJson,
-    addTimeline,
+    addTimeline: addCurrentTimeline,
     showError,
   });
 
@@ -182,49 +212,49 @@ export default function App() {
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages]);
+  }, [currentContext.messages]);
 
   const { handleAgentEvent } = useAgentEvents({
-    messages,
-    setMessages,
-    addTimeline,
+    getSessionContext,
+    setSessionMessages,
+    addSessionTimeline,
+    setSessionPermissions,
+    setSessionRunCheckpoint,
+    clearSessionRun: clearSessionRunContext,
+    currentSessionIdRef,
+    markRunEvent,
+    finishRun,
     openContextTab,
     loadWorkspaceDiff,
-    setIsRunning,
-    setActiveRun,
-    setPendingPermissions,
     showError,
-    addOrReplaceMessage,
-    addTypewriterMessage,
-    runTerminalRef,
+    markRunTerminal,
   });
 
   async function refreshSessionHistory(sessionId) {
     const history = await apiJson(`/sessions/${sessionId}/history`);
     const visibleMessages = Array.isArray(history) ? history.filter(isVisibleChatMessage) : [];
-    setMessages(visibleMessages);
+    setSessionMessages(sessionId, visibleMessages);
     return visibleMessages;
   }
 
-  function rememberStreamEvent(event, sessionId = activeRunSessionIdRef.current || currentSessionId) {
+  function rememberStreamEvent(event, sessionId, fallbackRunId) {
     const payload = event?.payload;
-    const runId = typeof payload?.run_id === 'string' ? payload.run_id : null;
+    const eventRunId = typeof payload?.run_id === 'string' ? payload.run_id : null;
+    const runId = eventRunId || fallbackRunId;
+    if (!sessionId || !runId) return runId;
+
     const seq = Number.isFinite(payload?.seq) ? payload.seq : null;
-    const checkpoint = {
-      runId: runId || streamCheckpointRef.current.runId,
-      lastSeq: seq == null ? streamCheckpointRef.current.lastSeq : Math.max(streamCheckpointRef.current.lastSeq, seq),
-    };
-    streamCheckpointRef.current = checkpoint;
-    if (sessionId && checkpoint.runId) {
-      if (['finish', 'error'].includes(event?.eventName) || ['finish', 'error'].includes(payload?.type)) {
-        runCheckpointBySessionRef.current.delete(sessionId);
-      } else {
-        runCheckpointBySessionRef.current.set(sessionId, checkpoint);
-      }
-    }
+    const eventType = payload?.type || event?.eventName;
+    const currentCheckpoint = getSessionContext(sessionId).runCheckpoints[runId] || {};
+    const lastSeq = seq == null ? (currentCheckpoint.lastSeq || 0) : Math.max(currentCheckpoint.lastSeq || 0, seq);
+    const status = TERMINAL_RUN_EVENTS.has(eventType) ? eventType : 'running';
+
+    markRunEvent(runId, { lastSeq, status });
+    setSessionRunCheckpoint(sessionId, runId, { runId, lastSeq, status });
+    return runId;
   }
 
-  async function replayRunEvents(runId, afterSeq, sessionId = activeRunSessionIdRef.current || currentSessionId, signal) {
+  async function replayRunEvents(runId, afterSeq, sessionId, signal) {
     const response = await fetch(apiUrl(apiBase, `/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}`), {
       method: 'GET',
       headers,
@@ -235,32 +265,33 @@ export default function App() {
       throw new Error(errorText || `HTTP ${response.status}`);
     }
     await readSseStream(response.body, (event) => {
-      rememberStreamEvent(event, sessionId);
-      handleAgentEvent(event.eventName, event.payload);
+      const eventRunId = rememberStreamEvent(event, sessionId, runId);
+      handleAgentEvent(event.eventName, event.payload, { sessionId, runId: eventRunId });
     });
   }
 
-  async function recoverDisconnectedStream(sessionId, baselineVisibleCount, detail) {
-    const checkpoint = streamCheckpointRef.current;
+  async function recoverDisconnectedStream(sessionId, runId, baselineVisibleCount, detail, signal) {
+    const checkpoint = getSessionContext(sessionId).runCheckpoints[runId] || { runId, lastSeq: 0 };
     if (checkpoint.runId) {
-      addTimeline('stream_recovering', '连接恢复中', `${detail} · ${checkpoint.runId}`, 'warning');
+      addSessionTimeline(sessionId, 'stream_recovering', '连接恢复中', `${detail} · ${checkpoint.runId}`, 'warning');
       for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
         if (attempt > 0) {
           await delay(STREAM_RECOVERY_DELAY_MS);
         }
 
         try {
-          await replayRunEvents(checkpoint.runId, streamCheckpointRef.current.lastSeq, sessionId);
-          if (runTerminalRef.current) {
+          const latest = getSessionContext(sessionId).runCheckpoints[checkpoint.runId] || checkpoint;
+          await replayRunEvents(checkpoint.runId, latest.lastSeq || 0, sessionId, signal);
+          if (runTerminalsRef.current.get(checkpoint.runId)) {
             return true;
           }
         } catch (error) {
-          addTimeline('stream_recovering', '重连重试', normalizeError(error), 'warning');
+          addSessionTimeline(sessionId, 'stream_recovering', '重连重试', normalizeError(error), 'warning');
         }
       }
     }
 
-    addTimeline('stream_recovering', '连接恢复中', `${detail} · 回退到会话历史同步`, 'warning');
+    addSessionTimeline(sessionId, 'stream_recovering', '连接恢复中', `${detail} · 回退到会话历史同步`, 'warning');
 
     for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
       if (attempt > 0) {
@@ -270,100 +301,121 @@ export default function App() {
       try {
         const visibleMessages = await refreshSessionHistory(sessionId);
         if (visibleMessages.length >= baselineVisibleCount + 2) {
-          runTerminalRef.current = { type: 'recovered' };
-          setIsRunning(false);
-          setActiveRun((run) => (run ? { ...run, status: 'synced' } : { status: 'synced' }));
-          addTimeline('stream_recovered', '会话已同步', '已从会话历史补齐后台结果', 'success');
-          loadWorkspaceDiff();
+          markRunTerminal(sessionId, runId, 'recovered');
+          finishRun(runId, 'synced');
+          clearSessionRunContext(sessionId, runId);
+          addSessionTimeline(sessionId, 'stream_recovered', '会话已同步', '已从会话历史补齐后台结果', 'success');
+          if (currentSessionIdRef.current === sessionId) {
+            loadWorkspaceDiff();
+          }
           return true;
         }
       } catch (error) {
-        addTimeline('stream_recovering', '同步重试', normalizeError(error), 'warning');
+        addSessionTimeline(sessionId, 'stream_recovering', '同步重试', normalizeError(error), 'warning');
       }
     }
 
     const timeoutDetail = '事件流已断开，后台任务可能仍在运行；稍后重新打开当前会话会同步结果';
-    setIsRunning(false);
-    setActiveRun((run) => (run ? { ...run, status: 'detached' } : { status: 'detached' }));
-    addTimeline('stream_detached', '连接已分离', timeoutDetail, 'warning');
-    showError(timeoutDetail);
+    markRunEvent(runId, { status: 'detached' });
+    setSessionRunCheckpoint(sessionId, runId, { runId, lastSeq: checkpoint.lastSeq || 0, status: 'detached' });
+    addSessionTimeline(sessionId, 'stream_detached', '连接已分离', timeoutDetail, 'warning');
+    showError(timeoutDetail, { sessionId });
     return false;
   }
 
   async function handleSelectSession(id) {
     const visibleMessages = await selectSession(id);
     if (!visibleMessages) return;
+    setSessionMessages(id, visibleMessages);
 
-    const checkpoint = runCheckpointBySessionRef.current.get(id);
-    if (!checkpoint?.runId) {
-      return;
-    }
+    if (getSessionRun(id)) return;
+
+    const liveCheckpoint = Object.values(getSessionContext(id).runCheckpoints).find(isLiveCheckpoint);
+    if (!liveCheckpoint?.runId || isPendingRunId(liveCheckpoint.runId)) return;
 
     const controller = new AbortController();
-    abortRef.current = controller;
-    activeRunSessionIdRef.current = id;
-    streamCheckpointRef.current = checkpoint;
-    runTerminalRef.current = null;
-    setIsRunning(true);
-    setActiveRun({ run_id: checkpoint.runId, status: 'reconnecting' });
-    addTimeline('stream_recovering', '继续接收会话事件', checkpoint.runId, 'warning');
+    const temporaryId = startPendingSessionRun(id, {
+      controller,
+      status: 'reconnecting',
+      workspacePath: workspace?.root_path,
+    });
+    attachRunId(id, temporaryId, liveCheckpoint.runId);
+    markRunEvent(liveCheckpoint.runId, {
+      controller,
+      lastSeq: liveCheckpoint.lastSeq || 0,
+      status: 'reconnecting',
+    });
+    setSessionRunCheckpoint(id, liveCheckpoint.runId, {
+      lastSeq: liveCheckpoint.lastSeq || 0,
+      status: 'reconnecting',
+    });
+    addSessionTimeline(id, 'stream_recovering', '继续接收会话事件', liveCheckpoint.runId, 'warning');
 
     try {
-      await replayRunEvents(checkpoint.runId, checkpoint.lastSeq, id, controller.signal);
-      if (!runTerminalRef.current) {
+      await replayRunEvents(liveCheckpoint.runId, liveCheckpoint.lastSeq || 0, id, controller.signal);
+      if (!runTerminalsRef.current.get(liveCheckpoint.runId)) {
         await refreshSessionHistory(id);
-        setIsRunning(false);
-        setActiveRun((run) => (run ? { ...run, status: 'synced' } : { status: 'synced' }));
+        finishRun(liveCheckpoint.runId, 'synced');
+        clearSessionRunContext(id, liveCheckpoint.runId);
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
-        setIsRunning(false);
-        setActiveRun((run) => (run ? { ...run, status: 'detached' } : { status: 'detached' }));
-        addTimeline('stream_detached', '会话事件暂未接上', normalizeError(error), 'warning');
+        markRunEvent(liveCheckpoint.runId, { status: 'detached' });
+        setSessionRunCheckpoint(id, liveCheckpoint.runId, {
+          lastSeq: liveCheckpoint.lastSeq || 0,
+          status: 'detached',
+        });
+        addSessionTimeline(id, 'stream_detached', '会话事件暂未接上', normalizeError(error), 'warning');
       }
     } finally {
-      if (abortRef.current === controller) {
-        abortRef.current = null;
-      }
-      if (activeRunSessionIdRef.current === id) {
-        activeRunSessionIdRef.current = null;
-      }
       loadSessions();
     }
   }
 
   async function sendTask() {
-    const text = taskText.trim();
-    if (!text || isRunning) return;
+    const text = currentContext.draftText.trim();
+    if (!text || (currentSessionId && getSessionRun(currentSessionId))) return;
     if (!workspace) {
       showError('请先打开一个项目');
       return;
     }
 
-    setTaskText('');
-    setIsRunning(true);
-    runTerminalRef.current = null;
-    streamCheckpointRef.current = { runId: null, lastSeq: 0 };
-    setActiveRun({ status: 'running', started_at: new Date().toISOString() });
-    addTimeline('run', '任务已发送', text, 'neutral');
+    const draftContextId = currentContextId;
+    setSessionDraft(draftContextId, '');
 
-    const userMessage = {
-      id: `${Date.now()}`,
-      role: 'user',
-      content: [{ type: 'text', text }],
-      created_at: new Date().toISOString(),
-    };
-    const baselineVisibleCount = messages.length;
-    setMessages((items) => [...items, userMessage]);
-
+    let sessionId = currentSessionId;
+    let runId = null;
     let streamWasOpen = false;
-    let activeSessionId = null;
+    let baselineVisibleCount = 0;
+    const controller = new AbortController();
+
     try {
-      const sessionId = await ensureSession();
-      activeSessionId = sessionId;
-      activeRunSessionIdRef.current = sessionId;
-      const controller = new AbortController();
-      abortRef.current = controller;
+      sessionId = await ensureSession();
+      if (!sessionId) return;
+      if (getSessionRun(sessionId)) return;
+
+      if (draftContextId !== sessionId) {
+        setSessionDraft(sessionId, '');
+      }
+
+      runId = startPendingSessionRun(sessionId, {
+        controller,
+        status: 'running',
+        workspacePath: workspace.root_path,
+      });
+      setSessionRunCheckpoint(sessionId, runId, { runId, lastSeq: 0, status: 'running' });
+      runTerminalsRef.current.delete(runId);
+      addSessionTimeline(sessionId, 'run', '任务已发送', text, 'neutral');
+
+      const userMessage = {
+        id: `${Date.now()}`,
+        role: 'user',
+        content: [{ type: 'text', text }],
+        created_at: new Date().toISOString(),
+      };
+      baselineVisibleCount = getSessionContext(sessionId).messages.length;
+      setSessionMessages(sessionId, (items) => [...items, userMessage]);
+
       const response = await fetch(apiUrl(apiBase, '/reply'), {
         method: 'POST',
         headers,
@@ -387,46 +439,52 @@ export default function App() {
       }
 
       streamWasOpen = true;
+      let attachedRunId = runId;
       await readSseStream(response.body, (event) => {
-        rememberStreamEvent(event, sessionId);
-        handleAgentEvent(event.eventName, event.payload);
+        const eventRunId = rememberStreamEvent(event, sessionId, attachedRunId);
+        if (eventRunId && eventRunId !== attachedRunId) {
+          if (isPendingRunId(attachedRunId)) {
+            attachRunId(sessionId, attachedRunId, eventRunId);
+          }
+          attachedRunId = eventRunId;
+          runId = eventRunId;
+        }
+        handleAgentEvent(event.eventName, event.payload, { sessionId, runId: eventRunId });
       });
-      if (!runTerminalRef.current) {
+      if (!runTerminalsRef.current.get(runId)) {
         const detail = '事件流已断开，未收到任务结束信号';
-        await recoverDisconnectedStream(sessionId, baselineVisibleCount, detail);
+        await recoverDisconnectedStream(sessionId, runId, baselineVisibleCount, detail, controller.signal);
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        if (runTerminalRef.current?.type !== 'detached') {
-          runTerminalRef.current = { type: 'cancelled' };
-        }
-      } else if (streamWasOpen && !runTerminalRef.current) {
+        markRunTerminal(sessionId, runId, 'cancelled');
+      } else if (streamWasOpen && sessionId && runId && !runTerminalsRef.current.get(runId)) {
         await recoverDisconnectedStream(
-          activeSessionId,
+          sessionId,
+          runId,
           baselineVisibleCount,
           `事件流读取失败：${normalizeError(error)}`,
+          controller.signal,
         );
       } else {
         const detail = normalizeError(error);
-        showError(`任务失败：${detail}`);
-        addTimeline('error', '任务失败', detail, 'error');
-        setActiveRun((run) => (run ? { ...run, status: 'error' } : { status: 'error' }));
-        setIsRunning(false);
-        runTerminalRef.current = { type: 'error' };
+        if (sessionId && runId) {
+          finishRun(runId, 'error');
+          clearSessionRunContext(sessionId, runId);
+          addSessionTimeline(sessionId, 'error', '任务失败', detail, 'error');
+        }
+        showError(`任务失败：${detail}`, { sessionId });
+        markRunTerminal(sessionId, runId, 'error');
       }
     } finally {
-      abortRef.current = null;
-      if (activeRunSessionIdRef.current === activeSessionId) {
-        activeRunSessionIdRef.current = null;
-      }
       loadSessions();
     }
   }
 
-  const canSend = taskText.trim().length > 0 && !isRunning && Boolean(workspace);
+  const canSend = currentContext.draftText.trim().length > 0 && !visibleSessionRunning && Boolean(workspace);
   const contextUsage = useMemo(
-    () => estimateContextUsage(messages, taskText, contextThreshold),
-    [contextThreshold, messages, taskText],
+    () => estimateContextUsage(currentContext.messages, currentContext.draftText, contextThreshold),
+    [contextThreshold, currentContext.draftText, currentContext.messages],
   );
   const {
     cancelRun,
@@ -434,25 +492,20 @@ export default function App() {
     contextCompacting,
     resolvePermission,
   } = useRunControls({
-    abortRef,
-    activeRun,
     apiJson,
-    addTimeline,
+    addSessionTimeline,
     contextUsage,
     currentSessionId,
-    isRunning,
+    getSessionRun,
+    cancelRunState,
     loadSessions,
-    runTerminalRef,
-    setActiveRun,
-    setIsRunning,
-    setMessages,
-    setPendingPermissions,
+    markRunTerminal,
+    setSessionMessages,
+    setSessionPermissions,
+    clearSessionRun: clearSessionRunContext,
+    isRunning: visibleSessionRunning,
     showError,
   });
-  const projectSessions = useMemo(() => {
-    if (!workspace?.root_path) return [];
-    return sessions.filter((session) => sameWorkspacePath(session.working_dir, workspace.root_path));
-  }, [sessions, workspace]);
   const {
     subAgentPool,
     subAgentLoading,
@@ -461,7 +514,7 @@ export default function App() {
   } = useSubAgents({
     apiJson,
     active: contextOpen && rightTab === 'agents',
-    running: isRunning,
+    running: visibleSessionRunning,
   });
 
   return (
@@ -511,7 +564,9 @@ export default function App() {
         <Sidebar
           workspace={workspace}
           recentWorkspaces={recentWorkspaces}
-          sessions={projectSessions}
+          sessions={sessions}
+          runsById={runRegistry.runsById}
+          activeRunBySession={runRegistry.activeRunBySession}
           currentSessionId={currentSessionId}
           settingsOpen={settingsOpen}
           onOpenWorkspace={openWorkspace}
@@ -524,10 +579,10 @@ export default function App() {
         <ChatPanel
           title={sessions.find((item) => item.id === currentSessionId)?.name || 'New session'}
           serverDetail={serverStatus.detail}
-          messages={messages}
+          messages={currentContext.messages}
           messageEndRef={messageEndRef}
-          taskText={taskText}
-          isRunning={isRunning}
+          taskText={currentContext.draftText}
+          isRunning={visibleSessionRunning}
           canSend={canSend}
           workspace={workspace}
           providerProfiles={providerProfiles}
@@ -535,16 +590,16 @@ export default function App() {
           accessMode={accessMode}
           contextUsage={contextUsage}
           contextCompacting={contextCompacting}
-          canCompactContext={Boolean(currentSessionId && messages.length > 1 && !isRunning)}
+          canCompactContext={Boolean(currentSessionId && currentContext.messages.length > 1 && !visibleSessionRunning)}
           activeContext={contextOpen ? rightTab : null}
-          pendingPermissions={pendingPermissions}
-          onTaskTextChange={setTaskText}
+          pendingPermissions={currentContext.pendingPermissions}
+          onTaskTextChange={(value) => setSessionDraft(currentContextId, value)}
           onProviderProfileChange={selectProviderProfile}
           onAccessModeChange={setAccessMode}
           onCompactContext={compactContext}
           onResolvePermission={resolvePermission}
           onSendTask={sendTask}
-          onCancelRun={cancelRun}
+          onCancelRun={() => cancelRun({ sessionId: currentSessionId, runId: currentSessionRun?.runId })}
           onOpenContext={(tab) => {
             openContextTab(tab);
           }}
@@ -573,8 +628,8 @@ export default function App() {
       </main>
 
       <TimelinePanel
-        timeline={timeline}
-        activeRun={activeRun}
+        timeline={currentContext.timeline}
+        activeRun={visibleActiveRun}
         open={eventsOpen}
         onToggle={() => setEventsOpen((value) => !value)}
         onClose={() => setEventsOpen(false)}
