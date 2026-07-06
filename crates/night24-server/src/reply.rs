@@ -108,6 +108,11 @@ struct CoreEventDispatch {
     is_terminal: bool,
 }
 
+struct MessageDeltaPayload<'a> {
+    message_id: &'a str,
+    delta: &'a str,
+}
+
 async fn pump_core_events(
     mut core_events: mpsc::Receiver<serde_json::Value>,
     tx: mpsc::Sender<Result<String, Infallible>>,
@@ -334,19 +339,11 @@ fn persist_core_event(conversation: &mut Vec<Message>, event: &serde_json::Value
             }
         }
         "message_delta" => {
-            let Some(message_id) = payload.get("message_id").and_then(|value| value.as_str())
-            else {
-                return;
-            };
-            let delta = payload
-                .get("delta")
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            if !delta.is_empty() {
+            if let Some(delta) = payload_message_delta(payload) {
                 apply_message_delta(
                     conversation,
-                    message_id,
-                    delta,
+                    delta.message_id,
+                    delta.delta,
                     event_created_at(event).unwrap_or_else(Utc::now),
                 );
             }
@@ -374,6 +371,15 @@ fn payload_messages(payload: &serde_json::Value) -> Vec<Message> {
 
 fn parse_message_value(value: &serde_json::Value) -> Option<Message> {
     serde_json::from_value::<Message>(value.clone()).ok()
+}
+
+fn payload_message_delta(payload: &serde_json::Value) -> Option<MessageDeltaPayload<'_>> {
+    let message_id = payload.get("message_id").and_then(|value| value.as_str())?;
+    let delta = payload.get("delta").and_then(|value| value.as_str())?;
+    if delta.is_empty() {
+        return None;
+    }
+    Some(MessageDeltaPayload { message_id, delta })
 }
 
 fn merge_conversation_message(conversation: &mut Vec<Message>, message: Message) {
@@ -1072,6 +1078,29 @@ mod tests {
 
         assert!(payload_message(&serde_json::json!({})).is_none());
         assert!(payload_messages(&serde_json::json!({ "messages": "bad" })).is_empty());
+    }
+
+    #[test]
+    fn payload_message_delta_requires_id_and_non_empty_string_delta() {
+        let payload = serde_json::json!({
+            "message_id": "assistant-1",
+            "delta": "hello"
+        });
+        let delta = payload_message_delta(&payload).expect("delta should parse");
+        assert_eq!(delta.message_id, "assistant-1");
+        assert_eq!(delta.delta, "hello");
+
+        assert!(payload_message_delta(&serde_json::json!({ "delta": "hello" })).is_none());
+        assert!(payload_message_delta(&serde_json::json!({
+            "message_id": "assistant-1",
+            "delta": ""
+        }))
+        .is_none());
+        assert!(payload_message_delta(&serde_json::json!({
+            "message_id": "assistant-1",
+            "delta": 42
+        }))
+        .is_none());
     }
 
     #[test]
