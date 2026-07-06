@@ -68,10 +68,7 @@ fn compile_template_interpolated(
                 let sub_expr = parse_template_expr(expr_str, t.pos.clone())?;
                 compile_expr(&sub_expr, chunk, resolutions)?;
                 chunk.write_op(Opcode::ToString, t.pos.clone());
-                if segments_emitted > 0 {
-                    chunk.write_op(Opcode::Concat, t.pos.clone());
-                }
-                segments_emitted += 1;
+                finish_template_segment(chunk, &mut segments_emitted, t.pos.clone());
             }
             i = end + 1;
             continue;
@@ -85,10 +82,7 @@ fn compile_template_interpolated(
         let text = crate::evaluator::string_lit::unescape_string(&inner[start..i]);
         let idx = chunk.add_constant(str_obj(text));
         emit_const(chunk, idx, t.pos.clone());
-        if segments_emitted > 0 {
-            chunk.write_op(Opcode::Concat, t.pos.clone());
-        }
-        segments_emitted += 1;
+        finish_template_segment(chunk, &mut segments_emitted, t.pos.clone());
     }
 
     if segments_emitted == 0 {
@@ -96,6 +90,13 @@ fn compile_template_interpolated(
         emit_const(chunk, idx, t.pos.clone());
     }
     Ok(())
+}
+
+fn finish_template_segment(chunk: &mut Chunk, segments_emitted: &mut usize, pos: Position) {
+    if *segments_emitted > 0 {
+        chunk.write_op(Opcode::Concat, pos);
+    }
+    *segments_emitted += 1;
 }
 
 /// Re-parse a template `${...}` sub-expression string into an AST Expr, so the

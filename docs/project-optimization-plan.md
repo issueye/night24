@@ -300,6 +300,8 @@
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_try.rs`，承接 try/catch/finally protected region 发码、catch 绑定和 exceptional finally 路径；主编译器进一步收敛为顶层编译与语句分发。
 - 已完成：从 `bytecode/compiler.rs` 抽出 `bytecode/compiler_stmt.rs`，承接语句级分发、表达式语句保留值处理和 block 递归编译；主编译器进一步只保留程序级入口、共享 re-export 与测试。
 - 已完成：将 `bytecode/compiler.rs` 中测试移动到 `bytecode/compiler/tests.rs`，主 compiler 文件进一步只保留编译入口、共享 re-export 和测试模块声明。
+- 已完成：继续收敛 `bytecode/compiler_templates.rs`，抽出模板片段收尾 helper，统一 `${...}` 表达式片段和文本片段的 `Concat` 发射路径，并补充模板插值 opcode 编译测试。
+- 已完成：继续收敛 `bytecode/compiler_calls.rs`，抽出 `super()` 构造调用发码 helper，集中 `LoadThis` / `SuperMethod("constructor")` / 带 this receiver 的 `Call` 发射路径，并补充 super constructor opcode 编译测试。
 - 已完成：从 `bytecode/interp.rs` 主循环抽出 `check_execution_budget`，集中 timeout / instruction limit 采样检查，并补充采样边界回归测试。
 - 下一步：继续拆 compiler 中剩余复合 expression emitter，或拆 interpreter 中剩余小型栈操作 helper；每步继续核对 `try/finally` 保护线没有语义回退。
 - 中期建议：将 `evaluator::expressions` 中被 bytecode 复用的语义迁移到 `semantics` 或 `runtime_ops`，再处理更大的 interpreter/compiler 主循环拆分。

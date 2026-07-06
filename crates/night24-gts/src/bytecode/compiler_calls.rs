@@ -16,20 +16,7 @@ pub(super) fn compile_call(
     compile_expr: CompileExprFn,
 ) -> Result<(), Object> {
     if let Expr::Super(_) = &c.callee {
-        chunk.write_op(Opcode::LoadThis, c.pos.clone());
-        let name_idx = chunk.add_constant(str_obj("constructor"));
-        chunk.write_op(Opcode::SuperMethod, c.pos.clone());
-        chunk.write_u16(name_idx, c.pos.clone());
-        for arg in &c.args {
-            compile_expr(arg, chunk, resolutions)?;
-        }
-        let arg_count = c.args.len() as u16;
-        chunk.write_op(Opcode::Call, c.pos.clone());
-        chunk.write_u16(
-            encode_call_arg_count(arg_count, true, c.pos.clone())?,
-            c.pos.clone(),
-        );
-        return Ok(());
+        return compile_super_constructor_call(c, chunk, resolutions, compile_expr);
     }
 
     let has_this_receiver = compile_call_callee(&c.callee, chunk, resolutions, compile_expr)?;
@@ -41,6 +28,28 @@ pub(super) fn compile_call(
         resolutions,
         compile_expr,
     )
+}
+
+fn compile_super_constructor_call(
+    c: &CallExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+    compile_expr: CompileExprFn,
+) -> Result<(), Object> {
+    chunk.write_op(Opcode::LoadThis, c.pos.clone());
+    let name_idx = chunk.add_constant(str_obj("constructor"));
+    chunk.write_op(Opcode::SuperMethod, c.pos.clone());
+    chunk.write_u16(name_idx, c.pos.clone());
+    for arg in &c.args {
+        compile_expr(arg, chunk, resolutions)?;
+    }
+    let arg_count = c.args.len() as u16;
+    chunk.write_op(Opcode::Call, c.pos.clone());
+    chunk.write_u16(
+        encode_call_arg_count(arg_count, true, c.pos.clone())?,
+        c.pos.clone(),
+    );
+    Ok(())
 }
 
 pub(super) fn compile_new_expr(

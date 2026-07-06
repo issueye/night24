@@ -162,6 +162,29 @@ fn compiles_dynamic_import_as_promise() {
 }
 
 #[test]
+fn compiles_template_interpolation_to_string_concat() {
+    let chunk = compile_src("`hi ${name}`");
+    let spine = decode_opcode_spine(&chunk);
+    assert!(spine.contains(&Opcode::ToString));
+    assert!(spine.contains(&Opcode::Concat));
+}
+
+#[test]
+fn compiles_super_constructor_call_with_this_receiver() {
+    let chunk = compile_src("function Child() { super(); }");
+    let child = chunk
+        .protos
+        .iter()
+        .find(|proto| proto.name == "Child")
+        .expect("Child proto");
+    let child_chunk = child.chunk.borrow().clone().expect("Child chunk");
+    let spine = decode_opcode_spine(&child_chunk);
+    assert!(spine.contains(&Opcode::LoadThis));
+    assert!(spine.contains(&Opcode::SuperMethod));
+    assert!(spine.contains(&Opcode::Call));
+}
+
+#[test]
 fn records_async_function_proto() {
     let chunk = compile_src("async function answer() { return 42; }");
     assert_eq!(chunk.protos.len(), 1);
