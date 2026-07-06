@@ -351,18 +351,12 @@ impl AgentCoreClient {
         let generation = self.generation.clone();
         thread::spawn(move || {
             let reader = std::io::BufReader::new(stdout);
+            let mut exit_reason = "agent-core stdout closed".to_string();
             for line in reader.lines() {
                 let line = match line {
                     Ok(line) => line,
                     Err(err) => {
-                        set_core_status_if_current(
-                            &status,
-                            &generation,
-                            generation_id,
-                            CoreRuntimeStatus::unavailable(format!(
-                                "agent-core stdout read failed: {err}"
-                            )),
-                        );
+                        exit_reason = format!("agent-core stdout read failed: {err}");
                         break;
                     }
                 };
@@ -394,6 +388,14 @@ impl AgentCoreClient {
                     | CoreStdoutMessage::UnknownMessage => {}
                 }
             }
+            close_current_core_transport(
+                &pending,
+                &event_senders,
+                &status,
+                &generation,
+                generation_id,
+                &exit_reason,
+            );
         });
     }
 
@@ -560,6 +562,28 @@ fn remove_pending_response(pending: &PendingResponses, id: &str) -> bool {
         .ok()
         .and_then(|mut guard| guard.remove(id))
         .is_some()
+}
+
+fn close_current_core_transport(
+    pending: &PendingResponses,
+    event_senders: &EventSenders,
+    status_ptr: &Arc<Mutex<CoreRuntimeStatus>>,
+    generation: &Arc<AtomicU64>,
+    generation_id: u64,
+    reason: &str,
+) -> bool {
+    if generation.load(Ordering::SeqCst) != generation_id {
+        return false;
+    }
+    if let Ok(mut guard) = status_ptr.lock() {
+        *guard = CoreRuntimeStatus::unavailable(reason.to_string());
+    }
+    reject_pending_requests(pending, reason);
+    if let Ok(mut senders) = event_senders.lock() {
+        senders.clear();
+    }
+    warn!(reason, "agent-core transport closed");
+    true
 }
 
 fn agent_event_run_id(event: &serde_json::Value) -> Option<&str> {
@@ -955,6 +979,75 @@ mod tests {
         assert!(!remove_pending_response(&pending, "rpc-missing"));
         assert!(pending.lock().unwrap().contains_key("rpc-1"));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn close_current_core_transport_rejects_pending_and_clears_events() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let status = Arc::new(Mutex::new(CoreRuntimeStatus::available()));
+        let generation = Arc::new(AtomicU64::new(7));
+        let (pending_tx, pending_rx) = oneshot::channel();
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        pending
+            .lock()
+            .unwrap()
+            .insert("rpc-1".to_string(), pending_tx);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-1".to_string(), event_tx);
+
+        assert!(close_current_core_transport(
+            &pending,
+            &event_senders,
+            &status,
+            &generation,
+            7,
+            "agent-core stdout closed",
+        ));
+
+        assert!(pending.lock().unwrap().is_empty());
+        assert!(event_senders.lock().unwrap().is_empty());
+        let response = pending_rx.blocking_recv().unwrap();
+        assert_eq!(response["error"]["message"], "agent-core stdout closed");
+        let status = status.lock().unwrap();
+        assert!(!status.available);
+        assert_eq!(status.reason.as_deref(), Some("agent-core stdout closed"));
+    }
+
+    #[test]
+    fn close_current_core_transport_ignores_stale_generation() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let status = Arc::new(Mutex::new(CoreRuntimeStatus::available()));
+        let generation = Arc::new(AtomicU64::new(8));
+        let (pending_tx, mut pending_rx) = oneshot::channel();
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        pending
+            .lock()
+            .unwrap()
+            .insert("rpc-1".to_string(), pending_tx);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-1".to_string(), event_tx);
+
+        assert!(!close_current_core_transport(
+            &pending,
+            &event_senders,
+            &status,
+            &generation,
+            7,
+            "old agent-core stdout closed",
+        ));
+
+        assert!(pending.lock().unwrap().contains_key("rpc-1"));
+        assert!(event_senders.lock().unwrap().contains_key("run-1"));
+        assert!(pending_rx.try_recv().is_err());
+        let status = status.lock().unwrap();
+        assert!(status.available);
+        assert!(status.reason.is_none());
     }
 
     #[test]
