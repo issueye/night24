@@ -695,6 +695,8 @@
 
 追加完成：`reply.rs` 抽出 `message_delta` payload 解析 helper，集中处理 message_id、非空 delta 和非字符串 delta 边界，并补充 payload 解析测试。
 
+追加完成：`reply.rs` 抽出 terminal event seq 后移 helper，使用饱和递增避免极端 seq 溢出，并补充 `u64::MAX` 边界测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

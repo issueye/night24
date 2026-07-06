@@ -172,7 +172,7 @@ fn append_diff_ready_before_terminal(
     let Some(diff_event) = diff_event else {
         return;
     };
-    set_core_event_seq(terminal_event, core_event_seq(terminal_event) + 1);
+    set_core_event_seq(terminal_event, next_core_event_seq(terminal_event));
     events.push(diff_event);
 }
 
@@ -458,6 +458,10 @@ fn core_event_seq(event: &serde_json::Value) -> u64 {
         .get("seq")
         .and_then(|value| value.as_u64())
         .unwrap_or(0)
+}
+
+fn next_core_event_seq(event: &serde_json::Value) -> u64 {
+    core_event_seq(event).saturating_add(1)
 }
 
 fn set_core_event_seq(event: &mut serde_json::Value, seq: u64) {
@@ -1121,6 +1125,16 @@ mod tests {
         assert_eq!(core_event_seq(&message), 7);
         assert_eq!(core_event_seq(&finish), 12);
         assert_eq!(core_event_seq(&error_without_seq), 0);
+    }
+
+    #[test]
+    fn next_core_event_seq_saturates_at_u64_max() {
+        assert_eq!(next_core_event_seq(&serde_json::json!({ "seq": 41 })), 42);
+        assert_eq!(next_core_event_seq(&serde_json::json!({})), 1);
+        assert_eq!(
+            next_core_event_seq(&serde_json::json!({ "seq": u64::MAX })),
+            u64::MAX
+        );
     }
 
     #[test]
