@@ -1,0 +1,12 @@
+@media (max-width: 1180px) {
+  .workspace-grid {
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .statusbar {
+    grid-template-columns: 120px minmax(0, 1fr) auto;
+  }
+}
+

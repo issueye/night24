@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, str_obj, CallContext, Object};
+use crate::object::{bool_obj, new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn path_module() -> Object {
     module(vec![
@@ -60,11 +60,12 @@ pub(crate) fn path_resolve(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_relative(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let from = match required_string(ctx, "path.relative", args, 0, "from") {
+    let reader = ArgReader::new(ctx, "path.relative", args);
+    let from = match reader.required_string(0, "from") {
         Ok(value) => value,
         Err(err) => return err,
     };
-    let to = match required_string(ctx, "path.relative", args, 1, "to") {
+    let to = match reader.required_string(1, "to") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -78,7 +79,8 @@ pub(crate) fn path_relative(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_normalize(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "path.normalize", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.normalize", args);
+    let path = match reader.required_string(0, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -86,7 +88,8 @@ pub(crate) fn path_normalize(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_dirname(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "path.dirname", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.dirname", args);
+    let path = match reader.required_string(0, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -99,7 +102,8 @@ pub(crate) fn path_dirname(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_basename(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "path.basename", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.basename", args);
+    let path = match reader.required_string(0, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -112,7 +116,8 @@ pub(crate) fn path_basename(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_extname(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "path.extname", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.extname", args);
+    let path = match reader.required_string(0, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -124,32 +129,40 @@ pub(crate) fn path_extname(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_is_abs(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "path.isAbs", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.isAbs", args);
+    match reader.required_string(0, "path") {
         Ok(value) => bool_obj(Path::new(&value).is_absolute()),
         Err(err) => err,
     }
 }
 
 pub(crate) fn path_to_slash(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "path.toSlash", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.toSlash", args);
+    match reader.required_string(0, "path") {
         Ok(value) => str_obj(value.replace('\\', "/")),
         Err(err) => err,
     }
 }
 
 pub(crate) fn path_from_slash(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "path.fromSlash", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.fromSlash", args);
+    match reader.required_string(0, "path") {
         Ok(value) => str_obj(value.replace('/', MAIN_SEPARATOR_STR)),
         Err(err) => err,
     }
 }
 
 pub(crate) fn path_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "path.parse", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "path.parse", args);
+    let value = match reader.required_string(0, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
-    let path = Path::new(&value);
+    path_parse_object(&value)
+}
+
+pub(crate) fn path_parse_object(value: &str) -> Object {
+    let path = Path::new(value);
     let base = path
         .file_name()
         .map(|p| p.to_string_lossy().to_string())
@@ -168,20 +181,24 @@ pub(crate) fn path_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
     } else {
         String::new()
     };
-    module(vec![
-        ("root", str_obj(root)),
-        ("dir", str_obj(dir)),
-        ("base", str_obj(base)),
-        ("name", str_obj(name)),
-        ("ext", str_obj(ext)),
-    ])
+    ObjectBuilder::new()
+        .set("root", str_obj(root))
+        .set("dir", str_obj(dir))
+        .set("base", str_obj(base))
+        .set("name", str_obj(name))
+        .set("ext", str_obj(ext))
+        .build()
 }
 
 pub(crate) fn path_format(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let Some(Object::Hash(hash)) = args.first() else {
+    let reader = ArgReader::new(ctx, "path.format", args);
+    let Some(hash) = reader.object_view(0) else {
         return new_error(ctx.pos.clone(), "path.format requires a path object");
     };
-    let hash = hash.borrow();
+    path_format_object(&hash)
+}
+
+pub(crate) fn path_format_object(hash: &HashData) -> Object {
     let dir = hash_string(&hash, "dir").unwrap_or_default();
     let root = hash_string(&hash, "root").unwrap_or_default();
     let base = hash_string(&hash, "base").unwrap_or_default();
@@ -200,7 +217,8 @@ pub(crate) fn path_format(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn path_split_list(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "path.splitList", args, 0, "value") {
+    let reader = ArgReader::new(ctx, "path.splitList", args);
+    let value = match reader.required_string(0, "value") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -209,4 +227,82 @@ pub(crate) fn path_split_list(ctx: &mut CallContext, args: &[Object]) -> Object 
             .map(|p| str_obj(p.to_string_lossy()))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_string_field(object: &Object, key: &str) -> String {
+        let Object::Hash(hash) = object else {
+            panic!("expected object");
+        };
+        match hash.borrow().get(key) {
+            Some(Object::String(value)) => value.to_string(),
+            _ => panic!("expected string field {key}"),
+        }
+    }
+
+    fn object_as_string(object: Object) -> String {
+        match object {
+            Object::String(value) => value.to_string(),
+            _ => panic!("expected string"),
+        }
+    }
+
+    #[test]
+    fn path_parse_object_builds_expected_fields() {
+        let parsed = path_parse_object("dir/file.txt");
+
+        assert_eq!(object_string_field(&parsed, "root"), "");
+        assert_eq!(object_string_field(&parsed, "dir"), "dir");
+        assert_eq!(object_string_field(&parsed, "base"), "file.txt");
+        assert_eq!(object_string_field(&parsed, "name"), "file");
+        assert_eq!(object_string_field(&parsed, "ext"), ".txt");
+    }
+
+    #[test]
+    fn path_parse_object_handles_extensionless_file() {
+        let parsed = path_parse_object("README");
+
+        assert_eq!(object_string_field(&parsed, "dir"), "");
+        assert_eq!(object_string_field(&parsed, "base"), "README");
+        assert_eq!(object_string_field(&parsed, "name"), "README");
+        assert_eq!(object_string_field(&parsed, "ext"), "");
+    }
+
+    #[test]
+    fn path_format_object_prefers_base_over_name_ext() {
+        let object = ObjectBuilder::new()
+            .set("dir", str_obj("dir"))
+            .set("base", str_obj("file.txt"))
+            .set("name", str_obj("ignored"))
+            .set("ext", str_obj(".md"))
+            .build();
+        let Object::Hash(hash) = object else {
+            panic!("expected hash");
+        };
+
+        assert_eq!(
+            object_as_string(path_format_object(&hash.borrow())),
+            "dir\\file.txt".replace('\\', MAIN_SEPARATOR_STR)
+        );
+    }
+
+    #[test]
+    fn path_format_object_ignores_non_string_fields() {
+        let object = ObjectBuilder::new()
+            .set("dir", str_obj("dir"))
+            .set("name", str_obj("file"))
+            .set("ext", bool_obj(true))
+            .build();
+        let Object::Hash(hash) = object else {
+            panic!("expected hash");
+        };
+
+        assert_eq!(
+            object_as_string(path_format_object(&hash.borrow())),
+            "dir\\file".replace('\\', MAIN_SEPARATOR_STR)
+        );
+    }
 }

@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, CallContext, Object};
 
 pub(crate) const RATE_LIMIT_STATE_KEY: &str = "__rate_limit_state__";
 
@@ -14,14 +11,16 @@ pub(crate) fn rate_limit_module() -> Object {
 }
 
 pub(crate) fn rate_limit_create(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let reader = ArgReader::new(ctx, "rateLimit.create", args);
     let mut rate = 10.0_f64;
     let mut capacity = 10.0_f64;
-    if let Some(Object::Hash(opts)) = args.first() {
-        if let Some(Object::Number(n)) = opts.borrow().get("rate") {
-            rate = *n;
+    if let Some(opts) = reader.object_view(0) {
+        let opts = ObjectView::new(&opts);
+        if let Some(n) = opts.number("rate") {
+            rate = n;
         }
-        if let Some(Object::Number(n)) = opts.borrow().get("capacity") {
-            capacity = *n;
+        if let Some(n) = opts.number("capacity") {
+            capacity = n;
         }
     }
     if rate <= 0.0 || capacity <= 0.0 {
@@ -31,16 +30,16 @@ pub(crate) fn rate_limit_create(ctx: &mut CallContext, args: &[Object]) -> Objec
         );
     }
     // State stored as a HashData so it survives inside the object model.
-    let state = Rc::new(RefCell::new(HashData::default()));
-    state.borrow_mut().set("tokens", num_obj(capacity));
-    state.borrow_mut().set("capacity", num_obj(capacity));
-    state.borrow_mut().set("rate", num_obj(rate));
-    state.borrow_mut().set("lastTimeMs", num_obj(now_millis()));
+    let state = ObjectBuilder::new()
+        .set("tokens", num_obj(capacity))
+        .set("capacity", num_obj(capacity))
+        .set("rate", num_obj(rate))
+        .set("lastTimeMs", num_obj(now_millis()))
+        .into_shared();
 
-    let instance = Rc::new(RefCell::new(HashData::default()));
-    instance
-        .borrow_mut()
-        .set(RATE_LIMIT_STATE_KEY, Object::Hash(state.clone()));
+    let instance = ObjectBuilder::new()
+        .set(RATE_LIMIT_STATE_KEY, Object::Hash(state.clone()))
+        .into_shared();
 
     let s = state.clone();
     instance.borrow_mut().set(

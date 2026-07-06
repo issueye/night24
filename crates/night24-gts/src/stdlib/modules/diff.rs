@@ -9,11 +9,12 @@ pub(crate) fn diff_module() -> Object {
 }
 
 pub(crate) fn diff_lines(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let old = match required_string(ctx, "diff.lines", args, 0, "old") {
+    let reader = ArgReader::new(ctx, "diff.lines", args);
+    let old = match reader.required_string(0, "old") {
         Ok(value) => value,
         Err(err) => return err,
     };
-    let new = match required_string(ctx, "diff.lines", args, 1, "new") {
+    let new = match reader.required_string(1, "new") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -31,11 +32,12 @@ pub(crate) fn diff_lines(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn diff_unified(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let old = match required_string(ctx, "diff.unified", args, 0, "old") {
+    let reader = ArgReader::new(ctx, "diff.unified", args);
+    let old = match reader.required_string(0, "old") {
         Ok(value) => value,
         Err(err) => return err,
     };
-    let new = match required_string(ctx, "diff.unified", args, 1, "new") {
+    let new = match reader.required_string(1, "new") {
         Ok(value) => value,
         Err(err) => return err,
     };

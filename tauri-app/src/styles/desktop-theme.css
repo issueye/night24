@@ -1,0 +1,19 @@
+/* Codex-inspired desktop shell */
+:root {
+  --bg: #ffffff;
+  --sidebar-bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-soft: #f5f5f3;
+  --surface-tint: #eeeeec;
+  --line: #e7e5e0;
+  --line-strong: #d8d5ce;
+  --text: #242424;
+  --muted: #676762;
+  --subtle: #9a9994;
+  --blue: #2563eb;
+  --blue-hover: #1d4ed8;
+  --blue-soft: #eef2ff;
+  --green: #16a34a;
+  --green-soft: #edf8f1;
+  --shadow: 0 18px 50px rgba(30, 30, 30, 0.12);
+}

@@ -1,0 +1,61 @@
+.app-shell {
+  grid-template-rows: 40px minmax(0, 1fr) 26px;
+  background: var(--bg);
+}
+
+.topbar {
+  gap: 8px;
+  padding: 0 10px;
+  background: #fbfbfa;
+  border-bottom-color: var(--line);
+}
+
+.brand {
+  min-width: 210px;
+}
+
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  color: #4b5563;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 6px;
+}
+
+.brand span {
+  display: none;
+}
+
+.status-pill {
+  height: 26px;
+  min-width: auto;
+  padding: 0 10px;
+  background: #f2f2ef;
+  border-color: var(--line);
+}
+
+.toolbar-button {
+  height: 28px;
+  color: #1f2937;
+  background: #f2f2ef;
+  border: 1px solid var(--line);
+}
+
+.toolbar-button:hover {
+  background: #e9e9e5;
+}
+
+.icon-button,
+.mini-button {
+  background: transparent;
+  border-color: transparent;
+}
+
+.icon-button:hover,
+.icon-button.active,
+.mini-button:hover {
+  color: var(--text);
+  background: #ececea;
+  border-color: transparent;
+}

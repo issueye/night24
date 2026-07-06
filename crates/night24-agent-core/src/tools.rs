@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -6,12 +7,136 @@ use night24_core::model::{ContentBlock, Message};
 use night24_core::permission::{PermissionLevel, PermissionManager, ToolCategory};
 use night24_core::security::SecurityInspector;
 use night24_core::tool_executor::execute_tool_raw_output;
-use night24_protocol::{AgentEventKind, PermissionDecision, RiskLevel};
+use night24_protocol::{AgentEventKind, EventError, PermissionDecision, PermissionMode, RiskLevel};
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 
 use crate::hooks::{HookContext, HookEvent};
 use crate::types::{PermissionHandle, RunContext, RunHandle};
+
+pub(super) struct ToolLifecycle<'a> {
+    pub(super) context: &'a RunContext,
+    pub(super) working_dir: &'a Path,
+    pub(super) tool_call_id: &'a str,
+    pub(super) tool_name: &'a str,
+    pub(super) arguments: &'a serde_json::Value,
+}
+
+impl<'a> ToolLifecycle<'a> {
+    pub(super) fn new(
+        context: &'a RunContext,
+        working_dir: &'a Path,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        arguments: &'a serde_json::Value,
+    ) -> Self {
+        Self {
+            context,
+            working_dir,
+            tool_call_id,
+            tool_name,
+            arguments,
+        }
+    }
+
+    pub(super) async fn before(&self, summary: &str) {
+        self.context
+            .run_hooks(HookContext {
+                event: HookEvent::BeforeTool,
+                run_id: &self.context.run_id,
+                working_dir: self.working_dir,
+                provider: None,
+                model: None,
+                message_count: None,
+                tool_count: None,
+                tool_call_id: Some(self.tool_call_id),
+                tool_name: Some(self.tool_name),
+                summary: Some(summary),
+                arguments: Some(self.arguments),
+                result_preview: None,
+                error: None,
+                duration_ms: None,
+                finish_status: None,
+            })
+            .await;
+
+        if self.context.emit_tool_events {
+            self.context.send(AgentEventKind::ToolStarted {
+                tool_call_id: self.tool_call_id.to_string(),
+                tool_name: self.tool_name.to_string(),
+                summary: summary.to_string(),
+                arguments: self.arguments.clone(),
+            });
+        }
+    }
+
+    pub(super) async fn success(&self, duration_ms: u64, summary: String, result_preview: String) {
+        self.context
+            .run_hooks(HookContext {
+                event: HookEvent::AfterTool,
+                run_id: &self.context.run_id,
+                working_dir: self.working_dir,
+                provider: None,
+                model: None,
+                message_count: None,
+                tool_count: None,
+                tool_call_id: Some(self.tool_call_id),
+                tool_name: Some(self.tool_name),
+                summary: None,
+                arguments: Some(self.arguments),
+                result_preview: Some(&result_preview),
+                error: None,
+                duration_ms: Some(duration_ms),
+                finish_status: None,
+            })
+            .await;
+
+        if self.context.emit_tool_events {
+            self.context.send(AgentEventKind::ToolFinished {
+                tool_call_id: self.tool_call_id.to_string(),
+                tool_name: self.tool_name.to_string(),
+                duration_ms,
+                summary,
+                result_preview,
+                is_error: false,
+            });
+        }
+    }
+
+    pub(super) async fn failure(&self, duration_ms: u64, code: &str, error: &str) {
+        self.context
+            .run_hooks(HookContext {
+                event: HookEvent::AfterTool,
+                run_id: &self.context.run_id,
+                working_dir: self.working_dir,
+                provider: None,
+                model: None,
+                message_count: None,
+                tool_count: None,
+                tool_call_id: Some(self.tool_call_id),
+                tool_name: Some(self.tool_name),
+                summary: None,
+                arguments: Some(self.arguments),
+                result_preview: None,
+                error: Some(error),
+                duration_ms: Some(duration_ms),
+                finish_status: None,
+            })
+            .await;
+
+        if self.context.emit_tool_events {
+            self.context.send(AgentEventKind::ToolFailed {
+                tool_call_id: self.tool_call_id.to_string(),
+                tool_name: self.tool_name.to_string(),
+                duration_ms,
+                error: EventError {
+                    code: code.to_string(),
+                    message: error.to_string(),
+                },
+            });
+        }
+    }
+}
 
 pub(super) async fn execute_tool_with_events(
     context: &RunContext,
@@ -30,96 +155,23 @@ pub(super) async fn execute_tool_with_events(
     let arguments = arguments_with_network_proxy(tool_name, arguments, network_proxy);
     let summary = summarize_tool_call(tool_name, &arguments);
 
-    match security.require_permission(tool_name).await {
-        PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
-        PermissionLevel::Confirm => {
-            let permission_id = format!("perm-{}", uuid::Uuid::new_v4());
-            let (tx, rx) = oneshot::channel();
-            context
-                .permissions
-                .lock()
-                .map_err(|_| anyhow::anyhow!("permission state lock poisoned"))?
-                .insert(
-                    permission_id.clone(),
-                    PermissionHandle {
-                        run_id: context.run_id.clone(),
-                        sender: tx,
-                    },
-                );
-
-            context
-                .run_hooks(HookContext {
-                    event: HookEvent::PermissionRequired,
-                    run_id: &context.run_id,
-                    working_dir,
-                    provider: None,
-                    model: None,
-                    message_count: None,
-                    tool_count: None,
-                    tool_call_id: Some(tool_call_id),
-                    tool_name: Some(tool_name),
-                    summary: Some(&summary),
-                    arguments: Some(&arguments),
-                    result_preview: None,
-                    error: None,
-                    duration_ms: None,
-                    finish_status: None,
-                })
-                .await;
-            context.send(AgentEventKind::PermissionRequired {
-                permission_id,
-                tool_call_id: tool_call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                risk: risk_for_tool(tool_name),
-                summary: summary.clone(),
-                arguments: arguments.clone(),
-                timeout_ms: 300_000,
-            });
-
-            let decision = tokio::time::timeout(Duration::from_secs(300), rx)
-                .await
-                .map_err(|_| anyhow::anyhow!("permission request timed out"))?
-                .map_err(|_| anyhow::anyhow!("permission request closed"))?;
-
-            if matches!(decision, PermissionDecision::Deny) {
-                anyhow::bail!("permission denied for {tool_name}");
-            }
-        }
-        PermissionLevel::Allow => {}
-    }
+    ensure_tool_permission(
+        context,
+        security,
+        working_dir,
+        tool_call_id,
+        tool_name,
+        &arguments,
+        &summary,
+    )
+    .await?;
 
     if context.is_cancelled() {
         anyhow::bail!("cancelled");
     }
 
-    context
-        .run_hooks(HookContext {
-            event: HookEvent::BeforeTool,
-            run_id: &context.run_id,
-            working_dir,
-            provider: None,
-            model: None,
-            message_count: None,
-            tool_count: None,
-            tool_call_id: Some(tool_call_id),
-            tool_name: Some(tool_name),
-            summary: Some(&summary),
-            arguments: Some(&arguments),
-            result_preview: None,
-            error: None,
-            duration_ms: None,
-            finish_status: None,
-        })
-        .await;
-
-    if context.emit_tool_events {
-        context.send(AgentEventKind::ToolStarted {
-            tool_call_id: tool_call_id.to_string(),
-            tool_name: tool_name.to_string(),
-            summary,
-            arguments: arguments.clone(),
-        });
-    }
+    let lifecycle = ToolLifecycle::new(context, working_dir, tool_call_id, tool_name, &arguments);
+    lifecycle.before(&summary).await;
 
     let started = Instant::now();
     let result = match tokio::time::timeout(
@@ -148,25 +200,7 @@ pub(super) async fn execute_tool_with_events(
         Ok(result) => result,
         Err(err) => {
             let error = err.to_string();
-            context
-                .run_hooks(HookContext {
-                    event: HookEvent::AfterTool,
-                    run_id: &context.run_id,
-                    working_dir,
-                    provider: None,
-                    model: None,
-                    message_count: None,
-                    tool_count: None,
-                    tool_call_id: Some(tool_call_id),
-                    tool_name: Some(tool_name),
-                    summary: None,
-                    arguments: Some(&arguments),
-                    result_preview: None,
-                    error: Some(&error),
-                    duration_ms: Some(duration_ms),
-                    finish_status: None,
-                })
-                .await;
+            lifecycle.failure(duration_ms, "tool_failed", &error).await;
             return Err(err);
         }
     };
@@ -176,38 +210,84 @@ pub(super) async fn execute_tool_with_events(
     }
 
     let result_preview = preview(&result);
-    context
-        .run_hooks(HookContext {
-            event: HookEvent::AfterTool,
-            run_id: &context.run_id,
-            working_dir,
-            provider: None,
-            model: None,
-            message_count: None,
-            tool_count: None,
-            tool_call_id: Some(tool_call_id),
-            tool_name: Some(tool_name),
-            summary: None,
-            arguments: Some(&arguments),
-            result_preview: Some(&result_preview),
-            error: None,
-            duration_ms: Some(duration_ms),
-            finish_status: None,
-        })
+    lifecycle
+        .success(
+            duration_ms,
+            format!("{} completed", tool_name),
+            result_preview,
+        )
         .await;
 
-    if context.emit_tool_events {
-        context.send(AgentEventKind::ToolFinished {
-            tool_call_id: tool_call_id.to_string(),
-            tool_name: tool_name.to_string(),
-            duration_ms,
-            summary: format!("{} completed", tool_name),
-            result_preview,
-            is_error: false,
-        });
-    }
-
     Ok(result)
+}
+
+pub(super) async fn ensure_tool_permission(
+    context: &RunContext,
+    security: &SecurityInspector,
+    working_dir: &Path,
+    tool_call_id: &str,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+    summary: &str,
+) -> anyhow::Result<()> {
+    match security.require_permission(tool_name).await {
+        PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
+        PermissionLevel::Allow => Ok(()),
+        PermissionLevel::Confirm => {
+            let permission_id = format!("perm-{}", uuid::Uuid::new_v4());
+            let (tx, rx) = oneshot::channel();
+            context
+                .permissions
+                .lock()
+                .map_err(|_| anyhow::anyhow!("permission state lock poisoned"))?
+                .insert(
+                    permission_id.clone(),
+                    PermissionHandle {
+                        run_id: context.run_id.clone(),
+                        sender: tx,
+                    },
+                );
+
+            context
+                .run_hooks(HookContext {
+                    event: HookEvent::PermissionRequired,
+                    run_id: &context.run_id,
+                    working_dir,
+                    provider: None,
+                    model: None,
+                    message_count: None,
+                    tool_count: None,
+                    tool_call_id: Some(tool_call_id),
+                    tool_name: Some(tool_name),
+                    summary: Some(summary),
+                    arguments: Some(arguments),
+                    result_preview: None,
+                    error: None,
+                    duration_ms: None,
+                    finish_status: None,
+                })
+                .await;
+            context.send(AgentEventKind::PermissionRequired {
+                permission_id,
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                risk: risk_for_tool(tool_name),
+                summary: summary.to_string(),
+                arguments: arguments.clone(),
+                timeout_ms: 300_000,
+            });
+
+            let decision = tokio::time::timeout(Duration::from_secs(300), rx)
+                .await
+                .map_err(|_| anyhow::anyhow!("permission request timed out"))?
+                .map_err(|_| anyhow::anyhow!("permission request closed"))?;
+
+            if matches!(decision, PermissionDecision::Deny) {
+                anyhow::bail!("permission denied for {tool_name}");
+            }
+            Ok(())
+        }
+    }
 }
 
 async fn resolve_sensitive_output(
@@ -283,17 +363,11 @@ async fn resolve_sensitive_output(
 }
 
 pub(super) fn permission_manager_for_mode(mode: Option<&str>) -> PermissionManager {
-    match mode
-        .unwrap_or("strict")
-        .trim()
-        .to_ascii_lowercase()
-        .replace('-', "_")
-        .as_str()
-    {
-        "allow_all" | "full_access" => PermissionManager::new(PermissionLevel::Allow),
-        "deny_all" => PermissionManager::new(PermissionLevel::Deny),
-        "permissive" => PermissionManager::permissive_local(),
-        _ => PermissionManager::default(),
+    match PermissionMode::normalize(mode) {
+        PermissionMode::AllowAll => PermissionManager::new(PermissionLevel::Allow),
+        PermissionMode::DenyAll => PermissionManager::new(PermissionLevel::Deny),
+        PermissionMode::Permissive => PermissionManager::permissive_local(),
+        PermissionMode::Strict => PermissionManager::default(),
     }
 }
 
@@ -309,7 +383,7 @@ pub(super) fn text_content(message: &Message) -> String {
         .join("\n")
 }
 
-fn risk_for_tool(tool_name: &str) -> RiskLevel {
+pub(super) fn risk_for_tool(tool_name: &str) -> RiskLevel {
     match ToolCategory::from_tool_name(tool_name) {
         ToolCategory::Shell | ToolCategory::Write => RiskLevel::High,
         ToolCategory::Network => RiskLevel::Medium,

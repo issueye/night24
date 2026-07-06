@@ -65,9 +65,10 @@ pub(crate) fn crypto_hmac(ctx: &mut CallContext, args: &[Object]) -> Object {
             "crypto.hmac requires algorithm, key and value",
         );
     }
-    let algorithm = match &args[0] {
-        Object::String(s) => s.clone(),
-        _ => return new_error(ctx.pos.clone(), "crypto.hmac: algorithm must be a string"),
+    let reader = ArgReader::new(ctx, "crypto.hmac", args);
+    let algorithm = match reader.required_string(0, "algorithm") {
+        Ok(value) => value,
+        Err(err) => return err,
     };
     let key = match bytes_from_object(ctx, "crypto.hmac", &args[1]) {
         Ok(b) => b,
@@ -126,7 +127,12 @@ pub(crate) fn crypto_pbkdf2(ctx: &mut CallContext, args: &[Object]) -> Object {
     let derived = pbkdf2(kind, &password, &salt, iterations as u32, key_length);
     // pbkdf2 defaults to a lowercase hex string (matching the Go original's
     // hex.EncodeToString); only {asBuffer:true} returns a Buffer.
-    let as_buffer = hash_bool_arg(args.get(5), "asBuffer").unwrap_or(false);
+    let as_buffer = match args.get(5) {
+        Some(Object::Hash(opts)) => ObjectView::new(&opts.borrow())
+            .bool("asBuffer")
+            .unwrap_or(false),
+        _ => false,
+    };
     if as_buffer {
         make_buffer(derived)
     } else {
@@ -148,7 +154,8 @@ pub(crate) fn crypto_random_uuid(ctx: &mut CallContext, _args: &[Object]) -> Obj
 }
 
 pub(crate) fn crypto_random_bytes(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let size = match required_number(ctx, "crypto.randomBytes", args, 0, "size") {
+    let reader = ArgReader::new(ctx, "crypto.randomBytes", args);
+    let size = match reader.required_number(0, "size") {
         Ok(v) => v,
         Err(e) => return e,
     };

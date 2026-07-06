@@ -44,12 +44,13 @@ pub(crate) fn stringify_options(value: Option<&Object>) -> (Option<String>, bool
         return (None, false);
     };
     let hash = hash.borrow();
-    let space = match hash.get("space") {
-        Some(Object::Number(n)) if *n > 0.0 => Some(" ".repeat(*n as usize)),
+    let opts = ObjectView::new(&hash);
+    let space = match opts.number("space") {
+        Some(n) if n > 0.0 => Some(" ".repeat(n as usize)),
         _ => None,
     };
     let single_quote =
-        matches!(hash.get("quote"), Some(Object::String(s)) if s.as_str() == "single");
+        matches!(opts.object("quote"), Some(Object::String(s)) if s.as_str() == "single");
     (space, single_quote)
 }
 
@@ -268,8 +269,9 @@ pub(crate) fn pointer_set(doc: &Object, path: &str, value: Object) {
     for part in &parts[..parts.len() - 1] {
         match current {
             Object::Hash(hash) => {
-                let next = hash.borrow().get(part).cloned().unwrap_or_else(|| {
-                    let created = Object::Hash(Rc::new(RefCell::new(HashData::default())));
+                let next = hash.borrow().get(part).cloned();
+                let next = next.unwrap_or_else(|| {
+                    let created = ObjectBuilder::new().build();
                     hash.borrow_mut().set(part.clone(), created.clone());
                     created
                 });
@@ -375,13 +377,11 @@ pub(crate) fn deep_clone_object(value: &Object) -> Object {
                 .collect(),
         ),
         Object::Hash(hash) => {
-            let cloned = Rc::new(RefCell::new(HashData::default()));
+            let mut cloned = ObjectBuilder::new();
             for (key, value) in &hash.borrow().entries {
-                cloned
-                    .borrow_mut()
-                    .set(key.clone(), deep_clone_object(value));
+                cloned.insert(key.clone(), deep_clone_object(value));
             }
-            Object::Hash(cloned)
+            cloned.build()
         }
         other => other.clone(),
     }
@@ -460,11 +460,11 @@ pub(crate) fn json_to_object(value: JsonValue) -> Object {
         JsonValue::String(value) => str_obj(value),
         JsonValue::Array(values) => array(values.into_iter().map(json_to_object).collect()),
         JsonValue::Object(entries) => {
-            let hash = Rc::new(RefCell::new(HashData::default()));
+            let mut builder = ObjectBuilder::new();
             for (key, value) in entries {
-                hash.borrow_mut().set(key, json_to_object(value));
+                builder.insert(key, json_to_object(value));
             }
-            Object::Hash(hash)
+            builder.build()
         }
     }
 }
@@ -668,5 +668,171 @@ impl<'a> JsonParser<'a> {
         } else {
             Err(format!("expected '{}'", expected as char))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn string_value(value: &Object) -> &str {
+        match value {
+            Object::String(value) => value.as_str(),
+            _ => panic!("expected string"),
+        }
+    }
+
+    fn number_value(value: &Object) -> f64 {
+        match value {
+            Object::Number(value) => *value,
+            _ => panic!("expected number"),
+        }
+    }
+
+    fn field(object: &Object, key: &str) -> Object {
+        let Object::Hash(hash) = object else {
+            panic!("expected object");
+        };
+        hash.borrow()
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing field {key}"))
+    }
+
+    fn patch_field_string(patch: &Object, key: &str) -> String {
+        string_value(&field(patch, key)).to_string()
+    }
+
+    #[test]
+    fn pointer_get_unescapes_segments_and_set_creates_nested_objects() {
+        let doc = ObjectBuilder::new()
+            .set(
+                "a/b",
+                ObjectBuilder::new()
+                    .set("~key", array(vec![str_obj("zero")]))
+                    .build(),
+            )
+            .build();
+
+        let existing = pointer_get(&doc, "/a~1b/~0key/0").expect("existing value");
+        assert_eq!(string_value(&existing), "zero");
+
+        pointer_set(&doc, "/created/path", num_obj(7.0));
+        let created = pointer_get(&doc, "/created/path").expect("created value");
+        assert_eq!(number_value(&created), 7.0);
+
+        pointer_set(&doc, "/a~1b/~0key/-", str_obj("one"));
+        let appended = pointer_get(&doc, "/a~1b/~0key/1").expect("appended value");
+        assert_eq!(string_value(&appended), "one");
+    }
+
+    #[test]
+    fn pointer_remove_handles_hash_fields_and_array_indices() {
+        let doc = ObjectBuilder::new()
+            .set(
+                "items",
+                array(vec![str_obj("a"), str_obj("b"), str_obj("c")]),
+            )
+            .set(
+                "object",
+                ObjectBuilder::new()
+                    .set("keep", bool_obj(true))
+                    .set("drop", bool_obj(false))
+                    .build(),
+            )
+            .build();
+
+        pointer_remove(&doc, "/items/1");
+        pointer_remove(&doc, "/object/drop");
+
+        assert_eq!(
+            string_value(&pointer_get(&doc, "/items/1").expect("shifted item")),
+            "c"
+        );
+        assert!(pointer_get(&doc, "/object/drop").is_none());
+        assert!(matches!(
+            pointer_get(&doc, "/object/keep"),
+            Some(Object::Boolean(true))
+        ));
+    }
+
+    #[test]
+    fn deep_clone_object_detaches_nested_hashes_and_arrays() {
+        let original = ObjectBuilder::new()
+            .set(
+                "nested",
+                ObjectBuilder::new()
+                    .set("value", str_obj("old"))
+                    .set("items", array(vec![str_obj("a")]))
+                    .build(),
+            )
+            .build();
+        let cloned = deep_clone_object(&original);
+
+        pointer_set(&cloned, "/nested/value", str_obj("new"));
+        pointer_set(&cloned, "/nested/items/-", str_obj("b"));
+
+        assert_eq!(
+            string_value(&pointer_get(&original, "/nested/value").expect("original value")),
+            "old"
+        );
+        assert!(pointer_get(&original, "/nested/items/1").is_none());
+        assert_eq!(
+            string_value(&pointer_get(&cloned, "/nested/value").expect("cloned value")),
+            "new"
+        );
+        assert_eq!(
+            string_value(&pointer_get(&cloned, "/nested/items/1").expect("cloned item")),
+            "b"
+        );
+    }
+
+    #[test]
+    fn diff_objects_escapes_paths_and_clones_added_values() {
+        let old = ObjectBuilder::new()
+            .set("a/b", num_obj(1.0))
+            .set("gone", bool_obj(true))
+            .set("same", str_obj("ok"))
+            .set(
+                "nested",
+                ObjectBuilder::new().set("x", num_obj(1.0)).build(),
+            )
+            .build();
+        let new = ObjectBuilder::new()
+            .set("a/b", num_obj(2.0))
+            .set("same", str_obj("ok"))
+            .set(
+                "nested",
+                ObjectBuilder::new().set("x", num_obj(2.0)).build(),
+            )
+            .set(
+                "added",
+                ObjectBuilder::new().set("value", str_obj("copy")).build(),
+            )
+            .build();
+
+        let mut patches = Vec::new();
+        diff_objects(&old, &new, "", &mut patches);
+        let paths: Vec<String> = patches
+            .iter()
+            .map(|patch| patch_field_string(patch, "path"))
+            .collect();
+
+        assert!(paths.contains(&"/a~1b".to_string()));
+        assert!(paths.contains(&"/gone".to_string()));
+        assert!(paths.contains(&"/nested/x".to_string()));
+        assert!(paths.contains(&"/added".to_string()));
+
+        let added_patch = patches
+            .iter()
+            .find(|patch| patch_field_string(patch, "path") == "/added")
+            .expect("added patch");
+        let added_value = field(added_patch, "value");
+        pointer_set(&new, "/added/value", str_obj("mutated"));
+
+        assert_eq!(
+            string_value(&pointer_get(&added_value, "/value").expect("cloned added value")),
+            "copy"
+        );
     }
 }

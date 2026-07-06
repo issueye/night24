@@ -2,6 +2,7 @@ import { CheckCircle2, Copy, FileText, RefreshCw, Search, Sparkles, XCircle } fr
 import { useEffect, useMemo, useState } from 'react';
 import { normalizeError } from '../../utils/events.js';
 import { classNames } from '../../utils/format.js';
+import { SettingsListDetail } from './SettingsListDetail.jsx';
 
 const SOURCE_LABELS = {
   workspace: '工作区',
@@ -141,14 +142,17 @@ export function SkillSettings({ apiJson, workspace }) {
   const body = loadedSkill?.body || '';
 
   return (
-    <div className="skill-manager">
-      <aside className="provider-list skill-list" aria-label="技能列表">
-        <div className="provider-list-head">
-          <strong>技能</strong>
-          <button className="icon-button compact" disabled={loading} onClick={loadSkills} title="重新加载" type="button">
-            <RefreshCw size={14} />
-          </button>
-        </div>
+    <SettingsListDetail
+      managerClassName="skill-manager"
+      listClassName="skill-list"
+      listLabel="技能列表"
+      listTitle="技能"
+      listActions={(
+        <button className="icon-button compact" disabled={loading} onClick={loadSkills} title="重新加载" type="button">
+          <RefreshCw size={14} />
+        </button>
+      )}
+      listExtra={(
         <div className="skill-filter">
           <label>
             <Search size={13} />
@@ -161,7 +165,9 @@ export function SkillSettings({ apiJson, workspace }) {
             <option value="user">用户</option>
           </select>
         </div>
-        <div className="provider-list-scroll">
+      )}
+      listChildren={(
+        <>
           {filteredSkills.length === 0 && <div className="hook-list-empty">{loading ? '加载中' : '暂无技能'}</div>}
           {filteredSkills.map((skill) => {
             const itemStatus = availability(skill);
@@ -177,10 +183,10 @@ export function SkillSettings({ apiJson, workspace }) {
               </button>
             );
           })}
-        </div>
-      </aside>
-
-      <div className="skill-detail">
+        </>
+      )}
+      detailClassName="skill-detail"
+    >
         <div className="skill-summary">
           <div>
             <span>总数</span>
@@ -270,7 +276,6 @@ export function SkillSettings({ apiJson, workspace }) {
             <span>当前项目未发现可管理的技能。</span>
           </div>
         )}
-      </div>
-    </div>
+    </SettingsListDetail>
   );
 }

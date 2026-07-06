@@ -1,0 +1,15 @@
+.left-panel,
+.center-panel {
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(23, 32, 51, 0.07);
+}
+
+.center-panel {
+  display: grid;
+  position: relative;
+  grid-template-rows: 54px minmax(0, 1fr) 146px;
+  overflow: hidden;
+}

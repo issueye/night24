@@ -1,0 +1,156 @@
+.app-shell {
+  display: grid;
+  grid-template-rows: 50px auto minmax(0, 1fr) 30px;
+  position: relative;
+  height: 100%;
+  min-width: 1040px;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.brand-mark img {
+  display: block;
+  width: 30px;
+  height: 30px;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand strong {
+  font-size: 14px;
+}
+
+.brand span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 28px;
+  min-width: 104px;
+  padding: 0 10px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.status-pill.connected {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: #bee8cb;
+}
+
+.status-pill.failed {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: #ffd1d1;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.toolbar-button,
+.primary-button,
+.danger-button,
+.mini-button,
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.toolbar-button {
+  height: 30px;
+  padding: 0 10px;
+  color: #ffffff;
+  background: var(--blue);
+}
+
+.toolbar-button:hover,
+.primary-button:hover {
+  background: var(--blue-hover);
+}
+
+.toolbar-button:disabled,
+.primary-button:disabled,
+.danger-button:disabled,
+.mini-button:disabled,
+.icon-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.icon-button,
+.mini-button {
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.icon-button {
+  width: 30px;
+  height: 30px;
+}
+
+.icon-button.active,
+.icon-button:hover,
+.mini-button:hover {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-color: #c9d8ff;
+}
+
+.icon-button.compact {
+  width: 28px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.mini-button {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+}

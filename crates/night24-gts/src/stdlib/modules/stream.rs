@@ -9,7 +9,8 @@ pub(crate) fn stream_module() -> Object {
 }
 
 pub(crate) fn stream_from_string(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "stream.fromString", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "stream.fromString", args);
+    let text = match reader.required_string(0, "text") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -30,4 +31,26 @@ pub(crate) fn stream_from_text_object(text: String) -> Object {
         h.borrow_mut().set("text", str_obj(text));
     }
     stream
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_string_field(object: &Object, key: &str) -> String {
+        let Object::Hash(hash) = object else {
+            panic!("expected stream object");
+        };
+        match hash.borrow().get(key) {
+            Some(Object::String(value)) => value.to_string(),
+            _ => panic!("expected string field {key}"),
+        }
+    }
+
+    #[test]
+    fn stream_from_text_exposes_original_text() {
+        let stream = stream_from_text("night24".to_string());
+
+        assert_eq!(object_string_field(&stream, "text"), "night24");
+    }
 }

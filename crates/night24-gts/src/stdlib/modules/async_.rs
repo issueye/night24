@@ -49,7 +49,7 @@ fn async_fetch(ctx: &mut CallContext, args: &[Object]) -> Object {
 
 fn async_run_worker(ctx: &mut CallContext, args: &[Object]) -> Object {
     let func = match args.first() {
-        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => args[0].clone(),
+        Some(value) if is_callable(value) => value.clone(),
         _ => {
             return rejected_promise(new_error(
                 ctx.pos.clone(),

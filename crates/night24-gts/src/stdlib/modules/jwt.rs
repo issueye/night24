@@ -92,7 +92,8 @@ pub(crate) fn jwt_verify(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn jwt_decode(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let token = match required_string(ctx, "jwt.decode", args, 0, "token") {
+    let reader = ArgReader::new(ctx, "jwt.decode", args);
+    let token = match reader.required_string(0, "token") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -108,5 +109,54 @@ pub(crate) fn jwt_decode(ctx: &mut CallContext, args: &[Object]) -> Object {
     match serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
         Ok(v) => value_to_object(&v),
         Err(e) => new_error(ctx.pos.clone(), format!("jwt.decode: {}", e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Position;
+    use crate::object::{Environment, VirtualMachine};
+
+    fn test_context(env: &crate::object::EnvRef) -> CallContext<'_> {
+        CallContext::new(env, Position::default())
+    }
+
+    fn error_message(object: Object) -> String {
+        match object {
+            Object::Error(error) => error.borrow().message.clone(),
+            _ => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn decode_returns_payload_object() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+        let header = base64url_encode_string(br#"{"alg":"none","typ":"JWT"}"#);
+        let payload = base64url_encode_string(br#"{"sub":"night24","admin":true,"exp":123}"#);
+        let token = format!("{}.{}.signature", header, payload);
+
+        let decoded = jwt_decode(&mut ctx, &[str_obj(token)]);
+
+        let Object::Hash(hash) = decoded else {
+            panic!("expected decoded payload hash");
+        };
+        let hash = hash.borrow();
+        assert!(matches!(hash.get("admin"), Some(Object::Boolean(true))));
+        assert!(matches!(hash.get("exp"), Some(Object::Number(value)) if *value == 123.0));
+        assert!(
+            matches!(hash.get("sub"), Some(Object::String(value)) if value.as_str() == "night24")
+        );
+    }
+
+    #[test]
+    fn decode_rejects_invalid_token_format() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+
+        let decoded = jwt_decode(&mut ctx, &[str_obj("not-a-jwt")]);
+
+        assert_eq!(error_message(decoded), "jwt.decode: invalid token format");
     }
 }

@@ -1,0 +1,58 @@
+.conversation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.conversation-head span,
+.core-note {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.conversation-head strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.core-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 360px;
+  overflow: hidden;
+  color: var(--green);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.permission-trigger {
+  position: relative;
+}
+
+.permission-trigger span {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0 4px;
+  color: #ffffff;
+  background: var(--red);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+}

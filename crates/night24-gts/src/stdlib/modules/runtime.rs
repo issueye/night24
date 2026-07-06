@@ -39,7 +39,8 @@ pub(crate) fn runtime_state(_ctx: &mut CallContext, _args: &[Object]) -> Object 
 }
 
 pub(crate) fn runtime_run_script(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "runtime.runScript", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "runtime.runScript", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -51,11 +52,12 @@ pub(crate) fn runtime_run_script(ctx: &mut CallContext, args: &[Object]) -> Obje
 }
 
 pub(crate) fn runtime_call_script(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "runtime.callScript", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "runtime.callScript", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let export_name = match required_string(ctx, "runtime.callScript", args, 1, "exportName") {
+    let export_name = match reader.required_string(1, "exportName") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -76,7 +78,8 @@ pub(crate) fn runtime_call_script(ctx: &mut CallContext, args: &[Object]) -> Obj
 }
 
 pub(crate) fn runtime_run_tool(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "runtime.runTool", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "runtime.runTool", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -127,12 +130,13 @@ fn parse_runtime_opts(
         argv: Vec::new(),
         auto_main: false,
     };
-    if let Some(Object::Hash(h)) = args.get(index) {
-        let hb = h.borrow();
-        if let Some(Object::String(s)) = hb.get("cwd") {
+    let reader = ArgReader::new(ctx, name, args);
+    if let Some(view) = reader.object_view(index) {
+        let opts_view = ObjectView::new(&view);
+        if let Some(Object::String(s)) = opts_view.object("cwd") {
             opts.cwd = Some(s.to_string());
         }
-        if let Some(Object::Array(arr)) = hb.get("argv") {
+        if let Some(Object::Array(arr)) = opts_view.object("argv") {
             opts.argv = arr
                 .borrow()
                 .elements
@@ -143,12 +147,10 @@ fn parse_runtime_opts(
                 })
                 .collect();
         }
-        if let Some(Object::Boolean(b)) = hb.get("autoMain") {
-            opts.auto_main = *b;
+        if let Some(Object::Boolean(b)) = opts_view.object("autoMain") {
+            opts.auto_main = b;
         }
     }
-    let _ = name;
-    let _ = ctx;
     opts
 }
 

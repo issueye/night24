@@ -503,7 +503,10 @@ fn eval_try(s: &TryStmt, env: &EnvRef) -> Object {
     }
     if let Some(fin) = &s.finalizer {
         let fin_scope = Environment::child(env);
-        let _ = eval_block(fin, &fin_scope);
+        let finalizer_result = eval_block(fin, &fin_scope);
+        if matches!(finalizer_result, Object::Return(_)) || finalizer_result.is_runtime_error() {
+            return finalizer_result;
+        }
     }
     result
 }

@@ -1,0 +1,41 @@
+.app-shell.font-compact {
+  font-size: 13px;
+}
+
+.app-shell.font-normal {
+  font-size: 14px;
+}
+
+.app-shell.font-large {
+  font-size: 15px;
+}
+
+.app-shell.theme-warm {
+  --bg: #f7f5f0;
+  --surface: #fffdf8;
+  --surface-soft: #faf7ef;
+  --line: #e9e1d3;
+  --line-strong: #d7c8b4;
+  --text: #221f1a;
+  --muted: #6f665a;
+  --subtle: #9a8d7d;
+  background: var(--bg);
+}
+
+.app-shell.theme-dark {
+  --bg: #111318;
+  --surface: #181b22;
+  --surface-soft: #20242d;
+  --surface-tint: #182238;
+  --line: #2b303a;
+  --line-strong: #3b4350;
+  --text: #f2f5f8;
+  --muted: #a8b0bd;
+  --subtle: #7f8896;
+  --blue-soft: #172544;
+  --green-soft: #143221;
+  --amber-soft: #332815;
+  --red-soft: #351b1e;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  background: var(--bg);
+}

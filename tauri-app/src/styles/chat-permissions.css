@@ -1,0 +1,81 @@
+.permission-message {
+  max-width: min(720px, 92%);
+}
+
+.permission-message .avatar {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.permission-chat-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  color: var(--text);
+  background: var(--amber-soft);
+  border: 1px solid #f2daa6;
+  border-radius: 12px;
+}
+
+.permission-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.permission-chat-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-chat-head small {
+  color: var(--amber);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.permission-chat-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.permission-chat-card pre {
+  max-height: 150px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(183, 121, 31, 0.18);
+  border-radius: 8px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.permission-chat-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.permission-chat-actions button {
+  height: 30px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.permission-chat-actions button:last-child {
+  color: #ffffff;
+  background: var(--blue);
+  border-color: var(--blue);
+}

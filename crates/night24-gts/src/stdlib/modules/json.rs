@@ -16,7 +16,8 @@ pub(crate) fn json_module() -> Object {
 }
 
 pub(crate) fn json_parse5(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "json.parse5", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "json.parse5", args);
+    let text = match reader.required_string(0, "text") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -59,7 +60,8 @@ pub(crate) fn json_validate(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn json_get(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "json.get", args, 1, "path") {
+    let reader = ArgReader::new(ctx, "json.get", args);
+    let path = match reader.required_string(1, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -72,7 +74,8 @@ pub(crate) fn json_set(ctx: &mut CallContext, args: &[Object]) -> Object {
     if args.len() < 3 {
         return new_error(ctx.pos.clone(), "json.set requires doc, path, and value");
     }
-    let path = match required_string(ctx, "json.set", args, 1, "path") {
+    let reader = ArgReader::new(ctx, "json.set", args);
+    let path = match reader.required_string(1, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -81,7 +84,8 @@ pub(crate) fn json_set(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn json_has(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "json.has", args, 1, "path") {
+    let reader = ArgReader::new(ctx, "json.has", args);
+    let path = match reader.required_string(1, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -93,7 +97,8 @@ pub(crate) fn json_has(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn json_remove(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "json.remove", args, 1, "path") {
+    let reader = ArgReader::new(ctx, "json.remove", args);
+    let path = match reader.required_string(1, "path") {
         Ok(value) => value,
         Err(err) => return err,
     };

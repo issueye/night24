@@ -35,7 +35,7 @@ pub(crate) fn table_headers(value: Option<&Object>) -> Vec<String> {
             .iter()
             .map(object_to_text)
             .collect::<Vec<_>>(),
-        Some(Object::Hash(hash)) => match hash.borrow().get("headers") {
+        Some(Object::Hash(hash)) => match ObjectView::new(&hash.borrow()).object("headers") {
             Some(Object::Array(arr)) => arr
                 .borrow()
                 .elements

@@ -21,9 +21,12 @@ const MAX_TREE_CHILDREN: usize = 200;
 pub(crate) fn workspace_recents_limit() -> usize {
     std::env::var("NIGHT24_WORKSPACE_RECENTS_LIMIT")
         .ok()
-        .and_then(|raw| raw.parse::<usize>().ok())
-        .filter(|limit| *limit > 0)
+        .and_then(|raw| parse_workspace_recents_limit(&raw))
         .unwrap_or(10)
+}
+
+fn parse_workspace_recents_limit(raw: &str) -> Option<usize> {
+    raw.trim().parse::<usize>().ok().filter(|limit| *limit > 0)
 }
 
 pub(crate) fn canonical_workspace_root(
@@ -234,25 +237,35 @@ pub(crate) fn ensure_git_workspace(
 }
 
 pub(crate) fn parse_git_status(raw: &str) -> Vec<WorkspaceStatusFile> {
-    raw.lines()
-        .filter_map(|line| {
-            if line.len() < 4 {
-                return None;
-            }
-            let index_status = line.chars().next().unwrap_or(' ').to_string();
-            let worktree_status = line.chars().nth(1).unwrap_or(' ').to_string();
-            let path = line[3..].split(" -> ").last().unwrap_or("").to_string();
-            if path.is_empty() {
-                None
-            } else {
-                Some(WorkspaceStatusFile {
-                    path,
-                    index_status,
-                    worktree_status,
-                })
-            }
-        })
-        .collect()
+    raw.lines().filter_map(parse_git_status_line).collect()
+}
+
+fn parse_git_status_line(line: &str) -> Option<WorkspaceStatusFile> {
+    let bytes = line.as_bytes();
+    if bytes.len() < 4 {
+        return None;
+    }
+    if !is_git_status_byte(bytes[0]) || !is_git_status_byte(bytes[1]) {
+        return None;
+    }
+
+    let path = line.get(3..)?.split(" -> ").last().unwrap_or("");
+    if path.is_empty() {
+        return None;
+    }
+
+    Some(WorkspaceStatusFile {
+        path: path.to_string(),
+        index_status: (bytes[0] as char).to_string(),
+        worktree_status: (bytes[1] as char).to_string(),
+    })
+}
+
+fn is_git_status_byte(byte: u8) -> bool {
+    matches!(
+        byte,
+        b' ' | b'M' | b'A' | b'D' | b'R' | b'C' | b'U' | b'?' | b'!'
+    )
 }
 
 pub(crate) fn diff_stats(diff: &str) -> (usize, usize, usize) {
@@ -261,16 +274,38 @@ pub(crate) fn diff_stats(diff: &str) -> (usize, usize, usize) {
     let mut deletions = 0;
 
     for line in diff.lines() {
-        if line.starts_with("diff --git ") {
+        let kind = classify_diff_stat_line(line);
+        if kind == DiffStatLine::FileHeader {
             files_changed += 1;
-        } else if line.starts_with('+') && !line.starts_with("+++") {
+        } else if kind == DiffStatLine::Insertion {
             insertions += 1;
-        } else if line.starts_with('-') && !line.starts_with("---") {
+        } else if kind == DiffStatLine::Deletion {
             deletions += 1;
         }
     }
 
     (files_changed, insertions, deletions)
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DiffStatLine {
+    FileHeader,
+    Insertion,
+    Deletion,
+    Other,
+}
+
+fn classify_diff_stat_line(line: &str) -> DiffStatLine {
+    let bytes = line.as_bytes();
+    if bytes.starts_with(b"diff --git ") {
+        DiffStatLine::FileHeader
+    } else if bytes.starts_with(b"+") && !bytes.starts_with(b"+++") {
+        DiffStatLine::Insertion
+    } else if bytes.starts_with(b"-") && !bytes.starts_with(b"---") {
+        DiffStatLine::Deletion
+    } else {
+        DiffStatLine::Other
+    }
 }
 
 pub(crate) fn workspace_change_snapshot(
@@ -571,4 +606,118 @@ pub(crate) async fn workspace_diff(
         insertions,
         deletions,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "night24-server-workspace-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&path).expect("create temp workspace");
+            Self { path }
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn parse_workspace_recents_limit_trims_and_rejects_invalid_values() {
+        assert_eq!(parse_workspace_recents_limit(" 25 "), Some(25));
+        assert_eq!(parse_workspace_recents_limit("0"), None);
+        assert_eq!(parse_workspace_recents_limit(""), None);
+        assert_eq!(parse_workspace_recents_limit("many"), None);
+    }
+
+    #[test]
+    fn resolve_workspace_existing_path_accepts_root_aliases_and_child_paths() {
+        let temp = TestDir::new();
+        let root = temp.path.join("workspace");
+        let src = root.join("src");
+        let file = src.join("main.rs");
+        std::fs::create_dir_all(&src).expect("create src");
+        std::fs::write(&file, "fn main() {}\n").expect("write file");
+
+        let canonical_root = root.canonicalize().expect("canonical root");
+        assert_eq!(
+            resolve_workspace_existing_path(&root, None).expect("resolve root"),
+            canonical_root
+        );
+        assert_eq!(
+            resolve_workspace_existing_path(&root, Some(" . ")).expect("resolve dot"),
+            canonical_root
+        );
+        assert_eq!(
+            resolve_workspace_existing_path(&root, Some("src/main.rs")).expect("resolve child"),
+            file.canonicalize().expect("canonical file")
+        );
+    }
+
+    #[test]
+    fn resolve_workspace_existing_path_rejects_absolute_and_escaping_paths() {
+        let temp = TestDir::new();
+        let root = temp.path.join("workspace");
+        let outside = temp.path.join("outside.txt");
+        std::fs::create_dir_all(&root).expect("create workspace");
+        std::fs::write(&outside, "outside\n").expect("write outside file");
+
+        assert!(resolve_workspace_existing_path(&root, Some(&outside.to_string_lossy())).is_err());
+        assert!(resolve_workspace_existing_path(&root, Some("../outside.txt")).is_err());
+    }
+
+    #[test]
+    fn parse_git_status_line_handles_common_porcelain_entries() {
+        let modified = parse_git_status_line(" M src/main.rs").expect("modified entry");
+        assert_eq!(modified.index_status, " ");
+        assert_eq!(modified.worktree_status, "M");
+        assert_eq!(modified.path, "src/main.rs");
+
+        let renamed = parse_git_status_line("R  old.rs -> src/新.rs").expect("renamed entry");
+        assert_eq!(renamed.index_status, "R");
+        assert_eq!(renamed.worktree_status, " ");
+        assert_eq!(renamed.path, "src/新.rs");
+    }
+
+    #[test]
+    fn parse_git_status_line_rejects_malformed_entries() {
+        assert!(parse_git_status_line("").is_none());
+        assert!(parse_git_status_line(" M").is_none());
+        assert!(parse_git_status_line(" M ").is_none());
+        assert!(parse_git_status_line("✓ M src/main.rs").is_none());
+    }
+
+    #[test]
+    fn diff_stats_ignores_file_headers_and_counts_content_lines() {
+        let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+index 1111111..2222222 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,2 +1,3 @@
+-old
++new
++extra
+ context
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1 +1 @@
+-fn old() {}
++fn new() {}
+";
+
+        assert_eq!(diff_stats(diff), (2, 3, 2));
+    }
 }

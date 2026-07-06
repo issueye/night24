@@ -1,0 +1,102 @@
+.subagent-list {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px;
+  overflow: auto;
+  background: var(--surface-soft);
+  border-right: 1px solid var(--line);
+}
+
+.subagent-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.subagent-row:hover,
+.subagent-row.active {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.subagent-row > div,
+.subagent-row footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.subagent-row strong,
+.subagent-row p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-row strong {
+  font-size: 12px;
+}
+
+.subagent-row em {
+  margin-left: auto;
+  color: var(--subtle);
+  font-style: normal;
+  font-size: 10px;
+}
+
+.subagent-row p {
+  margin: 0;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-row footer {
+  justify-content: space-between;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.subagent-row footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.subagent-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  background: var(--subtle);
+  border-radius: 999px;
+}
+
+.subagent-dot.running {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.subagent-dot.completed {
+  background: var(--green);
+}
+
+.subagent-dot.failed {
+  background: var(--red);
+}
+
+.subagent-dot.cancelled {
+  background: var(--amber);
+}

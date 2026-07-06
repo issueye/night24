@@ -11,7 +11,8 @@ pub(crate) fn glob_module() -> Object {
 }
 
 pub(crate) fn glob_glob(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let pattern = match required_string(ctx, "glob.glob", args, 0, "pattern") {
+    let reader = ArgReader::new(ctx, "glob.glob", args);
+    let pattern = match reader.required_string(0, "pattern") {
         Ok(pattern) => pattern,
         Err(err) => return err,
     };
@@ -27,11 +28,12 @@ pub(crate) fn glob_glob(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn glob_match_native(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let pattern = match required_string(ctx, "glob.match", args, 0, "pattern") {
+    let reader = ArgReader::new(ctx, "glob.match", args);
+    let pattern = match reader.required_string(0, "pattern") {
         Ok(pattern) => pattern,
         Err(err) => return err,
     };
-    let path = match required_string(ctx, "glob.match", args, 1, "path") {
+    let path = match reader.required_string(1, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -39,9 +41,27 @@ pub(crate) fn glob_match_native(ctx: &mut CallContext, args: &[Object]) -> Objec
 }
 
 pub(crate) fn glob_has_magic(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "glob.hasMagic", args, 0, "pattern") {
+    let reader = ArgReader::new(ctx, "glob.hasMagic", args);
+    match reader.required_string(0, "pattern") {
         Ok(pattern) => bool_obj(pattern.contains('*') || pattern.contains('?')),
         Err(err) => err,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_match_normalizes_windows_separators() {
+        assert!(glob_match("src\\*.rs", "src/lib.rs"));
+        assert!(glob_match("src/*.rs", "src\\main.rs"));
+    }
+
+    #[test]
+    fn glob_match_supports_star_and_question_mark() {
+        assert!(glob_match("src/*.r?", "src/lib.rs"));
+        assert!(!glob_match("src/*.r?", "src/lib.ts"));
     }
 }
 

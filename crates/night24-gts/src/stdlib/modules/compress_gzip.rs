@@ -52,11 +52,12 @@ pub(crate) fn gzip_decompress(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn gzip_compress_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let src = match required_string(ctx, "gzip.compressFileSync", args, 0, "source path") {
+    let reader = ArgReader::new(ctx, "gzip.compressFileSync", args);
+    let src = match reader.required_string(0, "source path") {
         Ok(src) => src,
         Err(err) => return err,
     };
-    let dst = match required_string(ctx, "gzip.compressFileSync", args, 1, "destination path") {
+    let dst = match reader.required_string(1, "destination path") {
         Ok(dst) => dst,
         Err(err) => return err,
     };
@@ -71,11 +72,12 @@ pub(crate) fn gzip_compress_file_sync(ctx: &mut CallContext, args: &[Object]) ->
 }
 
 pub(crate) fn gzip_decompress_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let src = match required_string(ctx, "gzip.decompressFileSync", args, 0, "source path") {
+    let reader = ArgReader::new(ctx, "gzip.decompressFileSync", args);
+    let src = match reader.required_string(0, "source path") {
         Ok(src) => src,
         Err(err) => return err,
     };
-    let dst = match required_string(ctx, "gzip.decompressFileSync", args, 1, "destination path") {
+    let dst = match reader.required_string(1, "destination path") {
         Ok(dst) => dst,
         Err(err) => return err,
     };
@@ -108,6 +110,20 @@ pub(crate) fn bytes_to_latin1_string(bytes: &[u8]) -> String {
 
 pub(crate) fn latin1_string_to_bytes(value: &str) -> Vec<u8> {
     value.chars().map(|ch| ch as u32 as u8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gzip_bytes_round_trip() {
+        let input = b"night24 gzip round trip";
+        let compressed = gzip_compress_bytes(input).unwrap();
+        let decompressed = gzip_decompress_bytes(&compressed).unwrap();
+
+        assert_eq!(decompressed, input);
+    }
 }
 
 // ---------------------------------------------------------------------------

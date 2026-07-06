@@ -99,15 +99,49 @@ export function readProviderProfiles() {
   return normalizeProviderProfiles(readJsonSetting(STORAGE_KEYS.providerProfiles, []));
 }
 
+export function providerProfileById(profiles, id) {
+  const source = Array.isArray(profiles) ? profiles : [];
+  return source.find((profile) => profile?.id === id) || null;
+}
+
+export function activeProviderProfile(profiles, id) {
+  const source = Array.isArray(profiles) ? profiles : [];
+  return providerProfileById(source, id) || source[0] || null;
+}
+
+export function validProviderProfileId(profiles, id) {
+  return activeProviderProfile(profiles, id)?.id || '';
+}
+
+export function providerProfileFormState(profile) {
+  return {
+    provider: profile?.provider || 'echo',
+    model: profile?.model || (profile?.provider === 'echo' ? 'echo-v1' : ''),
+    baseUrl: profile?.baseUrl || '',
+    apiKey: profile?.apiKey || '',
+    contextThreshold: profile?.contextThreshold || DEFAULT_CONTEXT_THRESHOLD,
+  };
+}
+
 export function parseOptionalPositiveInt(value) {
   const number = Number.parseInt(String(value || '').trim(), 10);
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
+function normalizeApiBase(base) {
+  const value = String(base || '').trim();
+  return (value || DEFAULT_SERVER).replace(/\/+$/, '');
+}
+
 export function apiUrl(base, path) {
-  const normalizedBase = String(base || DEFAULT_SERVER).replace(/\/+$/, '');
+  const normalizedBase = normalizeApiBase(base);
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   return `${normalizedBase}${normalizedPath}`;
+}
+
+export function apiAuthHeaders(apiKey) {
+  const key = String(apiKey || '').trim();
+  return key ? { Authorization: `Bearer ${key}`, 'X-API-Key': key } : {};
 }
 
 export function workspaceNameFromPath(path) {
@@ -120,6 +154,7 @@ export function workspaceNameFromPath(path) {
 
 function normalizeLocalPath(path) {
   return String(path || '')
+    .trim()
     .replace(/\\/g, '/')
     .replace(/\/+$/, '')
     .toLowerCase();
@@ -136,7 +171,8 @@ export function compactWorkspaces(workspaces) {
   return (Array.isArray(workspaces) ? workspaces : [])
     .filter((item) => item?.root_path)
     .filter((item) => {
-      const key = String(item.root_path).toLowerCase();
+      const key = normalizeLocalPath(item.root_path);
+      if (!key) return false;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

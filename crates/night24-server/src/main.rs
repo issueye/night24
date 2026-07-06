@@ -50,39 +50,48 @@ use workspace::{
 use night24_core::{
     provider::registry::ProviderRegistry, session::SessionManager, tool_executor::builtin_tools,
 };
-use night24_protocol::{PermissionDecision, SkillRegistryParams, SubAgentPoolParams};
+use night24_protocol::{
+    PermissionDecision, PermissionMode, SkillRegistryParams, SubAgentPoolParams,
+};
 
 fn session_database_url() -> String {
-    std::env::var("NIGHT24_DATABASE_URL")
-        .ok()
-        .and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(normalize_sqlite_database_url(trimmed))
-            }
-        })
+    non_empty_env("NIGHT24_DATABASE_URL")
+        .map(|value| normalize_sqlite_database_url(&value))
         .unwrap_or_else(default_session_database_url)
 }
 
 fn default_session_database_url() -> String {
-    let path = std::env::var("NIGHT24_DATA_DIR")
-        .ok()
-        .and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(trimmed).join("night24.db"))
-            }
-        })
+    let path = non_empty_env("NIGHT24_DATA_DIR")
+        .map(|value| PathBuf::from(value).join("night24.db"))
         .unwrap_or_else(|| {
             std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join("night24.db")
         });
     sqlite_file_url(path)
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().and_then(trimmed_non_empty)
+}
+
+fn trimmed_non_empty(value: impl AsRef<str>) -> Option<String> {
+    let trimmed = value.as_ref().trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn trimmed_or_default(value: Option<&str>, default: &str) -> String {
+    value
+        .and_then(trimmed_non_empty)
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn env_or_default(key: &str, default: &str) -> String {
+    trimmed_or_default(std::env::var(key).ok().as_deref(), default)
 }
 
 fn normalize_sqlite_database_url(value: &str) -> String {
@@ -231,16 +240,12 @@ async fn main() -> anyhow::Result<()> {
     // When NIGHT24_API_KEY is set, require it on all routes except the public
     // documentation/health endpoints. When unset, the server is open (backwards
     // compatible with local development).
-    let app = if let Ok(api_key) = std::env::var("NIGHT24_API_KEY") {
-        if !api_key.is_empty() {
-            info!("API key authentication enabled");
-            app.layer(axum::middleware::from_fn_with_state(
-                api_key,
-                require_api_key,
-            ))
-        } else {
-            app
-        }
+    let app = if let Some(api_key) = non_empty_env("NIGHT24_API_KEY") {
+        info!("API key authentication enabled");
+        app.layer(axum::middleware::from_fn_with_state(
+            api_key,
+            require_api_key,
+        ))
     } else {
         app
     };
@@ -275,38 +280,26 @@ async fn main() -> anyhow::Result<()> {
 fn build_provider_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new("echo").with_echo();
 
-    if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        if !api_key.is_empty() {
-            let base_url = std::env::var("OPENAI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-            let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
-            registry = registry.with_openai(api_key, base_url, model);
-        }
+    if let Some(api_key) = non_empty_env("OPENAI_API_KEY") {
+        let base_url = env_or_default("OPENAI_BASE_URL", "https://api.openai.com/v1");
+        let model = env_or_default("OPENAI_MODEL", "gpt-4o-mini");
+        registry = registry.with_openai(api_key, base_url, model);
     }
 
-    if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-        if !api_key.is_empty() {
-            let base_url = std::env::var("ANTHROPIC_BASE_URL")
-                .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
-            let model = std::env::var("ANTHROPIC_MODEL")
-                .unwrap_or_else(|_| "claude-3-5-sonnet-latest".to_string());
-            registry = registry.with_anthropic(api_key, base_url, model);
-        }
+    if let Some(api_key) = non_empty_env("ANTHROPIC_API_KEY") {
+        let base_url = env_or_default("ANTHROPIC_BASE_URL", "https://api.anthropic.com");
+        let model = env_or_default("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest");
+        registry = registry.with_anthropic(api_key, base_url, model);
     }
 
-    if let Ok(api_key) = std::env::var("STEPFUN_API_KEY") {
-        if !api_key.is_empty() {
-            let base_url = std::env::var("STEPFUN_BASE_URL")
-                .unwrap_or_else(|_| "https://api.stepfun.com/step_plan/v1".to_string());
-            let model =
-                std::env::var("STEPFUN_MODEL").unwrap_or_else(|_| "step-3.7-flash".to_string());
-            registry = registry.with_stepfun(api_key, base_url, model);
-        }
+    if let Some(api_key) = non_empty_env("STEPFUN_API_KEY") {
+        let base_url = env_or_default("STEPFUN_BASE_URL", "https://api.stepfun.com/step_plan/v1");
+        let model = env_or_default("STEPFUN_MODEL", "step-3.7-flash");
+        registry = registry.with_stepfun(api_key, base_url, model);
     }
 
-    let ollama_base_url =
-        std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2".to_string());
+    let ollama_base_url = env_or_default("OLLAMA_BASE_URL", "http://localhost:11434");
+    let ollama_model = env_or_default("OLLAMA_MODEL", "llama3.2");
     registry = registry.with_ollama(ollama_base_url, ollama_model);
 
     registry
@@ -319,25 +312,24 @@ fn build_provider_registry() -> ProviderRegistry {
 /// - `deny_all`:   every tool denied
 fn build_permission_manager() -> night24_core::permission::PermissionManager {
     use night24_core::permission::{PermissionLevel, PermissionManager};
-    let mode = std::env::var("NIGHT24_PERMISSION_MODE")
-        .unwrap_or_else(|_| "strict".to_string())
-        .to_ascii_lowercase();
-    match mode.as_str() {
-        "permissive" => {
-            info!(permission_mode = %mode, "permission: permissive (read-only allowed)");
+    let mode_value = std::env::var("NIGHT24_PERMISSION_MODE").ok();
+    let mode = PermissionMode::normalize(mode_value.as_deref());
+    match mode {
+        PermissionMode::Permissive => {
+            info!(permission_mode = %mode.as_str(), "permission: permissive (read-only allowed)");
             PermissionManager::permissive_local()
         }
-        "allow_all" | "allow-all" => {
-            info!(permission_mode = %mode, "permission: allow_all (NOT for production)");
+        PermissionMode::AllowAll => {
+            info!(permission_mode = %mode.as_str(), "permission: allow_all (NOT for production)");
             PermissionManager::new(PermissionLevel::Allow)
         }
-        "deny_all" | "deny-all" => {
-            info!(permission_mode = %mode, "permission: deny_all");
+        PermissionMode::DenyAll => {
+            info!(permission_mode = %mode.as_str(), "permission: deny_all");
             PermissionManager::new(PermissionLevel::Deny)
         }
-        _ => {
+        PermissionMode::Strict => {
             info!(
-                permission_mode = "strict",
+                permission_mode = %mode.as_str(),
                 "permission: strict (confirm all)"
             );
             PermissionManager::default()
@@ -636,20 +628,10 @@ async fn agent_cancel(
     {
         match core_client.cancel(run_id.clone(), req.reason.clone()).await {
             Ok(_) => {
-                return Json(AcceptedResponse {
-                    accepted: true,
-                    reason: None,
-                    run_id: Some(run_id),
-                    permission_id: None,
-                });
+                return accepted_response(true, None, Some(run_id), None);
             }
             Err(err) => {
-                return Json(AcceptedResponse {
-                    accepted: false,
-                    reason: Some(err.to_string()),
-                    run_id: Some(run_id),
-                    permission_id: None,
-                });
+                return accepted_response(false, Some(err.to_string()), Some(run_id), None);
             }
         }
     }
@@ -657,12 +639,7 @@ async fn agent_cancel(
         .reason
         .map(|reason| format!("no active core client or run_id: {}", reason))
         .unwrap_or_else(|| "no active core client or run_id".to_string());
-    Json(AcceptedResponse {
-        accepted: false,
-        reason: Some(reason),
-        run_id: req.run_id,
-        permission_id: None,
-    })
+    accepted_response(false, Some(reason), req.run_id, None)
 }
 
 #[utoipa::path(
@@ -682,45 +659,7 @@ async fn approve_permission(
     Path(id): Path<String>,
     Json(req): Json<PermissionDecisionRequest>,
 ) -> Json<AcceptedResponse> {
-    if let (Some(core_client), Some(run_id)) =
-        (current_core_client(&state).await, req.run_id.clone())
-    {
-        match core_client
-            .resolve_permission(
-                run_id.clone(),
-                id.clone(),
-                PermissionDecision::Approve,
-                req.reason.clone(),
-            )
-            .await
-        {
-            Ok(_) => {
-                return Json(AcceptedResponse {
-                    accepted: true,
-                    reason: None,
-                    run_id: Some(run_id),
-                    permission_id: Some(id),
-                });
-            }
-            Err(err) => {
-                return Json(AcceptedResponse {
-                    accepted: false,
-                    reason: Some(err.to_string()),
-                    run_id: Some(run_id),
-                    permission_id: Some(id),
-                });
-            }
-        }
-    }
-    let detail = req
-        .reason
-        .unwrap_or_else(|| "no active core client or run_id".to_string());
-    Json(AcceptedResponse {
-        accepted: false,
-        reason: Some(detail),
-        run_id: req.run_id,
-        permission_id: Some(id),
-    })
+    handle_permission_decision(state, id, req, PermissionDecision::Approve).await
 }
 
 #[utoipa::path(
@@ -740,44 +679,47 @@ async fn deny_permission(
     Path(id): Path<String>,
     Json(req): Json<PermissionDecisionRequest>,
 ) -> Json<AcceptedResponse> {
+    handle_permission_decision(state, id, req, PermissionDecision::Deny).await
+}
+
+async fn handle_permission_decision(
+    state: AppState,
+    id: String,
+    req: PermissionDecisionRequest,
+    decision: PermissionDecision,
+) -> Json<AcceptedResponse> {
     if let (Some(core_client), Some(run_id)) =
         (current_core_client(&state).await, req.run_id.clone())
     {
         match core_client
-            .resolve_permission(
-                run_id.clone(),
-                id.clone(),
-                PermissionDecision::Deny,
-                req.reason.clone(),
-            )
+            .resolve_permission(run_id.clone(), id.clone(), decision, req.reason.clone())
             .await
         {
             Ok(_) => {
-                return Json(AcceptedResponse {
-                    accepted: true,
-                    reason: None,
-                    run_id: Some(run_id),
-                    permission_id: Some(id),
-                });
+                return accepted_response(true, None, Some(run_id), Some(id));
             }
             Err(err) => {
-                return Json(AcceptedResponse {
-                    accepted: false,
-                    reason: Some(err.to_string()),
-                    run_id: Some(run_id),
-                    permission_id: Some(id),
-                });
+                return accepted_response(false, Some(err.to_string()), Some(run_id), Some(id));
             }
         }
     }
     let detail = req
         .reason
         .unwrap_or_else(|| "no active core client or run_id".to_string());
+    accepted_response(false, Some(detail), req.run_id, Some(id))
+}
+
+fn accepted_response(
+    accepted: bool,
+    reason: Option<String>,
+    run_id: Option<String>,
+    permission_id: Option<String>,
+) -> Json<AcceptedResponse> {
     Json(AcceptedResponse {
-        accepted: false,
-        reason: Some(detail),
-        run_id: req.run_id,
-        permission_id: Some(id),
+        accepted,
+        reason,
+        run_id,
+        permission_id,
     })
 }
 #[cfg(test)]
@@ -850,5 +792,39 @@ mod tests {
             sqlite_file_url(PathBuf::from("data\\night24.db")),
             "sqlite:file:data/night24.db?mode=rwc"
         );
+    }
+
+    #[test]
+    fn test_trimmed_non_empty_ignores_blank_values() {
+        assert_eq!(
+            trimmed_non_empty("  data/night24.db  ").as_deref(),
+            Some("data/night24.db")
+        );
+        assert_eq!(trimmed_non_empty(" \t\r\n "), None);
+    }
+
+    #[test]
+    fn test_trimmed_or_default_trims_and_falls_back() {
+        assert_eq!(
+            trimmed_or_default(Some(" https://api.example.com/v1 "), "default"),
+            "https://api.example.com/v1"
+        );
+        assert_eq!(trimmed_or_default(Some(" \t\r\n "), "default"), "default");
+        assert_eq!(trimmed_or_default(None, "default"), "default");
+    }
+
+    #[test]
+    fn test_accepted_response_preserves_optional_ids() {
+        let Json(response) = accepted_response(
+            false,
+            Some("missing core".to_string()),
+            Some("run-1".to_string()),
+            Some("permission-1".to_string()),
+        );
+
+        assert!(!response.accepted);
+        assert_eq!(response.reason.as_deref(), Some("missing core"));
+        assert_eq!(response.run_id.as_deref(), Some("run-1"));
+        assert_eq!(response.permission_id.as_deref(), Some("permission-1"));
     }
 }

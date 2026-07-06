@@ -7,7 +7,7 @@ use std::process::Command;
 use std::process::Stdio;
 
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 /// PTY/子进程的内部状态。
 pub(crate) struct PtyState {
@@ -26,7 +26,8 @@ pub(crate) fn pty_module() -> Object {
 /// pty.spawn(cmd, [args...], [opts]) -> pty 实例
 /// 返回的对象含 read/readLine/readText/readTextTimeout/write/writeln/kill/wait/tryWait/resize/close 方法。
 fn pty_spawn(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let cmd_name = match required_string(ctx, "pty.spawn", args, 0, "command") {
+    let reader = ArgReader::new(ctx, "pty.spawn", args);
+    let cmd_name = match reader.required_string(0, "command") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -84,7 +85,7 @@ fn pty_spawn(ctx: &mut CallContext, args: &[Object]) -> Object {
         rows: std::cell::Cell::new(rows),
     });
 
-    let pty_obj = Rc::new(RefCell::new(HashData::default()));
+    let pty_obj = ObjectBuilder::new().into_shared();
 
     // read() -> string（读取当前可用的 stdout 输出，非阻塞式：读到 EOF 或无数据）
     let s = state.clone();
@@ -235,7 +236,8 @@ pub(crate) fn pty_write(
     state: &Rc<PtyState>,
     append_newline: bool,
 ) -> Object {
-    let text = match required_string(ctx, "pty.write", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "pty.write", args);
+    let text = match reader.required_string(0, "text") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -288,26 +290,22 @@ pub(crate) fn pty_try_wait(ctx: &mut CallContext, state: &Rc<PtyState>) -> Objec
         Ok(status) => status,
         Err(e) => return new_error(ctx.pos.clone(), format!("pty.tryWait: {e}")),
     };
-    let hash = Rc::new(RefCell::new(HashData::default()));
     match status {
-        Some(status) => {
-            hash.borrow_mut().set("running", bool_obj(false));
-            hash.borrow_mut()
-                .set("exitCode", num_obj(status.code().unwrap_or(0) as f64));
-        }
-        None => {
-            hash.borrow_mut().set("running", bool_obj(true));
-        }
+        Some(status) => ObjectBuilder::new()
+            .set("running", bool_obj(false))
+            .set("exitCode", num_obj(status.code().unwrap_or(0) as f64))
+            .build(),
+        None => ObjectBuilder::new().set("running", bool_obj(true)).build(),
     }
-    Object::Hash(hash)
 }
 
 pub(crate) fn pty_resize(ctx: &mut CallContext, args: &[Object], state: &Rc<PtyState>) -> Object {
-    let cols = match required_number(ctx, "pty.resize", args, 0, "cols") {
+    let reader = ArgReader::new(ctx, "pty.resize", args);
+    let cols = match reader.required_number(0, "cols") {
         Ok(n) => n as u32,
         Err(e) => return e,
     };
-    let rows = match required_number(ctx, "pty.resize", args, 1, "rows") {
+    let rows = match reader.required_number(1, "rows") {
         Ok(n) => n as u32,
         Err(e) => return e,
     };

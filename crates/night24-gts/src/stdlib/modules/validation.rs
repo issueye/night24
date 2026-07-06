@@ -41,7 +41,8 @@ pub(crate) fn validation_required(_ctx: &mut CallContext, args: &[Object]) -> Ob
 }
 
 pub(crate) fn validation_type(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let expected = match required_string(ctx, "validation.type", args, 1, "type") {
+    let reader = ArgReader::new(ctx, "validation.type", args);
+    let expected = match reader.required_string(1, "type") {
         Ok(expected) => expected,
         Err(err) => return err,
     };
@@ -53,14 +54,16 @@ pub(crate) fn validation_type(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn validation_email(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "validation.email", args, 0, "value") {
+    let reader = ArgReader::new(ctx, "validation.email", args);
+    match reader.required_string(0, "value") {
         Ok(value) => bool_obj(is_email(&value)),
         Err(err) => err,
     }
 }
 
 pub(crate) fn validation_min(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let min = match required_number(ctx, "validation.min", args, 1, "min") {
+    let reader = ArgReader::new(ctx, "validation.min", args);
+    let min = match reader.required_number(1, "min") {
         Ok(min) => min,
         Err(err) => return err,
     };
@@ -72,7 +75,8 @@ pub(crate) fn validation_min(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn validation_max(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let max = match required_number(ctx, "validation.max", args, 1, "max") {
+    let reader = ArgReader::new(ctx, "validation.max", args);
+    let max = match reader.required_number(1, "max") {
         Ok(max) => max,
         Err(err) => return err,
     };
@@ -203,3 +207,131 @@ pub(crate) fn value_at_most(value: &Object, max: f64) -> bool {
 // ---------------------------------------------------------------------------
 // serde_json::Value <-> Object bridge (shared by the codec modules).
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Position;
+    use crate::object::{num_obj, Environment, VirtualMachine};
+
+    fn test_context(env: &crate::object::EnvRef) -> CallContext<'_> {
+        CallContext::new(env, Position::default())
+    }
+
+    fn assert_bool(value: Object, expected: bool) {
+        match value {
+            Object::Boolean(actual) => assert_eq!(actual, expected),
+            other => panic!("expected boolean {expected}, got {}", other.inspect()),
+        }
+    }
+
+    fn array_obj(elements: Vec<Object>) -> Object {
+        array(elements)
+    }
+
+    #[test]
+    fn email_validates_strings_and_requires_value() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+
+        assert_bool(
+            validation_email(&mut ctx, &[str_obj("agent@night24.dev")]),
+            true,
+        );
+        assert_bool(
+            validation_email(&mut ctx, &[str_obj("agent@night24")]),
+            false,
+        );
+        assert!(matches!(validation_email(&mut ctx, &[]), Object::Error(_)));
+    }
+
+    #[test]
+    fn type_missing_value_is_false_but_type_argument_is_required() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+
+        assert_bool(
+            validation_type(&mut ctx, &[Object::Undefined, str_obj("string")]),
+            false,
+        );
+        assert_bool(
+            validation_type(&mut ctx, &[str_obj("night24"), str_obj("string")]),
+            true,
+        );
+        assert!(matches!(
+            validation_type(&mut ctx, &[str_obj("night24")]),
+            Object::Error(_)
+        ));
+    }
+
+    #[test]
+    fn min_checks_string_array_lengths_and_numbers() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+
+        assert_bool(
+            validation_min(&mut ctx, &[str_obj("night"), num_obj(5.0)]),
+            true,
+        );
+        assert_bool(
+            validation_min(&mut ctx, &[str_obj("gts"), num_obj(5.0)]),
+            false,
+        );
+        assert_bool(
+            validation_min(
+                &mut ctx,
+                &[array_obj(vec![num_obj(1.0), num_obj(2.0)]), num_obj(2.0)],
+            ),
+            true,
+        );
+        assert_bool(
+            validation_min(&mut ctx, &[num_obj(24.0), num_obj(10.0)]),
+            true,
+        );
+        assert_bool(
+            validation_min(&mut ctx, &[num_obj(3.0), num_obj(10.0)]),
+            false,
+        );
+        assert!(matches!(
+            validation_min(&mut ctx, &[num_obj(3.0)]),
+            Object::Error(_)
+        ));
+    }
+
+    #[test]
+    fn max_checks_string_array_lengths_and_numbers() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+
+        assert_bool(
+            validation_max(&mut ctx, &[str_obj("gts"), num_obj(3.0)]),
+            true,
+        );
+        assert_bool(
+            validation_max(&mut ctx, &[str_obj("night"), num_obj(3.0)]),
+            false,
+        );
+        assert_bool(
+            validation_max(
+                &mut ctx,
+                &[
+                    array_obj(vec![num_obj(1.0), num_obj(2.0), num_obj(3.0)]),
+                    num_obj(2.0),
+                ],
+            ),
+            false,
+        );
+        assert_bool(
+            validation_max(&mut ctx, &[num_obj(10.0), num_obj(24.0)]),
+            true,
+        );
+        assert_bool(
+            validation_max(&mut ctx, &[num_obj(30.0), num_obj(24.0)]),
+            false,
+        );
+        assert!(matches!(
+            validation_max(&mut ctx, &[num_obj(30.0)]),
+            Object::Error(_)
+        ));
+    }
+}

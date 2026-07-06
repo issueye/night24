@@ -21,11 +21,10 @@ pub(crate) fn schema_validate(ctx: &mut CallContext, args: &[Object]) -> Object 
         Err(e) => return new_error(ctx.pos.clone(), e),
     };
     let valid = errors.is_empty();
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("valid", bool_obj(valid));
-    hash.borrow_mut()
-        .set("errors", array(errors.into_iter().map(str_obj).collect()));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("valid", bool_obj(valid))
+        .set("errors", array(errors.into_iter().map(str_obj).collect()))
+        .build()
 }
 
 pub(crate) fn schema_assert(ctx: &mut CallContext, args: &[Object]) -> Object {

@@ -80,7 +80,7 @@ fn timers_clear(_ctx: &mut CallContext, _args: &[Object]) -> Object {
 /// queueMicrotask runs the callback immediately on the current thread.
 fn timers_queue_microtask(ctx: &mut CallContext, args: &[Object]) -> Object {
     let callback = match args.first() {
-        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => args[0].clone(),
+        Some(value) if is_callable(value) => value.clone(),
         _ => return Object::Undefined,
     };
     let _ = crate::evaluator::expressions::apply_function(

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{new_error, str_obj, ArrayData, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, ArrayData, CallContext, Object};
 
 /// Best-effort Ctrl+C handler that flips a shutdown flag. Cross-platform via
 /// the OS signal API. If a handler is already installed (e.g. another listen),
@@ -128,7 +128,7 @@ fn signal_notify(ctx: &mut CallContext, args: &[Object]) -> Object {
         Err(e) => return e,
     };
     let sigs = signals.clone();
-    let watcher = Rc::new(RefCell::new(HashData::default()));
+    let watcher = ObjectBuilder::new().into_shared();
 
     // wait 方法：复用 signal_wait 的阻塞逻辑。
     let sigs2 = sigs.clone();
@@ -154,7 +154,8 @@ fn signal_notify(ctx: &mut CallContext, args: &[Object]) -> Object {
 
 /// signal.send(pid, [signal]) -> 向进程发送信号。
 fn signal_send(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let pid = match required_number(ctx, "signal.send", args, 0, "pid") {
+    let reader = ArgReader::new(ctx, "signal.send", args);
+    let pid = match reader.required_number(0, "pid") {
         Ok(n) => n as i32,
         Err(e) => return e,
     };
@@ -225,16 +226,14 @@ fn parse_signal_options(
     if args.is_empty() || matches!(args.first(), Some(Object::Null | Object::Undefined)) {
         return Ok((default, None));
     }
+    let reader = ArgReader::new(ctx, name, args);
     // 对象形式 { signals, timeoutMs }
-    if let Some(Object::Hash(opts)) = args.first() {
-        let signals = match opts.borrow().get("signals") {
-            Some(arr) => signal_names_from_object(arr),
-            None => default,
-        };
-        let timeout_ms = match opts.borrow().get("timeoutMs") {
-            Some(Object::Number(n)) => Some(*n as u64),
-            _ => None,
-        };
+    if let Some(opts) = reader.object_view(0) {
+        let view = ObjectView::new(&opts);
+        let signals = view
+            .object("signals")
+            .map_or(default, |arr| signal_names_from_object(&arr));
+        let timeout_ms = view.number("timeoutMs").map(|n| n as u64);
         return Ok((signals, timeout_ms));
     }
     // 位置形式 (signals, timeoutMs)
@@ -246,8 +245,6 @@ fn parse_signal_options(
         Some(Object::Number(n)) => Some(*n as u64),
         _ => None,
     };
-    let _ = ctx;
-    let _ = name;
     Ok((signals, timeout_ms))
 }
 

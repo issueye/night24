@@ -2,58 +2,8 @@ import { Plus, RefreshCw, Save, Trash2, Workflow } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { normalizeError } from '../../utils/events.js';
 import { classNames } from '../../utils/format.js';
-
-const EVENTS = [
-  'run_started',
-  'before_provider_request',
-  'before_tool',
-  'after_tool',
-  'permission_required',
-  'run_finished',
-  'run_failed',
-];
-
-function createHook(overrides = {}) {
-  return {
-    id: overrides.id || `hook-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    event: overrides.event || 'before_tool',
-    name: overrides.name || 'hook',
-    engine: 'gts',
-    script: overrides.script || '',
-    inline_script: overrides.inline_script || '',
-    enabled: overrides.enabled ?? true,
-    timeout_ms: overrides.timeout_ms ?? 5000,
-    instruction_limit: overrides.instruction_limit ?? 1000000,
-  };
-}
-
-function normalizeHook(item, index) {
-  return createHook({
-    id: item?.id || `hook-${index}-${Date.now()}`,
-    event: EVENTS.includes(item?.event) ? item.event : undefined,
-    name: item?.name,
-    script: item?.script,
-    inline_script: item?.inline_script,
-    enabled: item?.enabled,
-    timeout_ms: item?.timeout_ms,
-    instruction_limit: item?.instruction_limit,
-  });
-}
-
-function toConfig(hooks) {
-  return {
-    hooks: hooks.map(({ id, ...hook }) => ({
-      ...hook,
-      engine: 'gts',
-      event: EVENTS.includes(hook.event) ? hook.event : 'before_tool',
-      name: hook.name?.trim() || undefined,
-      script: hook.script?.trim() || undefined,
-      inline_script: hook.inline_script?.trim() || undefined,
-      timeout_ms: Number.parseInt(String(hook.timeout_ms || ''), 10) || undefined,
-      instruction_limit: Number.parseInt(String(hook.instruction_limit || ''), 10) || undefined,
-    })),
-  };
-}
+import { HOOK_EVENTS, createHook, hooksToConfig, normalizeHook } from '../../utils/hooks.js';
+import { SettingsListDetail } from './SettingsListDetail.jsx';
 
 export function HookSettings({ apiJson, workspace }) {
   const [hooks, setHooks] = useState([]);
@@ -125,7 +75,7 @@ export function HookSettings({ apiJson, workspace }) {
     try {
       const data = await apiJson('/workspace/hooks', {
         method: 'PUT',
-        body: JSON.stringify(toConfig(hooks)),
+        body: JSON.stringify(hooksToConfig(hooks)),
       });
       const nextHooks = (data?.config?.hooks || []).map(normalizeHook);
       setHooks(nextHooks);
@@ -150,20 +100,23 @@ export function HookSettings({ apiJson, workspace }) {
   }
 
   return (
-    <div className="hook-manager">
-      <aside className="provider-list hook-list" aria-label="钩子列表">
-        <div className="provider-list-head">
-          <strong>钩子</strong>
-          <div className="hook-list-actions">
-            <button className="icon-button compact" disabled={loading} onClick={loadHooks} title="重新加载" type="button">
-              <RefreshCw size={14} />
-            </button>
-            <button className="icon-button compact" onClick={addHook} title="新增钩子" type="button">
-              <Plus size={14} />
-            </button>
-          </div>
+    <SettingsListDetail
+      managerClassName="hook-manager"
+      listClassName="hook-list"
+      listLabel="钩子列表"
+      listTitle="钩子"
+      listActions={(
+        <div className="hook-list-actions">
+          <button className="icon-button compact" disabled={loading} onClick={loadHooks} title="重新加载" type="button">
+            <RefreshCw size={14} />
+          </button>
+          <button className="icon-button compact" onClick={addHook} title="新增钩子" type="button">
+            <Plus size={14} />
+          </button>
         </div>
-        <div className="provider-list-scroll">
+      )}
+      listChildren={(
+        <>
           {hooks.length === 0 && <div className="hook-list-empty">暂无钩子</div>}
           {hooks.map((hook) => (
             <button
@@ -176,10 +129,10 @@ export function HookSettings({ apiJson, workspace }) {
               <span>{hook.event} · {hook.enabled ? '启用' : '停用'}</span>
             </button>
           ))}
-        </div>
-      </aside>
-
-      <div className="hook-editor">
+        </>
+      )}
+      detailClassName="hook-editor"
+    >
         <div className="hook-toolbar">
           <span>{loading ? '加载中' : configPath || '.night24/hooks.json'}</span>
           <div>
@@ -206,7 +159,7 @@ export function HookSettings({ apiJson, workspace }) {
             <label>
               <span>事件</span>
               <select value={activeHook.event} onChange={(event) => updateActive({ event: event.target.value })}>
-                {EVENTS.map((event) => (
+                {HOOK_EVENTS.map((event) => (
                   <option key={event} value={event}>{event}</option>
                 ))}
               </select>
@@ -243,6 +196,24 @@ export function HookSettings({ apiJson, workspace }) {
                 type="checkbox"
               />
             </label>
+            <label className="hook-toggle">
+              <span>模块白名单</span>
+              <input
+                checked={Boolean(activeHook.allowed_modules_enabled)}
+                onChange={(event) => updateActive({ allowed_modules_enabled: event.target.checked })}
+                type="checkbox"
+              />
+            </label>
+            <label className="hook-code-field">
+              <span>允许模块</span>
+              <textarea
+                disabled={!activeHook.allowed_modules_enabled}
+                spellCheck="false"
+                value={activeHook.allowed_modules_text}
+                onChange={(event) => updateActive({ allowed_modules_text: event.target.value })}
+                placeholder={'fs\n@std/exec'}
+              />
+            </label>
             <label className="hook-code-field">
               <span>内联脚本</span>
               <textarea
@@ -260,7 +231,6 @@ export function HookSettings({ apiJson, workspace }) {
             <span>新增一个钩子后开始配置。</span>
           </div>
         )}
-      </div>
-    </div>
+    </SettingsListDetail>
   );
 }

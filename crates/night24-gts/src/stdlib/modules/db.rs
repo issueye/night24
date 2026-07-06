@@ -1,8 +1,7 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) const DB_STATE_KEY: &str = "__db_conn__";
 
@@ -17,11 +16,12 @@ pub(crate) fn db_module() -> Object {
 }
 
 pub(crate) fn db_open(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let driver = match required_string(ctx, "db.open", args, 0, "driver") {
+    let reader = ArgReader::new(ctx, "db.open", args);
+    let driver = match reader.required_string(0, "driver") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let dsn = match required_string(ctx, "db.open", args, 1, "dsn") {
+    let dsn = match reader.required_string(1, "dsn") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -44,15 +44,12 @@ pub(crate) fn db_open(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn db_connection_object(conn: DbConn, driver: String, dsn: String) -> Object {
-    let obj = Rc::new(RefCell::new(HashData::default()));
     // Sentinel marker so callers can identify a connection handle if needed.
-    obj.borrow_mut().set(
-        DB_STATE_KEY,
-        Object::Hash(Rc::new(RefCell::new(HashData::default()))),
-    );
-
-    obj.borrow_mut().set("driver", str_obj(driver.clone()));
-    obj.borrow_mut().set("dsn", str_obj(dsn.clone()));
+    let obj = ObjectBuilder::new()
+        .set(DB_STATE_KEY, ObjectBuilder::new().build())
+        .set("driver", str_obj(driver.clone()))
+        .set("dsn", str_obj(dsn.clone()))
+        .into_shared();
 
     let c = conn.clone();
     obj.borrow_mut().set(
@@ -107,7 +104,8 @@ pub(crate) fn db_query_args(
     name: &str,
     args: &[Object],
 ) -> Result<(String, Vec<RusqlParam>), Object> {
-    let query = required_string(ctx, name, args, 0, "query")?;
+    let reader = ArgReader::new(ctx, name, args);
+    let query = reader.required_string(0, "query")?;
     let mut params = Vec::new();
     if let Some(arg) = args.get(1) {
         if let Object::Array(arr) = arg {
@@ -171,13 +169,10 @@ pub(crate) fn db_exec(ctx: &mut CallContext, conn: &DbConn, args: &[Object]) -> 
     let refs = to_sql_refs(&params);
     let result = unsafe { conn_ref(conn).execute(&query, refs.as_slice()) };
     match result {
-        Ok(affected) => {
-            let out = Rc::new(RefCell::new(HashData::default()));
-            out.borrow_mut()
-                .set("rowsAffected", num_obj(affected as f64));
-            out.borrow_mut().set("lastInsertId", num_obj(0.0));
-            Object::Hash(out)
-        }
+        Ok(affected) => ObjectBuilder::new()
+            .set("rowsAffected", num_obj(affected as f64))
+            .set("lastInsertId", num_obj(0.0))
+            .build(),
         Err(e) => new_error(ctx.pos.clone(), format!("db.exec: {}", e)),
     }
 }
@@ -208,7 +203,7 @@ pub(crate) fn db_query(ctx: &mut CallContext, conn: &DbConn, args: &[Object]) ->
 
 pub(crate) fn row_to_hash(row: &rusqlite::Row<'_>) -> rusqlite::Result<Object> {
     let col_count = row.as_ref().column_count();
-    let mut h = HashData::default();
+    let mut builder = ObjectBuilder::new();
     for i in 0..col_count {
         let name = row.as_ref().column_name(i)?.to_string();
         let value: rusqlite::types::Value = row.get(i).unwrap_or(rusqlite::types::Value::Null);
@@ -219,9 +214,9 @@ pub(crate) fn row_to_hash(row: &rusqlite::Row<'_>) -> rusqlite::Result<Object> {
             rusqlite::types::Value::Text(s) => str_obj(s),
             rusqlite::types::Value::Blob(b) => str_obj(String::from_utf8_lossy(&b).to_string()),
         };
-        h.set(name, obj);
+        builder.insert(name, obj);
     }
-    Ok(Object::Hash(Rc::new(RefCell::new(h))))
+    Ok(builder.build())
 }
 
 pub(crate) fn db_query_one(ctx: &mut CallContext, conn: &DbConn, args: &[Object]) -> Object {
@@ -240,7 +235,8 @@ pub(crate) fn db_query_one(ctx: &mut CallContext, conn: &DbConn, args: &[Object]
 }
 
 pub(crate) fn db_prepare(ctx: &mut CallContext, conn: &DbConn, args: &[Object]) -> Object {
-    let query = match required_string(ctx, "db.prepare", args, 0, "query") {
+    let reader = ArgReader::new(ctx, "db.prepare", args);
+    let query = match reader.required_string(0, "query") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -248,7 +244,7 @@ pub(crate) fn db_prepare(ctx: &mut CallContext, conn: &DbConn, args: &[Object]) 
     // gymnastics; provide a lightweight prepared-statement facade that re-parses
     // per call. Behaviourally equivalent for the synchronous VM.
     let conn_clone = conn.clone();
-    let stmt_obj = Rc::new(RefCell::new(HashData::default()));
+    let stmt_obj = ObjectBuilder::new().into_shared();
     let q = query.clone();
     let c = conn_clone.clone();
     stmt_obj.borrow_mut().set(
@@ -265,11 +261,9 @@ pub(crate) fn db_prepare(ctx: &mut CallContext, conn: &DbConn, args: &[Object]) 
             };
             let refs = to_sql_refs(&params);
             match unsafe { conn_ref(&c).execute(&q, refs.as_slice()) } {
-                Ok(n) => {
-                    let out = Rc::new(RefCell::new(HashData::default()));
-                    out.borrow_mut().set("rowsAffected", num_obj(n as f64));
-                    Object::Hash(out)
-                }
+                Ok(n) => ObjectBuilder::new()
+                    .set("rowsAffected", num_obj(n as f64))
+                    .build(),
                 Err(e) => new_error(ctx.pos.clone(), format!("db.stmt.exec: {}", e)),
             }
         }),
@@ -357,7 +351,7 @@ pub(crate) fn db_begin(ctx: &mut CallContext, conn: &DbConn) -> Object {
     if let Err(e) = res {
         return new_error(ctx.pos.clone(), format!("db.begin: {}", e));
     }
-    let tx_obj = Rc::new(RefCell::new(HashData::default()));
+    let tx_obj = ObjectBuilder::new().into_shared();
     let c = conn.clone();
     tx_obj.borrow_mut().set(
         "exec",

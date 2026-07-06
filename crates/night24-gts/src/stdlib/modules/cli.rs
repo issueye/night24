@@ -116,9 +116,7 @@ pub(crate) fn cli_apply_options(
     }
     if let Some(run) = hash.get("run").or_else(|| hash.get("Run")) {
         match run {
-            Object::Function(_) | Object::Builtin(_) | Object::Closure(_) => {
-                cmd_mut.run = Some(run.clone());
-            }
+            value if is_callable(value) => cmd_mut.run = Some(run.clone()),
             Object::Undefined | Object::Null => {}
             _ => {
                 return Err(new_error(
@@ -216,7 +214,8 @@ pub(crate) fn cli_command_object(cmd: Rc<RefCell<CliCommand>>) -> Object {
         (
             "flag",
             native("cli.Command.flag", move |ctx, args| {
-                let name = match required_string(ctx, "cli.Command.flag", args, 0, "name") {
+                let reader = ArgReader::new(ctx, "cli.Command.flag", args);
+                let name = match reader.required_string(0, "name") {
                     Ok(name) => name,
                     Err(err) => return err,
                 };
@@ -263,7 +262,8 @@ pub(crate) fn cli_flag_set_object(set: Rc<RefCell<CliFlagSet>>) -> Object {
         (
             "get",
             native("cli.FlagSet.get", move |ctx, args| {
-                let name = match required_string(ctx, "cli.FlagSet.get", args, 0, "name") {
+                let reader = ArgReader::new(ctx, "cli.FlagSet.get", args);
+                let name = match reader.required_string(0, "name") {
                     Ok(name) => name,
                     Err(err) => return err,
                 };
@@ -278,7 +278,8 @@ pub(crate) fn cli_flag_set_object(set: Rc<RefCell<CliFlagSet>>) -> Object {
         (
             "changed",
             native("cli.FlagSet.changed", move |ctx, args| {
-                let name = match required_string(ctx, "cli.FlagSet.changed", args, 0, "name") {
+                let reader = ArgReader::new(ctx, "cli.FlagSet.changed", args);
+                let name = match reader.required_string(0, "name") {
                     Ok(name) => name,
                     Err(err) => return err,
                 };
@@ -299,7 +300,9 @@ pub(crate) fn cli_flag_add(
     kind: &str,
     args: &[Object],
 ) -> Object {
-    let name = match required_string(ctx, &format!("cli.FlagSet.{}", kind), args, 0, "name") {
+    let module = format!("cli.FlagSet.{}", kind);
+    let reader = ArgReader::new(ctx, &module, args);
+    let name = match reader.required_string(0, "name") {
         Ok(name) => name,
         Err(err) => return err,
     };
@@ -696,32 +699,36 @@ pub(crate) fn cli_arbitrary_args(_ctx: &mut CallContext, _args: &[Object]) -> Ob
 }
 
 pub(crate) fn cli_exact_args(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_number(ctx, "cli.exactArgs", args, 0, "n") {
+    let reader = ArgReader::new(ctx, "cli.exactArgs", args);
+    match reader.required_number(0, "n") {
         Ok(n) => cli_validator_object("exact", n as usize, n as usize),
         Err(err) => err,
     }
 }
 
 pub(crate) fn cli_min_args(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_number(ctx, "cli.minArgs", args, 0, "n") {
+    let reader = ArgReader::new(ctx, "cli.minArgs", args);
+    match reader.required_number(0, "n") {
         Ok(n) => cli_validator_object("min", n as usize, usize::MAX),
         Err(err) => err,
     }
 }
 
 pub(crate) fn cli_max_args(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_number(ctx, "cli.maxArgs", args, 0, "n") {
+    let reader = ArgReader::new(ctx, "cli.maxArgs", args);
+    match reader.required_number(0, "n") {
         Ok(n) => cli_validator_object("max", 0, n as usize),
         Err(err) => err,
     }
 }
 
 pub(crate) fn cli_range_args(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let min = match required_number(ctx, "cli.rangeArgs", args, 0, "min") {
+    let reader = ArgReader::new(ctx, "cli.rangeArgs", args);
+    let min = match reader.required_number(0, "min") {
         Ok(min) => min as usize,
         Err(err) => return err,
     };
-    let max = match required_number(ctx, "cli.rangeArgs", args, 1, "max") {
+    let max = match reader.required_number(1, "max") {
         Ok(max) => max as usize,
         Err(err) => return err,
     };

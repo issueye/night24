@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn markdown_module() -> Object {
     module(vec![
@@ -20,7 +20,8 @@ pub(crate) fn markdown_module() -> Object {
 }
 
 pub(crate) fn markdown_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let source = match required_string(ctx, "markdown.parse", args, 0, "source") {
+    let reader = ArgReader::new(ctx, "markdown.parse", args);
+    let source = match reader.required_string(0, "source") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -28,24 +29,20 @@ pub(crate) fn markdown_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn markdown_render_terminal(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let source = match required_string(ctx, "markdown.renderTerminal", args, 0, "source") {
+    let reader = ArgReader::new(ctx, "markdown.renderTerminal", args);
+    let source = match reader.required_string(0, "source") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let width = match args.get(1) {
-        Some(Object::Hash(_)) => {
-            let w = hash_bool_arg(args.get(1), "width");
-            let _ = w;
-            match args.get(1) {
-                Some(Object::Hash(h)) => match h.borrow().get("width") {
-                    Some(Object::Number(n)) if *n >= 1.0 => *n as usize,
-                    _ => 80,
-                },
-                _ => 80,
-            }
-        }
-        _ => 80,
-    };
+    let width = reader
+        .object_view(1)
+        .and_then(|opts| {
+            ObjectView::new(&opts)
+                .number("width")
+                .filter(|value| *value >= 1.0)
+                .map(|value| value as usize)
+        })
+        .unwrap_or(80);
     let normalized: String = source.replace("\r\n", "\n").replace('\r', "\n");
     let lines: Vec<&str> = normalized.lines().collect();
     let mut out_lines: Vec<Object> = Vec::new();
@@ -65,16 +62,17 @@ pub(crate) fn markdown_render_terminal(ctx: &mut CallContext, args: &[Object]) -
             out_lines.push(str_obj(trimmed.to_string()));
         }
     }
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("lines", array(out_lines));
-    hash.borrow_mut().set("width", num_obj(width as f64));
-    hash.borrow_mut().set("headings", array(headings));
-    hash.borrow_mut().set("links", array(Vec::new()));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("lines", array(out_lines))
+        .set("width", num_obj(width as f64))
+        .set("headings", array(headings))
+        .set("links", array(Vec::new()))
+        .build()
 }
 
 pub(crate) fn markdown_create_stream(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let source = match required_string(ctx, "markdown.createStream", args, 0, "source") {
+    let reader = ArgReader::new(ctx, "markdown.createStream", args);
+    let source = match reader.required_string(0, "source") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -85,10 +83,10 @@ pub(crate) fn markdown_create_stream(ctx: &mut CallContext, args: &[Object]) -> 
 /// Types: "heading" (text includes the heading content), "paragraph",
 /// "list_item", "code_fence", "hr". EOF is signalled by `next()` returning null.
 fn md_token(kind: &str, text: &str) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("type", str_obj(kind));
-    hash.borrow_mut().set("text", str_obj(text));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("type", str_obj(kind))
+        .set("text", str_obj(text))
+        .build()
 }
 
 /// Build a streaming token reader over markdown source.
@@ -150,10 +148,9 @@ pub(crate) fn build_markdown_token_stream(source: String) -> Object {
     let tokens_obj: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(tokens));
     let cursor: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
 
-    let reader = Rc::new(RefCell::new(HashData::default()));
-    reader
-        .borrow_mut()
-        .set("count", num_obj(tokens_obj.borrow().len() as f64));
+    let reader = ObjectBuilder::new()
+        .set("count", num_obj(tokens_obj.borrow().len() as f64))
+        .into_shared();
 
     // .index — live cursor position (re-read each access via a getter closure).
     {
@@ -213,7 +210,8 @@ pub(crate) fn build_markdown_token_stream(source: String) -> Object {
 }
 
 pub(crate) fn markdown_from_html(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let html = match required_string(ctx, "markdown.fromHTML", args, 0, "html") {
+    let reader = ArgReader::new(ctx, "markdown.fromHTML", args);
+    let html = match reader.required_string(0, "html") {
         Ok(v) => v,
         Err(e) => return e,
     };

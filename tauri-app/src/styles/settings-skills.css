@@ -1,0 +1,254 @@
+.skill-manager {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.skill-list {
+  grid-template-rows: 34px auto minmax(0, 1fr);
+}
+
+.skill-filter {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.skill-filter label {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.skill-filter input,
+.skill-filter select {
+  min-width: 0;
+  height: 30px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.skill-filter select {
+  padding: 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.skill-row.success strong {
+  color: var(--text);
+}
+
+.skill-row.error strong {
+  color: var(--red);
+}
+
+.skill-row.muted {
+  opacity: 0.58;
+}
+
+.skill-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.skill-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skill-summary > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.skill-summary span {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.skill-summary strong {
+  font-size: 16px;
+}
+
+.skill-inspector {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.skill-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.skill-inspector-head > div:first-child {
+  min-width: 0;
+}
+
+.skill-inspector-head strong,
+.skill-inspector-head span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-inspector-head strong {
+  font-size: 15px;
+}
+
+.skill-inspector-head span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.skill-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.skill-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.skill-status.success {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: #bbf7d0;
+}
+
+.skill-status.error {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: #fecaca;
+}
+
+.skill-status.muted {
+  color: var(--subtle);
+  background: var(--surface-soft);
+}
+
+.skill-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.skill-meta-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.skill-meta-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.skill-meta-grid span {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.skill-meta-grid input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+}
+
+.skill-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-missing span {
+  padding: 4px 7px;
+  color: var(--red);
+  background: var(--red-soft);
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.skill-body-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.skill-body-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-body {
+  flex: 1;
+  min-height: 120px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: var(--text);
+  background: #fbfcff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}

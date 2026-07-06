@@ -1,9 +1,7 @@
-use std::cell::RefCell;
 use std::fs;
-use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn csv_module() -> Object {
     module(vec![
@@ -125,7 +123,8 @@ pub(crate) fn csv_single_char(
 }
 
 pub(crate) fn csv_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "csv.parse", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "csv.parse", args);
+    let text = match reader.required_string(0, "text") {
         Ok(text) => text,
         Err(err) => return err,
     };
@@ -242,14 +241,14 @@ pub(crate) fn csv_records_to_object(records: Vec<Vec<String>>, header: bool) -> 
     };
     let mut rows = Vec::new();
     for record in records.iter().skip(1) {
-        let hash = Rc::new(RefCell::new(HashData::default()));
+        let mut row = ObjectBuilder::new();
         for (idx, key) in headers.iter().enumerate() {
-            hash.borrow_mut().set(
+            row.insert(
                 key.clone(),
                 str_obj(record.get(idx).cloned().unwrap_or_default()),
             );
         }
-        rows.push(Object::Hash(hash));
+        rows.push(row.build());
     }
     array(rows)
 }
@@ -355,7 +354,8 @@ pub(crate) fn csv_escape_field(field: &str, comma: char) -> String {
 }
 
 pub(crate) fn csv_read_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "csv.readFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "csv.readFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -373,7 +373,8 @@ pub(crate) fn csv_read_file_sync(ctx: &mut CallContext, args: &[Object]) -> Obje
 }
 
 pub(crate) fn csv_write_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "csv.writeFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "csv.writeFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -389,6 +390,52 @@ pub(crate) fn csv_write_file_sync(ctx: &mut CallContext, args: &[Object]) -> Obj
     match fs::write(&path, object_to_text(&text)) {
         Ok(_) => Object::Undefined,
         Err(e) => new_error(ctx.pos.clone(), format!("csv.writeFileSync: {}", e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_options() -> CsvOptions {
+        CsvOptions {
+            header: true,
+            comma: ',',
+            comment: None,
+            fields_per_record: 0,
+            trim_leading_space: false,
+        }
+    }
+
+    #[test]
+    fn parse_csv_records_handles_quoted_fields() {
+        let records = parse_csv_records(
+            "name,note\nAlice,\"hello, \"\"night\"\"\"\n",
+            &default_options(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            records,
+            vec![
+                vec!["name".to_string(), "note".to_string()],
+                vec!["Alice".to_string(), "hello, \"night\"".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn write_csv_records_escapes_quoted_fields() {
+        let records = vec![vec![
+            "name".to_string(),
+            "hello, \"night\"".to_string(),
+            "line\nbreak".to_string(),
+        ]];
+
+        assert_eq!(
+            write_csv_records(&records, ','),
+            "name,\"hello, \"\"night\"\"\",\"line\nbreak\"\n"
+        );
     }
 }
 

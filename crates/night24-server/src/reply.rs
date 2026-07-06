@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,13 +20,14 @@ use night24_core::{
     context_mgmt::{CompactionResult, ContextManager},
     model::{ContentBlock, Message, Role},
     provider::ModelConfig,
-    session::SessionType,
+    session::{Session, SessionType},
 };
 use night24_protocol::{
-    ProviderConfig, ReplyInput, ReplyLimits, ReplyOptions, ReplyParams, ReplySession,
+    normalize_permission_mode, ProviderConfig, ReplyInput, ReplyLimits, ReplyOptions, ReplyParams,
+    ReplySession,
 };
 
-use crate::api_types::ReplyRequest;
+use crate::api_types::{ReplyRequest, WorkspaceChangeSnapshot};
 use crate::state::AppState;
 use crate::workspace::{build_diff_ready_event, current_workspace_path, workspace_change_snapshot};
 
@@ -40,82 +42,249 @@ pub(crate) async fn reply_core(
         }
     };
 
-    let mut session = if let Some(session_id) = req.session_id.clone() {
-        match state.session_manager.get(&session_id).await {
-            Ok(Some(existing)) => existing,
-            Ok(None) => {
-                return (
-                    axum::http::StatusCode::BAD_REQUEST,
-                    Json(
-                        serde_json::json!({"error": format!("session not found: {}", session_id)}),
-                    ),
-                )
-                    .into_response();
-            }
-            Err(err) => {
-                return (
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": format!("failed to load session: {err}")})),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        let working_dir = current_workspace_path(&state)
-            .await
-            .unwrap_or_else(|| PathBuf::from("."));
-        match state
-            .session_manager
-            .create("session", working_dir, SessionType::User)
-            .await
-        {
-            Ok(session) => session,
-            Err(err) => {
-                return (
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": format!("failed to create session: {err}")})),
-                )
-                    .into_response();
-            }
+    let prepared = match prepare_reply_session(&state, req).await {
+        Ok(prepared) => prepared,
+        Err(response) => return response,
+    };
+    let PreparedReplySession {
+        session,
+        run_id,
+        user_message,
+        reply_params,
+    } = prepared;
+
+    let (_accepted, core_events) = match core_client.reply(reply_params).await {
+        Ok(value) => value,
+        Err(err) => {
+            return sse_error_response(Some(run_id), "core_reply_failed", err.to_string(), true);
         }
     };
 
-    if let Some(threshold) = req.context_threshold_tokens.filter(|value| *value > 0) {
-        let context_manager = ContextManager::default();
-        let compaction =
-            context_manager.maybe_compact_by_token_threshold(&mut session.conversation, threshold);
-        if let CompactionResult::Compacted { removed, current } = compaction {
-            session.updated_at = chrono::Utc::now();
-            info!(
-                session_id = %session.id,
-                threshold,
-                removed,
-                current,
-                "session context summarized"
-            );
+    let (tx, rx) = mpsc::channel::<Result<String, Infallible>>(64);
+    let session_manager = state.session_manager.clone();
+    let diff_root = session.working_dir.clone();
+    let diff_baseline = workspace_change_snapshot(&diff_root).ok();
+    tokio::spawn(async move {
+        let session_for_task = pump_core_events(
+            core_events,
+            tx,
+            CoreEventPumpState {
+                session,
+                run_id,
+                user_message,
+                diff_root,
+                diff_baseline,
+            },
+        )
+        .await;
+        let _ = session_manager.save(&session_for_task).await;
+    });
+
+    let stream = stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+
+    sse_stream_response(Body::from_stream(stream))
+}
+
+struct PreparedReplySession {
+    session: Session,
+    run_id: String,
+    user_message: Message,
+    reply_params: ReplyParams,
+}
+
+struct CoreEventPumpState {
+    session: Session,
+    run_id: String,
+    user_message: Message,
+    diff_root: PathBuf,
+    diff_baseline: Option<WorkspaceChangeSnapshot>,
+}
+
+struct CoreEventDispatch {
+    events: Vec<serde_json::Value>,
+    is_terminal: bool,
+}
+
+async fn pump_core_events(
+    mut core_events: mpsc::Receiver<serde_json::Value>,
+    tx: mpsc::Sender<Result<String, Infallible>>,
+    mut state: CoreEventPumpState,
+) -> Session {
+    let user_message_id = state.user_message.id.clone();
+    state.session.conversation.push(state.user_message.clone());
+
+    while let Some(event) = core_events.recv().await {
+        let dispatch = prepare_core_event_dispatch(&mut state, event);
+        for event_to_send in dispatch.events {
+            if tx.send(Ok(sse_format_event(&event_to_send))).await.is_err() {
+                return finalize_pumped_session(state.session, &state.run_id, &user_message_id);
+            }
+        }
+        if dispatch.is_terminal {
+            break;
         }
     }
 
+    finalize_pumped_session(state.session, &state.run_id, &user_message_id)
+}
+
+fn prepare_core_event_dispatch(
+    state: &mut CoreEventPumpState,
+    event: serde_json::Value,
+) -> CoreEventDispatch {
+    persist_core_event(&mut state.session.conversation, &event);
+
+    let is_terminal = is_terminal_core_event(&event);
+    let mut event_to_send = event;
+    let mut events = Vec::with_capacity(if is_terminal { 2 } else { 1 });
+
+    if is_terminal {
+        let seq = core_event_seq(&event_to_send);
+        if let Some(diff_event) = build_diff_ready_event(
+            &state.run_id,
+            seq,
+            &state.diff_root,
+            state.diff_baseline.as_ref(),
+        ) {
+            if let Some(object) = event_to_send.as_object_mut() {
+                object.insert("seq".to_string(), serde_json::json!(seq + 1));
+            }
+            events.push(diff_event);
+        }
+    }
+
+    events.push(event_to_send);
+    CoreEventDispatch {
+        events,
+        is_terminal,
+    }
+}
+
+fn finalize_pumped_session(mut session: Session, run_id: &str, user_message_id: &str) -> Session {
+    if !conversation_has_assistant_after_current_user(&session.conversation, user_message_id) {
+        session.conversation.push(text_message(
+            Role::Assistant,
+            format!("Run {run_id} completed without assistant message."),
+        ));
+    }
+
+    if session.name == "session" || session.name.is_empty() {
+        let derived = session.derived_name();
+        if derived != session.name {
+            session.rename(derived);
+        }
+    }
+
+    session
+}
+
+async fn prepare_reply_session(
+    state: &AppState,
+    req: ReplyRequest,
+) -> Result<PreparedReplySession, Response> {
+    let mut session = load_or_create_reply_session(state, req.session_id.as_deref()).await?;
+    compact_session_for_reply(&mut session, req.context_threshold_tokens);
+
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
-    let user_message = Message {
-        id: uuid::Uuid::new_v4().to_string(),
-        role: Role::User,
-        content: vec![ContentBlock::Text {
-            text: req.text.clone(),
-        }],
-        created_at: chrono::Utc::now(),
-    };
-    let permission_mode = normalize_permission_mode(
-        req.permission_mode
-            .or_else(|| std::env::var("NIGHT24_PERMISSION_MODE").ok()),
-    );
+    let user_message = user_message(&req.text);
+    let permission_mode = effective_permission_mode(req.permission_mode.clone());
     info!(
         run_id = %run_id,
         permission_mode = %permission_mode,
         "reply permission mode"
     );
-    let reply_params = ReplyParams {
-        run_id: run_id.clone(),
+    let reply_params = build_reply_params(&run_id, &session, req, permission_mode);
+
+    Ok(PreparedReplySession {
+        session,
+        run_id,
+        user_message,
+        reply_params,
+    })
+}
+
+async fn load_or_create_reply_session(
+    state: &AppState,
+    session_id: Option<&str>,
+) -> Result<Session, Response> {
+    if let Some(session_id) = session_id {
+        return match state.session_manager.get(session_id).await {
+            Ok(Some(existing)) => Ok(existing),
+            Ok(None) => Err(json_error_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("session not found: {session_id}"),
+            )),
+            Err(err) => Err(json_error_response(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to load session: {err}"),
+            )),
+        };
+    }
+
+    let working_dir = current_workspace_path(state)
+        .await
+        .unwrap_or_else(|| PathBuf::from("."));
+    state
+        .session_manager
+        .create("session", working_dir, SessionType::User)
+        .await
+        .map_err(|err| {
+            json_error_response(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create session: {err}"),
+            )
+        })
+}
+
+fn compact_session_for_reply(session: &mut Session, threshold: Option<usize>) {
+    let Some(threshold) = threshold.filter(|value| *value > 0) else {
+        return;
+    };
+
+    let context_manager = ContextManager::default();
+    let compaction =
+        context_manager.maybe_compact_by_token_threshold(&mut session.conversation, threshold);
+    if let CompactionResult::Compacted { removed, current } = compaction {
+        session.updated_at = chrono::Utc::now();
+        info!(
+            session_id = %session.id,
+            threshold,
+            removed,
+            current,
+            "session context summarized"
+        );
+    }
+}
+
+fn effective_permission_mode(request_mode: Option<String>) -> String {
+    let mode = request_mode.or_else(|| std::env::var("NIGHT24_PERMISSION_MODE").ok());
+    normalize_permission_mode(mode.as_deref())
+}
+
+fn user_message(text: &str) -> Message {
+    text_message(Role::User, text.to_string())
+}
+
+fn text_message(role: Role, text: String) -> Message {
+    Message {
+        id: uuid::Uuid::new_v4().to_string(),
+        role,
+        content: vec![ContentBlock::Text { text }],
+        created_at: chrono::Utc::now(),
+    }
+}
+
+fn build_reply_params(
+    run_id: &str,
+    session: &Session,
+    req: ReplyRequest,
+    permission_mode: String,
+) -> ReplyParams {
+    let provider_name = normalize_provider_name(req.provider.as_deref());
+    ReplyParams {
+        run_id: run_id.to_string(),
         session: ReplySession {
             id: session.id.clone(),
             name: session.name.clone(),
@@ -124,7 +293,7 @@ pub(crate) async fn reply_core(
         },
         input: ReplyInput { text: req.text },
         provider: ProviderConfig {
-            provider: req.provider.unwrap_or_else(|| "echo".to_string()),
+            provider: provider_name,
             model: req.model.unwrap_or_else(|| "echo-v1".to_string()),
             base_url: req.base_url,
             api_key_ref: None,
@@ -135,131 +304,27 @@ pub(crate) async fn reply_core(
             stream_message_delta: true,
             emit_tool_events: true,
             permission_mode: Some(permission_mode),
-            network_proxy: req.network_proxy.and_then(|value| {
-                let trimmed = value.trim().to_string();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed)
-                }
-            }),
+            network_proxy: normalize_network_proxy(req.network_proxy),
             context_threshold_tokens: req.context_threshold_tokens,
         },
-    };
-
-    let (_accepted, mut core_events) = match core_client.reply(reply_params).await {
-        Ok(value) => value,
-        Err(err) => {
-            return sse_error_response(Some(run_id), "core_reply_failed", err.to_string(), true);
-        }
-    };
-
-    let (tx, rx) = mpsc::channel::<Result<String, std::convert::Infallible>>(64);
-    let session_manager = state.session_manager.clone();
-    let run_id_for_task = run_id.clone();
-    let user_message_id = user_message.id.clone();
-    let diff_root = session.working_dir.clone();
-    let diff_baseline = workspace_change_snapshot(&diff_root).ok();
-    tokio::spawn(async move {
-        let mut session_for_task = session;
-        session_for_task.conversation.push(user_message);
-
-        while let Some(event) = core_events.recv().await {
-            persist_core_event(&mut session_for_task.conversation, &event);
-
-            let event_type = event
-                .get("type")
-                .and_then(|value| value.as_str())
-                .unwrap_or("message")
-                .to_string();
-            let is_terminal = event_type == "finish" || event_type == "error";
-
-            let mut event_to_send = event.clone();
-            if is_terminal {
-                let seq = event
-                    .get("seq")
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or(0);
-                if let Some(diff_event) = build_diff_ready_event(
-                    &run_id_for_task,
-                    seq,
-                    &diff_root,
-                    diff_baseline.as_ref(),
-                ) {
-                    if let Some(object) = event_to_send.as_object_mut() {
-                        object.insert("seq".to_string(), serde_json::json!(seq + 1));
-                    }
-                    if tx.send(Ok(sse_format_event(&diff_event))).await.is_err() {
-                        break;
-                    }
-                }
-            }
-
-            if tx.send(Ok(sse_format_event(&event_to_send))).await.is_err() {
-                break;
-            }
-            if is_terminal {
-                break;
-            }
-        }
-
-        if !conversation_has_assistant_after_current_user(
-            &session_for_task.conversation,
-            &user_message_id,
-        ) {
-            session_for_task.conversation.push(Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: Role::Assistant,
-                content: vec![ContentBlock::Text {
-                    text: format!("Run {run_id_for_task} completed without assistant message."),
-                }],
-                created_at: chrono::Utc::now(),
-            });
-        }
-
-        if session_for_task.name == "session" || session_for_task.name.is_empty() {
-            let derived = session_for_task.derived_name();
-            if derived != session_for_task.name {
-                session_for_task.rename(derived);
-            }
-        }
-        let _ = session_manager.save(&session_for_task).await;
-    });
-
-    let stream = stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|item| (item, rx))
-    });
-
-    Response::builder()
-        .status(axum::http::StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::CONNECTION, "keep-alive")
-        .body(Body::from_stream(stream))
-        .unwrap()
-        .into_response()
-}
-
-pub(crate) fn normalize_permission_mode(mode: Option<String>) -> String {
-    match mode
-        .unwrap_or_else(|| "strict".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .replace('-', "_")
-        .as_str()
-    {
-        "allow_all" | "full_access" => "allow_all".to_string(),
-        "permissive" => "permissive".to_string(),
-        "deny_all" => "deny_all".to_string(),
-        _ => "strict".to_string(),
     }
 }
 
+fn normalize_provider_name(value: Option<&str>) -> String {
+    let Some(provider) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "echo".to_string();
+    };
+    provider.to_ascii_lowercase()
+}
+
+fn normalize_network_proxy(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn persist_core_event(conversation: &mut Vec<Message>, event: &serde_json::Value) {
-    let event_type = event
-        .get("type")
-        .and_then(|value| value.as_str())
-        .unwrap_or("message");
+    let event_type = core_event_type(event);
     let Some(payload) = event.get("payload") else {
         return;
     };
@@ -365,6 +430,24 @@ fn event_created_at(event: &serde_json::Value) -> Option<DateTime<Utc>> {
         .map(|value| value.with_timezone(&Utc))
 }
 
+fn core_event_type(event: &serde_json::Value) -> &str {
+    event
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("message")
+}
+
+fn is_terminal_core_event(event: &serde_json::Value) -> bool {
+    matches!(core_event_type(event), "finish" | "error")
+}
+
+fn core_event_seq(event: &serde_json::Value) -> u64 {
+    event
+        .get("seq")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
+}
+
 fn conversation_has_assistant_after_current_user(conversation: &[Message], user_id: &str) -> bool {
     let Some(user_index) = conversation
         .iter()
@@ -381,10 +464,7 @@ fn conversation_has_assistant_after_current_user(conversation: &[Message], user_
 }
 
 pub(crate) fn sse_format_event(event: &serde_json::Value) -> String {
-    let event_type = event
-        .get("type")
-        .and_then(|value| value.as_str())
-        .unwrap_or("message");
+    let event_type = core_event_type(event);
     format!("event: {event_type}\ndata: {event}\n\n")
 }
 
@@ -410,12 +490,20 @@ fn sse_error_response(
             async move { Ok::<String, std::convert::Infallible>(sse_format_event(&event)) },
         );
 
+    sse_stream_response(Body::from_stream(stream))
+}
+
+fn json_error_response(status: axum::http::StatusCode, message: impl Into<String>) -> Response {
+    (status, Json(serde_json::json!({ "error": message.into() }))).into_response()
+}
+
+fn sse_stream_response(body: Body) -> Response {
     Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .header(header::CONNECTION, "keep-alive")
-        .body(Body::from_stream(stream))
+        .body(body)
         .unwrap()
         .into_response()
 }
@@ -434,7 +522,7 @@ pub(crate) async fn reply(
     State(state): State<AppState>,
     Json(req): Json<ReplyRequest>,
 ) -> Response {
-    let provider_name = req.provider.as_deref().unwrap_or("echo");
+    let provider_name = normalize_provider_name(req.provider.as_deref());
     let provider: Arc<dyn night24_core::provider::Provider> = if provider_name == "openai" {
         let api_key = req
             .api_key
@@ -612,43 +700,223 @@ pub(crate) async fn reply(
         }
     });
 
-    Response::builder()
-        .status(axum::http::StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::CONNECTION, "keep-alive")
-        .body(Body::from_stream(stream))
-        .unwrap()
-        .into_response()
+    sse_stream_response(Body::from_stream(stream))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use night24_core::{
+        permission::PermissionManager, provider::registry::ProviderRegistry,
+        session::SessionManager,
+    };
+
+    fn reply_request(text: &str) -> ReplyRequest {
+        ReplyRequest {
+            text: text.to_string(),
+            provider: None,
+            api_key: None,
+            base_url: None,
+            model: None,
+            session_id: None,
+            permission_mode: None,
+            network_proxy: None,
+            context_threshold_tokens: None,
+        }
+    }
+
+    fn test_state_with_workspace(root_path: PathBuf) -> AppState {
+        AppState {
+            session_manager: Arc::new(SessionManager::new()),
+            provider_registry: Arc::new(ProviderRegistry::new("echo").with_echo()),
+            permission_manager: Arc::new(PermissionManager::default()),
+            workspace_state: Arc::new(tokio::sync::RwLock::new(crate::api_types::WorkspaceState {
+                current: Some(crate::api_types::WorkspaceInfo {
+                    id: "workspace-test".to_string(),
+                    name: "test".to_string(),
+                    root_path: root_path.to_string_lossy().to_string(),
+                    created_at: "2026-07-05T00:00:00Z".to_string(),
+                    last_opened_at: "2026-07-05T00:00:00Z".to_string(),
+                }),
+                recent: Vec::new(),
+            })),
+            core_client: Arc::new(tokio::sync::RwLock::new(None)),
+        }
+    }
 
     #[test]
     fn permission_mode_normalization() {
-        assert_eq!(
-            normalize_permission_mode(Some("allow_all".to_string())),
-            "allow_all"
-        );
-        assert_eq!(
-            normalize_permission_mode(Some("allow-all".to_string())),
-            "allow_all"
-        );
-        assert_eq!(
-            normalize_permission_mode(Some("full_access".to_string())),
-            "allow_all"
-        );
-        assert_eq!(
-            normalize_permission_mode(Some("permissive".to_string())),
-            "permissive"
-        );
-        assert_eq!(
-            normalize_permission_mode(Some("unknown".to_string())),
-            "strict"
-        );
+        assert_eq!(normalize_permission_mode(Some("allow_all")), "allow_all");
+        assert_eq!(normalize_permission_mode(Some("allow-all")), "allow_all");
+        assert_eq!(normalize_permission_mode(Some("full_access")), "allow_all");
+        assert_eq!(normalize_permission_mode(Some("deny-all")), "deny_all");
+        assert_eq!(normalize_permission_mode(Some("permissive")), "permissive");
+        assert_eq!(normalize_permission_mode(Some("unknown")), "strict");
         assert_eq!(normalize_permission_mode(None), "strict");
+    }
+
+    #[test]
+    fn network_proxy_normalization_trims_empty_values() {
+        assert_eq!(normalize_network_proxy(None), None);
+        assert_eq!(normalize_network_proxy(Some("   ".to_string())), None);
+        assert_eq!(
+            normalize_network_proxy(Some(" http://127.0.0.1:7890 ".to_string())),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_name_normalization_trims_cases_and_defaults_blank_values() {
+        assert_eq!(normalize_provider_name(None), "echo");
+        assert_eq!(normalize_provider_name(Some("   ")), "echo");
+        assert_eq!(normalize_provider_name(Some(" OpenAI ")), "openai");
+        assert_eq!(normalize_provider_name(Some("STEPFUN")), "stepfun");
+    }
+
+    #[test]
+    fn reply_params_use_request_provider_defaults() {
+        let session = Session::new(
+            "session",
+            std::path::PathBuf::from("E:/codes/project"),
+            SessionType::User,
+        );
+        let params = build_reply_params(
+            "run-1",
+            &session,
+            ReplyRequest {
+                text: "hello".to_string(),
+                provider: None,
+                api_key: None,
+                base_url: None,
+                model: None,
+                session_id: Some(session.id.clone()),
+                permission_mode: None,
+                network_proxy: Some(" http://127.0.0.1:7890 ".to_string()),
+                context_threshold_tokens: Some(24000),
+            },
+            "strict".to_string(),
+        );
+
+        assert_eq!(params.run_id, "run-1");
+        assert_eq!(params.input.text, "hello");
+        assert_eq!(params.provider.provider, "echo");
+        assert_eq!(params.provider.model, "echo-v1");
+        assert_eq!(
+            params.options.network_proxy.as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+        assert_eq!(params.options.context_threshold_tokens, Some(24000));
+        assert_eq!(params.options.permission_mode.as_deref(), Some("strict"));
+    }
+
+    #[test]
+    fn reply_params_normalize_request_provider_name() {
+        let session = Session::new(
+            "session",
+            std::path::PathBuf::from("E:/codes/project"),
+            SessionType::User,
+        );
+        let params = build_reply_params(
+            "run-1",
+            &session,
+            ReplyRequest {
+                text: "hello".to_string(),
+                provider: Some(" StepFun ".to_string()),
+                api_key: None,
+                base_url: None,
+                model: None,
+                session_id: Some(session.id.clone()),
+                permission_mode: None,
+                network_proxy: None,
+                context_threshold_tokens: None,
+            },
+            "strict".to_string(),
+        );
+
+        assert_eq!(params.provider.provider, "stepfun");
+    }
+
+    #[test]
+    fn sse_stream_response_sets_standard_headers() {
+        let response = sse_stream_response(Body::empty());
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/event-stream"
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+        assert_eq!(
+            response.headers().get(header::CONNECTION).unwrap(),
+            "keep-alive"
+        );
+    }
+
+    #[tokio::test]
+    async fn json_error_response_sets_status_and_body() {
+        let response = json_error_response(axum::http::StatusCode::BAD_REQUEST, "not found");
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body should be json");
+        assert_eq!(value, serde_json::json!({ "error": "not found" }));
+    }
+
+    #[tokio::test]
+    async fn prepare_reply_session_creates_session_from_current_workspace() {
+        let workspace_root = PathBuf::from("E:/codes/project");
+        let state = test_state_with_workspace(workspace_root.clone());
+        let prepared = prepare_reply_session(&state, reply_request("hello"))
+            .await
+            .expect("reply session should be prepared");
+
+        assert!(prepared.run_id.starts_with("run-"));
+        assert_eq!(prepared.session.name, "session");
+        assert_eq!(prepared.session.working_dir, workspace_root);
+        assert_eq!(prepared.reply_params.session.id, prepared.session.id);
+        assert_eq!(prepared.reply_params.session.working_dir, workspace_root);
+        assert_eq!(prepared.reply_params.input.text, "hello");
+        assert_eq!(prepared.user_message.role, Role::User);
+        match &prepared.user_message.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "hello"),
+            _ => panic!("expected text block"),
+        }
+
+        let saved = state
+            .session_manager
+            .get(&prepared.session.id)
+            .await
+            .expect("session lookup should succeed")
+            .expect("created session should be saved");
+        assert_eq!(saved.working_dir, workspace_root);
+    }
+
+    #[tokio::test]
+    async fn prepare_reply_session_uses_existing_session_working_dir() {
+        let workspace_root = PathBuf::from("E:/codes/current-workspace");
+        let session_root = PathBuf::from("E:/codes/session-workspace");
+        let state = test_state_with_workspace(workspace_root);
+        let existing = state
+            .session_manager
+            .create("existing", session_root.clone(), SessionType::User)
+            .await
+            .expect("session should be created");
+        let mut request = reply_request("continue");
+        request.session_id = Some(existing.id.clone());
+
+        let prepared = prepare_reply_session(&state, request)
+            .await
+            .expect("existing reply session should be prepared");
+
+        assert_eq!(prepared.session.id, existing.id);
+        assert_eq!(prepared.session.working_dir, session_root);
+        assert_eq!(prepared.reply_params.session.working_dir, session_root);
     }
 
     #[test]
@@ -720,6 +988,39 @@ mod tests {
     }
 
     #[test]
+    fn core_event_terminal_and_seq_state_are_stable() {
+        let missing_type = serde_json::json!({"payload": {}});
+        let non_string_type = serde_json::json!({"type": 42, "payload": {}});
+        let message = serde_json::json!({"type": "message", "seq": 7});
+        let finish = serde_json::json!({"type": "finish", "seq": 12});
+        let error_without_seq = serde_json::json!({"type": "error"});
+
+        assert_eq!(core_event_type(&missing_type), "message");
+        assert_eq!(core_event_type(&non_string_type), "message");
+        assert!(!is_terminal_core_event(&missing_type));
+        assert!(!is_terminal_core_event(&non_string_type));
+        assert!(!is_terminal_core_event(&message));
+        assert!(is_terminal_core_event(&finish));
+        assert!(is_terminal_core_event(&error_without_seq));
+        assert_eq!(core_event_seq(&message), 7);
+        assert_eq!(core_event_seq(&finish), 12);
+        assert_eq!(core_event_seq(&error_without_seq), 0);
+    }
+
+    #[test]
+    fn sse_format_event_defaults_non_string_type_to_message_event_name() {
+        let event = serde_json::json!({
+            "type": 42,
+            "payload": { "message": "kept verbatim" }
+        });
+
+        assert_eq!(
+            sse_format_event(&event),
+            format!("event: message\ndata: {event}\n\n")
+        );
+    }
+
+    #[test]
     fn assistant_placeholder_check_is_scoped_to_current_user() {
         let previous_assistant = Message::assistant("old reply");
         let current_user = Message::user("new question");
@@ -729,5 +1030,40 @@ mod tests {
             &conversation,
             &current_user.id,
         ));
+    }
+
+    #[test]
+    fn finalize_pumped_session_adds_placeholder_only_for_current_user_without_reply() {
+        let previous_user = Message::user("old question");
+        let previous_assistant = Message::assistant("old reply");
+        let current_user = Message::user("new question");
+        let session = Session {
+            conversation: vec![
+                previous_user,
+                previous_assistant,
+                current_user.clone(),
+                Message::user("not an assistant"),
+            ],
+            ..Session::new(
+                "session",
+                PathBuf::from("E:/codes/project"),
+                SessionType::User,
+            )
+        };
+
+        let finalized = finalize_pumped_session(session, "run-test", &current_user.id);
+
+        assert_eq!(finalized.conversation.len(), 5);
+        let placeholder = finalized
+            .conversation
+            .last()
+            .expect("placeholder should be appended");
+        assert_eq!(placeholder.role, Role::Assistant);
+        match &placeholder.content[0] {
+            ContentBlock::Text { text } => {
+                assert_eq!(text, "Run run-test completed without assistant message.")
+            }
+            _ => panic!("expected text block"),
+        }
     }
 }

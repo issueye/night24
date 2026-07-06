@@ -1,0 +1,44 @@
+.statusbar {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+  height: 26px;
+  background: #fbfbfa;
+  border-top-color: var(--line);
+}
+
+.statusbar-event-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.statusbar-event-button:hover,
+.statusbar-event-button.active {
+  background: #ececea;
+}
+
+.statusbar-event-button.error {
+  color: var(--red);
+}
+
+.statusbar-event-button.warning {
+  color: var(--amber);
+}
+
+.statusbar-event-button.success {
+  color: var(--green);
+}
+
+.statusbar-event-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

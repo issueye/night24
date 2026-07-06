@@ -22,7 +22,7 @@ pub(crate) struct HttpResponseState {
 }
 
 pub(crate) fn http_response_object(state: Rc<RefCell<HttpResponseState>>) -> Object {
-    let obj = Rc::new(RefCell::new(HashData::default()));
+    let obj = ObjectBuilder::new().into_shared();
 
     let s = state.clone();
     let out = obj.clone();
@@ -138,7 +138,8 @@ pub(crate) fn http_response_object(state: Rc<RefCell<HttpResponseState>>) -> Obj
     obj.borrow_mut().set(
         "setTimeout",
         native("response.setTimeout", move |ctx, args| {
-            let ms = match required_number(ctx, "response.setTimeout", args, 0, "ms") {
+            let reader = ArgReader::new(ctx, "response.setTimeout", args);
+            let ms = match reader.required_number(0, "ms") {
                 Ok(v) => v.max(0.0) as u64,
                 Err(e) => return e,
             };

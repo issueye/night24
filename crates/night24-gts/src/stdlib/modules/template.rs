@@ -22,7 +22,8 @@ pub(crate) fn template_module() -> Object {
 }
 
 pub(crate) fn template_render(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let source = match required_string(ctx, "template.render", args, 0, "source") {
+    let reader = ArgReader::new(ctx, "template.render", args);
+    let source = match reader.required_string(0, "source") {
         Ok(source) => source,
         Err(err) => return err,
     };
@@ -32,7 +33,8 @@ pub(crate) fn template_render(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn template_render_html(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let source = match required_string(ctx, "template.renderHTML", args, 0, "source") {
+    let reader = ArgReader::new(ctx, "template.renderHTML", args);
+    let source = match reader.required_string(0, "source") {
         Ok(source) => source,
         Err(err) => return err,
     };
@@ -42,7 +44,8 @@ pub(crate) fn template_render_html(ctx: &mut CallContext, args: &[Object]) -> Ob
 }
 
 pub(crate) fn template_render_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "template.renderFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "template.renderFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -57,7 +60,8 @@ pub(crate) fn template_render_file_sync(ctx: &mut CallContext, args: &[Object]) 
 }
 
 pub(crate) fn template_escape_html(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "template.escapeHTML", args, 0, "value") {
+    let reader = ArgReader::new(ctx, "template.escapeHTML", args);
+    match reader.required_string(0, "value") {
         Ok(value) => str_obj(escape_html(&value)),
         Err(err) => err,
     }
@@ -201,6 +205,29 @@ pub(crate) fn escape_html(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&#34;")
         .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_html_escapes_reserved_characters() {
+        assert_eq!(
+            escape_html("<a href=\"/x?y=1&z='2'\">Night24</a>"),
+            "&lt;a href=&#34;/x?y=1&amp;z=&#39;2&#39;&#34;&gt;Night24&lt;/a&gt;"
+        );
+    }
+
+    #[test]
+    fn template_execute_renders_basic_lookup() {
+        let data = module(vec![("name", str_obj("Night24"))]);
+
+        assert_eq!(
+            template_execute("Hello, {{ .name }}!", &data, false).unwrap(),
+            "Hello, Night24!"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

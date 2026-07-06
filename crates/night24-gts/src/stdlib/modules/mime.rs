@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
-use crate::object::{new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn mime_module() -> Object {
     module(vec![
@@ -26,7 +23,8 @@ pub(crate) fn mime_module() -> Object {
 }
 
 pub(crate) fn mime_type_by_extension(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let ext = match required_string(ctx, "mime.typeByExtension", args, 0, "extension") {
+    let reader = ArgReader::new(ctx, "mime.typeByExtension", args);
+    let ext = match reader.required_string(0, "extension") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -39,7 +37,8 @@ pub(crate) fn mime_type_by_extension(ctx: &mut CallContext, args: &[Object]) -> 
 }
 
 pub(crate) fn mime_extension_by_type(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let typ = match required_string(ctx, "mime.extensionByType", args, 0, "type") {
+    let reader = ArgReader::new(ctx, "mime.extensionByType", args);
+    let typ = match reader.required_string(0, "type") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -53,7 +52,8 @@ pub(crate) fn mime_extension_by_type(ctx: &mut CallContext, args: &[Object]) -> 
 }
 
 pub(crate) fn mime_parse_media_type(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "mime.parseMediaType", args, 0, "value") {
+    let reader = ArgReader::new(ctx, "mime.parseMediaType", args);
+    let value = match reader.required_string(0, "value") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -65,30 +65,29 @@ pub(crate) fn mime_parse_media_type(ctx: &mut CallContext, args: &[Object]) -> O
     if !main.contains('/') {
         return new_error(ctx.pos.clone(), "mime.parseMediaType: invalid media type");
     }
-    let params_hash = Rc::new(RefCell::new(HashData::default()));
+    let mut params = ObjectBuilder::new();
     for part in parts {
         let part = part.trim();
         if let Some((k, v)) = part.split_once('=') {
             let v = v.trim().trim_matches('"');
-            params_hash
-                .borrow_mut()
-                .set(k.trim().to_string(), str_obj(v.to_string()));
+            params.insert(k.trim().to_string(), str_obj(v.to_string()));
         }
     }
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("type", str_obj(main));
-    hash.borrow_mut().set("params", Object::Hash(params_hash));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("type", str_obj(main))
+        .set("params", params.build())
+        .build()
 }
 
 pub(crate) fn mime_format_media_type(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let typ = match required_string(ctx, "mime.formatMediaType", args, 0, "type") {
+    let reader = ArgReader::new(ctx, "mime.formatMediaType", args);
+    let typ = match reader.required_string(0, "type") {
         Ok(v) => v,
         Err(e) => return e,
     };
     let mut out = typ;
-    if let Some(Object::Hash(params)) = args.get(1) {
-        for (k, v) in &params.borrow().entries {
+    if let Some(params) = reader.object_view(1) {
+        for (k, v) in &params.entries {
             out.push_str(&format!("; {}=\"{}\"", k, v.inspect()));
         }
     } else if let Some(o) = args.get(1) {

@@ -1,0 +1,53 @@
+:root {
+  font-family: "Aptos", "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #172033;
+  background: #f6f7fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-soft: #f9fafc;
+  --surface-tint: #eef4ff;
+  --line: #e1e5ec;
+  --line-strong: #cfd6e1;
+  --text: #172033;
+  --muted: #657083;
+  --subtle: #8a94a6;
+  --blue: #2563eb;
+  --blue-hover: #1d4ed8;
+  --blue-soft: #e9f0ff;
+  --green: #16a34a;
+  --green-soft: #e8f7ee;
+  --amber: #b7791f;
+  --amber-soft: #fff6df;
+  --red: #dc2626;
+  --red-soft: #fff0f0;
+  --shadow: 0 10px 28px rgba(23, 32, 51, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}

@@ -263,6 +263,28 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
         });
     }
 
+    if tool_input.starts_with("subagent_cancel:") {
+        let id = tool_input
+            .trim_start_matches("subagent_cancel:")
+            .trim()
+            .to_string();
+        let arguments = if id.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({"subagent_id": id})
+        };
+        return Some(Message {
+            id: Uuid::new_v4().to_string(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolRequest {
+                id: Uuid::new_v4().to_string(),
+                name: "developer__subagent_cancel".to_string(),
+                arguments,
+            }],
+            created_at: chrono::Utc::now(),
+        });
+    }
+
     if tool_input.starts_with("skill_load:") {
         let name = tool_input
             .trim_start_matches("skill_load:")

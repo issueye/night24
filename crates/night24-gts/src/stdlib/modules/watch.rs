@@ -11,30 +11,28 @@ pub(crate) fn watch_module() -> Object {
 /// 阻塞当前脚本，轮询文件的修改时间，一旦变化立即同步调用回调函数。
 /// 可通过 options.duration（毫秒，默认 1000）和 options.timeout（毫秒，默认无限）控制。
 fn watch_file(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "watch.file", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "watch.file", args);
+    let path = match reader.required_string(0, "path") {
         Ok(s) => s,
         Err(e) => return e,
     };
     let callback = match args.get(1) {
-        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => args.get(1).cloned(),
+        Some(value) if is_callable(value) => value.clone(),
         _ => return new_error(ctx.pos.clone(), "watch.file expects function callback"),
-    };
-    let callback = match callback {
-        Some(c) => c,
-        None => return new_error(ctx.pos.clone(), "watch.file expects function callback"),
     };
 
     let mut interval_ms: u64 = 1000;
     let mut timeout_ms: Option<u64> = None;
-    if let Some(Object::Hash(opts)) = args.get(2) {
-        if let Some(Object::Number(n)) = opts.borrow().get("interval") {
-            interval_ms = *n as u64;
+    if let Some(opts) = reader.object_view(2) {
+        let opts = ObjectView::new(&opts);
+        if let Some(n) = opts.number("interval") {
+            interval_ms = n as u64;
         }
-        if let Some(Object::Number(n)) = opts.borrow().get("duration") {
-            interval_ms = *n as u64;
+        if let Some(n) = opts.number("duration") {
+            interval_ms = n as u64;
         }
-        if let Some(Object::Number(n)) = opts.borrow().get("timeout") {
-            timeout_ms = Some(*n as u64);
+        if let Some(n) = opts.number("timeout") {
+            timeout_ms = Some(n as u64);
         }
     }
     if interval_ms == 0 {

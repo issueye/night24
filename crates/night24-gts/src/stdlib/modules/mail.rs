@@ -1,9 +1,6 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
 use super::time::{parse_time_ms, time_from_object, utc_parts_from_ms};
-use crate::object::{new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn mail_module() -> Object {
     module(vec![
@@ -132,11 +129,10 @@ fn split_address_list(value: &str) -> Vec<String> {
 }
 
 pub(crate) fn mail_address_object(addr: &MailAddress) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("name", str_obj(addr.name.clone()));
-    hash.borrow_mut()
-        .set("address", str_obj(addr.address.clone()));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("name", str_obj(addr.name.clone()))
+        .set("address", str_obj(addr.address.clone()))
+        .build()
 }
 
 pub(crate) fn mail_address_from_value(
@@ -182,7 +178,8 @@ pub(crate) fn mail_address_from_value(
 }
 
 pub(crate) fn mail_parse_address(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "mail.parseAddress", args, 0, "address") {
+    let reader = ArgReader::new(ctx, "mail.parseAddress", args);
+    let value = match reader.required_string(0, "address") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -193,7 +190,8 @@ pub(crate) fn mail_parse_address(ctx: &mut CallContext, args: &[Object]) -> Obje
 }
 
 pub(crate) fn mail_parse_address_list(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "mail.parseAddressList", args, 0, "addresses") {
+    let reader = ArgReader::new(ctx, "mail.parseAddressList", args);
+    let value = match reader.required_string(0, "addresses") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -208,7 +206,8 @@ pub(crate) fn mail_parse_address_list(ctx: &mut CallContext, args: &[Object]) ->
 }
 
 pub(crate) fn mail_parse_message(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "mail.parseMessage", args, 0, "message") {
+    let reader = ArgReader::new(ctx, "mail.parseMessage", args);
+    let value = match reader.required_string(0, "message") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -221,25 +220,24 @@ pub(crate) fn mail_parse_message(ctx: &mut CallContext, args: &[Object]) -> Obje
         },
     };
     let headers_obj = parse_rfc5322_headers(&headers);
-    let out = Rc::new(RefCell::new(HashData::default()));
-    out.borrow_mut().set("headers", headers_obj);
-    out.borrow_mut().set("body", str_obj(body));
-    Object::Hash(out)
+    ObjectBuilder::new()
+        .set("headers", headers_obj)
+        .set("body", str_obj(body))
+        .build()
 }
 
 /// Parse a header block into a Hash mapping header name -> Array<string>.
 /// Header unfolding (continuation lines starting with whitespace) is handled.
 fn parse_rfc5322_headers(block: &str) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
+    let mut builder = ObjectBuilder::new();
     let mut current_name: Option<String> = None;
     let mut current_vals: Vec<String> = Vec::new();
-    let flush =
-        |name: &mut Option<String>, vals: &mut Vec<String>, hash: &Rc<RefCell<HashData>>| {
-            if let Some(n) = name.take() {
-                let arr: Vec<Object> = vals.drain(..).map(str_obj).collect();
-                hash.borrow_mut().set(n, array(arr));
-            }
-        };
+    let flush = |name: &mut Option<String>, vals: &mut Vec<String>, builder: &mut ObjectBuilder| {
+        if let Some(n) = name.take() {
+            let arr: Vec<Object> = vals.drain(..).map(str_obj).collect();
+            builder.insert(n, array(arr));
+        }
+    };
     for raw_line in block.lines() {
         if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
             // Continuation of previous header value.
@@ -252,7 +250,7 @@ fn parse_rfc5322_headers(block: &str) -> Object {
             }
             continue;
         }
-        flush(&mut current_name, &mut current_vals, &hash);
+        flush(&mut current_name, &mut current_vals, &mut builder);
         match raw_line.find(':') {
             Some(i) => {
                 current_name = Some(raw_line[..i].trim().to_string());
@@ -264,8 +262,8 @@ fn parse_rfc5322_headers(block: &str) -> Object {
             }
         }
     }
-    flush(&mut current_name, &mut current_vals, &hash);
-    Object::Hash(hash)
+    flush(&mut current_name, &mut current_vals, &mut builder);
+    builder.build()
 }
 
 pub(crate) fn mail_format_address(ctx: &mut CallContext, args: &[Object]) -> Object {
@@ -301,7 +299,8 @@ pub(crate) fn mail_format_address_list(ctx: &mut CallContext, args: &[Object]) -
 }
 
 pub(crate) fn mail_parse_date(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "mail.parseDate", args, 0, "date") {
+    let reader = ArgReader::new(ctx, "mail.parseDate", args);
+    let value = match reader.required_string(0, "date") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -364,7 +363,8 @@ pub(crate) fn mail_get_header(ctx: &mut CallContext, args: &[Object]) -> Object 
         Some(_) => return new_error(ctx.pos.clone(), "mail.getHeader: headers must be an object"),
         None => return new_error(ctx.pos.clone(), "mail.getHeader requires headers"),
     };
-    let name = match required_string(ctx, "mail.getHeader", args, 1, "name") {
+    let reader = ArgReader::new(ctx, "mail.getHeader", args);
+    let name = match reader.required_string(1, "name") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -383,6 +383,70 @@ pub(crate) fn mail_get_header(ctx: &mut CallContext, args: &[Object]) -> Object 
         }
     }
     Object::Undefined
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_string(value: &Object) -> &str {
+        match value {
+            Object::String(value) => value.as_str(),
+            _ => panic!("expected string"),
+        }
+    }
+
+    fn first_header_value(headers: Object, name: &str) -> String {
+        let Object::Hash(hash) = headers else {
+            panic!("expected headers object");
+        };
+        let borrowed = hash.borrow();
+        let Some(Object::Array(values)) = borrowed.get(name) else {
+            panic!("expected header array");
+        };
+        let borrowed_values = values.borrow();
+        object_string(&borrowed_values.elements[0]).to_string()
+    }
+
+    #[test]
+    fn split_address_list_preserves_quoted_commas() {
+        let parts = split_address_list(
+            "\"Doe, Jane\" <jane@example.com>, Ops Team <ops@example.com>, root@example.com",
+        );
+
+        assert_eq!(
+            parts,
+            vec![
+                "\"Doe, Jane\" <jane@example.com>",
+                "Ops Team <ops@example.com>",
+                "root@example.com",
+            ]
+        );
+
+        let parsed: Vec<MailAddress> = parts
+            .iter()
+            .map(|part| parse_one_address(part).expect("address should parse"))
+            .collect();
+        assert_eq!(parsed[0].name, "Doe, Jane");
+        assert_eq!(parsed[0].address, "jane@example.com");
+        assert_eq!(parsed[1].name, "Ops Team");
+        assert_eq!(parsed[1].address, "ops@example.com");
+        assert_eq!(parsed[2].name, "");
+        assert_eq!(parsed[2].address, "root@example.com");
+    }
+
+    #[test]
+    fn parse_rfc5322_headers_unfolds_continuation_lines() {
+        let headers = parse_rfc5322_headers(
+            "Subject: First line\r\n second line\r\nX-Trace: alpha\r\n\tbeta\r\n",
+        );
+
+        assert_eq!(
+            first_header_value(headers.clone(), "Subject"),
+            "First line second line"
+        );
+        assert_eq!(first_header_value(headers, "X-Trace"), "alpha beta");
+    }
 }
 
 // ---------------------------------------------------------------------------

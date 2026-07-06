@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn net_ip_module() -> Object {
     module(vec![
@@ -22,7 +19,8 @@ pub(crate) fn net_ip_module() -> Object {
 }
 
 pub(crate) fn net_ip_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "netip.parseIP", args, 0, "ip") {
+    let reader = ArgReader::new(ctx, "netip.parseIP", args);
+    let text = match reader.required_string(0, "ip") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -33,7 +31,8 @@ pub(crate) fn net_ip_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn net_ip_parse_cidr(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "netip.parseCIDR", args, 0, "cidr") {
+    let reader = ArgReader::new(ctx, "netip.parseCIDR", args);
+    let text = match reader.required_string(0, "cidr") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -44,11 +43,12 @@ pub(crate) fn net_ip_parse_cidr(ctx: &mut CallContext, args: &[Object]) -> Objec
 }
 
 pub(crate) fn net_ip_contains(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let cidr = match required_string(ctx, "netip.contains", args, 0, "cidr") {
+    let reader = ArgReader::new(ctx, "netip.contains", args);
+    let cidr = match reader.required_string(0, "cidr") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let ip = match required_string(ctx, "netip.contains", args, 1, "ip") {
+    let ip = match reader.required_string(1, "ip") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -64,39 +64,36 @@ pub(crate) fn net_ip_contains(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn net_ip_split_host_port(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let address = match required_string(ctx, "netip.splitHostPort", args, 0, "address") {
+    let reader = ArgReader::new(ctx, "netip.splitHostPort", args);
+    let address = match reader.required_string(0, "address") {
         Ok(v) => v,
         Err(e) => return e,
     };
     match split_host_port(&address) {
-        Ok((host, port)) => {
-            let hash = Rc::new(RefCell::new(HashData::default()));
-            hash.borrow_mut().set("host", str_obj(host));
-            hash.borrow_mut().set("port", str_obj(port));
-            Object::Hash(hash)
-        }
+        Ok((host, port)) => ObjectBuilder::new()
+            .set("host", str_obj(host))
+            .set("port", str_obj(port))
+            .build(),
         Err(e) => new_error(ctx.pos.clone(), format!("netip.splitHostPort: {}", e)),
     }
 }
 
 pub(crate) fn net_ip_join_host_port(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let host = match required_string(ctx, "netip.joinHostPort", args, 0, "host") {
+    let reader = ArgReader::new(ctx, "netip.joinHostPort", args);
+    let host = match reader.required_string(0, "host") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let port = match required_string(ctx, "netip.joinHostPort", args, 1, "port") {
+    let port = match reader.required_string(1, "port") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    if host.contains(':') && !host.starts_with('[') {
-        str_obj(format!("[{}]:{}", host, port))
-    } else {
-        str_obj(format!("{}:{}", host, port))
-    }
+    str_obj(join_host_port(&host, &port))
 }
 
 pub(crate) fn net_ip_lookup_host(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let host = match required_string(ctx, "netip.lookupHost", args, 0, "host") {
+    let reader = ArgReader::new(ctx, "netip.lookupHost", args);
+    let host = match reader.required_string(0, "host") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -180,32 +177,28 @@ pub(crate) fn ip_cidr_contains(prefix: &IpPrefix, addr: &IpAddr) -> bool {
 }
 
 pub(crate) fn ip_addr_to_object(addr: &IpAddr) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
     let display = format_ip(addr);
-    hash.borrow_mut().set("value", str_obj(display));
-    hash.borrow_mut().set("is4", bool_obj(!addr.is_v6));
-    hash.borrow_mut().set("is6", bool_obj(addr.is_v6));
-    hash.borrow_mut()
-        .set("isLoopback", bool_obj(addr.is_loopback()));
-    hash.borrow_mut()
-        .set("isPrivate", bool_obj(is_private_ip(addr)));
-    hash.borrow_mut()
-        .set("isMulticast", bool_obj(is_multicast_ip(addr)));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("value", str_obj(display))
+        .set("is4", bool_obj(!addr.is_v6))
+        .set("is6", bool_obj(addr.is_v6))
+        .set("isLoopback", bool_obj(addr.is_loopback()))
+        .set("isPrivate", bool_obj(is_private_ip(addr)))
+        .set("isMulticast", bool_obj(is_multicast_ip(addr)))
+        .build()
 }
 
 pub(crate) fn ip_prefix_to_object(prefix: &IpPrefix) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set(
-        "value",
-        str_obj(format!("{}/{}", format_ip(&prefix.addr), prefix.bits)),
-    );
-    hash.borrow_mut()
-        .set("addr", str_obj(format_ip(&prefix.addr)));
-    hash.borrow_mut().set("bits", num_obj(prefix.bits as f64));
-    hash.borrow_mut().set("is4", bool_obj(!prefix.addr.is_v6));
-    hash.borrow_mut().set("is6", bool_obj(prefix.addr.is_v6));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set(
+            "value",
+            str_obj(format!("{}/{}", format_ip(&prefix.addr), prefix.bits)),
+        )
+        .set("addr", str_obj(format_ip(&prefix.addr)))
+        .set("bits", num_obj(prefix.bits as f64))
+        .set("is4", bool_obj(!prefix.addr.is_v6))
+        .set("is6", bool_obj(prefix.addr.is_v6))
+        .build()
 }
 
 pub(crate) fn format_ip(addr: &IpAddr) -> String {
@@ -240,6 +233,35 @@ pub(crate) fn split_host_port(address: &str) -> Result<(String, String), String>
         Ok((address[..end].to_string(), address[end + 1..].to_string()))
     } else {
         Err("missing port in address".to_string())
+    }
+}
+
+pub(crate) fn join_host_port(host: &str, port: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cidr_contains_matches_ipv4_prefix_bits() {
+        let prefix = parse_ip_cidr("192.168.1.0/24").expect("valid cidr");
+        let inside = parse_ip_addr("192.168.1.42").expect("valid ip");
+        let outside = parse_ip_addr("192.168.2.42").expect("valid ip");
+
+        assert!(ip_cidr_contains(&prefix, &inside));
+        assert!(!ip_cidr_contains(&prefix, &outside));
+    }
+
+    #[test]
+    fn join_host_port_wraps_bare_ipv6_host() {
+        assert_eq!(join_host_port("2001:db8::1", "443"), "[2001:db8::1]:443");
+        assert_eq!(join_host_port("[2001:db8::1]", "443"), "[2001:db8::1]:443");
     }
 }
 

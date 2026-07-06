@@ -10,3 +10,6 @@ pub mod methods;
 pub mod string_lit;
 
 pub use eval_core::{eval_node, eval_program, Eval};
+
+#[cfg(test)]
+mod tests;

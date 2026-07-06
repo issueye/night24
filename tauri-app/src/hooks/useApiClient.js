@@ -1,25 +1,38 @@
 import { useCallback, useMemo } from 'react';
-import { apiUrl } from '../utils/settings.js';
+import { apiAuthHeaders, apiUrl } from '../utils/settings.js';
+
+function normalizeRequestHeaders(headers) {
+  if (!headers) return {};
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return { ...headers };
+}
+
+function apiRequestHeaders(apiKey, { json = false, headers = null } = {}) {
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    ...apiAuthHeaders(apiKey),
+    ...normalizeRequestHeaders(headers),
+  };
+}
 
 export function useApiClient(apiBase, apiKey) {
   const headers = useMemo(() => {
-    const next = { 'Content-Type': 'application/json' };
-    if (apiKey.trim()) {
-      next.Authorization = `Bearer ${apiKey.trim()}`;
-      next['X-API-Key'] = apiKey.trim();
-    }
-    return next;
+    return apiRequestHeaders(apiKey, { json: true });
   }, [apiKey]);
 
   const apiJson = useCallback(
     async (path, options = {}) => {
       const response = await fetch(apiUrl(apiBase, path), {
         ...options,
-        headers: {
-          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-          ...(apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}`, 'X-API-Key': apiKey.trim() } : {}),
-          ...(options.headers || {}),
-        },
+        headers: apiRequestHeaders(apiKey, {
+          json: Boolean(options.body),
+          headers: options.headers,
+        }),
       });
       const text = await response.text();
       if (!response.ok) {

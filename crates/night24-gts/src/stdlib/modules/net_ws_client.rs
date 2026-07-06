@@ -1,9 +1,8 @@
-use std::cell::RefCell;
 use std::io::{Read, Write};
 use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -36,13 +35,14 @@ pub(crate) fn ws_client_module() -> Object {
 }
 
 pub(crate) fn ws_client_connect(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let url = match required_string(ctx, "ws.connect", args, 0, "url") {
+    let reader = ArgReader::new(ctx, "ws.connect", args);
+    let url = match reader.required_string(0, "url") {
         Ok(v) => v,
         Err(e) => return e,
     };
     let mut headers: Vec<(String, String)> = Vec::new();
-    if let Some(Object::Hash(h)) = args.get(1) {
-        for (k, v) in &h.borrow().entries {
+    if let Some(opts) = reader.object_view(1) {
+        for (k, v) in &opts.entries {
             headers.push((k.clone(), v.inspect()));
         }
     }
@@ -238,11 +238,9 @@ fn ws_read_message(stream: &mut dyn WsStream) -> std::io::Result<(u8, Vec<u8>)> 
 
 /// Build the connection object exposed to GTS scripts.
 pub(crate) fn new_ws_conn_object(conn: Rc<WsConn>) -> Object {
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut().set(
-        WS_CONN_STATE_KEY,
-        Object::Hash(Rc::new(RefCell::new(HashData::default()))),
-    );
+    let obj = ObjectBuilder::new()
+        .set(WS_CONN_STATE_KEY, ObjectBuilder::new().build())
+        .into_shared();
 
     let c = conn.clone();
     obj.borrow_mut().set(

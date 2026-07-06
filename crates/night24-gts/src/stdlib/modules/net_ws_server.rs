@@ -1,9 +1,8 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
 use super::net_ws_client::{compute_accept_key, find_subsequence, new_ws_conn_object, WsConn};
-use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn ws_server_module() -> Object {
     module(vec![
@@ -27,14 +26,13 @@ pub(crate) struct WsServer {
 }
 
 pub(crate) fn ws_server_create_server(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let port = match required_number(ctx, "ws.createServer", args, 0, "port") {
+    let reader = ArgReader::new(ctx, "ws.createServer", args);
+    let port = match reader.required_number(0, "port") {
         Ok(v) => v,
         Err(e) => return e,
     };
     let handler = match args.get(1) {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            Some(v.clone())
-        }
+        Some(value) if is_callable(value) => Some(value.clone()),
         _ => None,
     };
     let addr = format!("0.0.0.0:{}", port as i64);
@@ -51,20 +49,16 @@ pub(crate) fn ws_server_create_server(ctx: &mut CallContext, args: &[Object]) ->
     let server = Rc::new(WsServer {
         listener: std::cell::RefCell::new(Some(listener)),
     });
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut().set(
-        WS_SERVER_STATE_KEY,
-        Object::Hash(Rc::new(RefCell::new(HashData {
-            entries: vec![(
-                "__ws_handler__".to_string(),
-                handler.unwrap_or(Object::Undefined),
-            )],
-            ..Default::default()
-        }))),
-    );
-    obj.borrow_mut().set("port", num_obj(bound_port as f64));
-    obj.borrow_mut()
-        .set("address", str_obj(format!(":{}", bound_port)));
+    let obj = ObjectBuilder::new()
+        .set(
+            WS_SERVER_STATE_KEY,
+            ObjectBuilder::new()
+                .set("__ws_handler__", handler.unwrap_or(Object::Undefined))
+                .build(),
+        )
+        .set("port", num_obj(bound_port as f64))
+        .set("address", str_obj(format!(":{}", bound_port)))
+        .into_shared();
 
     let s = server.clone();
     obj.borrow_mut().set(
@@ -97,9 +91,7 @@ pub(crate) fn ws_accept_one(
     args: &[Object],
 ) -> Object {
     let handler = match args.first() {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            Some(v.clone())
-        }
+        Some(value) if is_callable(value) => Some(value.clone()),
         _ => None,
     };
     let guard = server.listener.borrow();

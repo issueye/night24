@@ -18,7 +18,8 @@ pub(crate) fn compression_module() -> Object {
 }
 
 pub(crate) fn compression_gzip_compress(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "gzipCompress", args, 0, "data") {
+    let reader = ArgReader::new(ctx, "gzipCompress", args);
+    let value = match reader.required_string(0, "data") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -29,12 +30,27 @@ pub(crate) fn compression_gzip_compress(ctx: &mut CallContext, args: &[Object]) 
 }
 
 pub(crate) fn compression_gzip_decompress(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "gzipDecompress", args, 0, "data") {
+    let reader = ArgReader::new(ctx, "gzipDecompress", args);
+    let value = match reader.required_string(0, "data") {
         Ok(value) => value,
         Err(err) => return err,
     };
     match gzip_decompress_bytes(&latin1_string_to_bytes(&value)) {
         Ok(bytes) => str_obj(String::from_utf8_lossy(&bytes).into_owned()),
         Err(e) => new_error(ctx.pos.clone(), format!("gzipDecompress: {}", e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gzip_bytes_round_trip_through_latin1_string() {
+        let compressed = gzip_compress_bytes(b"night24").unwrap();
+        let encoded = bytes_to_latin1_string(&compressed);
+        let decoded = gzip_decompress_bytes(&latin1_string_to_bytes(&encoded)).unwrap();
+
+        assert_eq!(decoded, b"night24");
     }
 }

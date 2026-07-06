@@ -1,0 +1,79 @@
+.left-panel {
+  grid-template-rows: auto auto minmax(160px, 1fr) auto;
+  background: var(--sidebar-bg);
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.primary-nav {
+  display: grid;
+  gap: 2px;
+  padding: 12px 10px 10px;
+  border-bottom: 1px solid transparent;
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text);
+  background: transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-row:hover,
+.nav-row.active {
+  background: #ececea;
+}
+
+.project-block,
+.tree-block,
+.sessions-block,
+.permissions {
+  padding: 8px 10px;
+  border-bottom-color: var(--line);
+}
+
+.menu-section-head {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.project-current {
+  padding: 8px 10px;
+  background: #ffffff;
+  border-color: var(--line);
+  border-radius: 10px;
+}
+
+.recent-list button,
+.session-row,
+.tree-row {
+  border-radius: 9px;
+}
+
+.recent-list button,
+.tree-row {
+  color: var(--muted);
+}
+
+.session-row {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.session-row:hover,
+.session-row.active,
+.tree-row:hover,
+.tree-row.selected,
+.recent-list button:hover {
+  color: var(--text);
+  background: #ececea;
+  border-color: transparent;
+}

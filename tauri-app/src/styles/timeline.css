@@ -1,0 +1,86 @@
+.conversation-timeline {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-height: 100%;
+  padding: 26px 0 32px;
+  border-right: 1px solid var(--line);
+}
+
+.timeline-rail {
+  position: absolute;
+  top: 24px;
+  bottom: 28px;
+  left: 50%;
+  width: 1px;
+  background: var(--line);
+  transform: translateX(-50%);
+}
+
+.timeline-point {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-height: 22px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.timeline-point > span {
+  display: block;
+  width: 9px;
+  height: 9px;
+  background: var(--surface);
+  border: 2px solid var(--line-strong);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px #fbfcff;
+}
+
+.timeline-point.user > span {
+  border-color: #4b5563;
+}
+
+.timeline-point.assistant > span {
+  border-color: var(--blue);
+}
+
+.timeline-point.permission > span {
+  border-color: var(--amber);
+}
+
+.timeline-point.error > span {
+  border-color: var(--red);
+}
+
+.timeline-point.active > span {
+  background: currentColor;
+}
+
+.timeline-point:hover > span,
+.timeline-point:focus-visible > span {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 4px rgba(55, 125, 255, 0.12), 0 0 0 3px #fbfcff;
+}
+
+.timeline-point:focus-visible {
+  outline: none;
+}
+
+.timeline-point small {
+  width: 34px;
+  overflow: hidden;
+  color: var(--subtle);
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

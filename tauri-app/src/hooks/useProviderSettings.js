@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  DEFAULT_CONTEXT_THRESHOLD,
   STORAGE_KEYS,
+  activeProviderProfile,
   createProviderProfile,
+  providerProfileById,
+  providerProfileFormState,
   readProviderProfiles,
   readSetting,
+  validProviderProfileId,
   writeJsonSetting,
   writeSetting,
 } from '../utils/settings.js';
@@ -13,22 +16,24 @@ export function useProviderSettings() {
   const initialProviderProfiles = useMemo(readProviderProfiles, []);
   const initialProviderProfileId = useMemo(() => {
     const stored = readSetting(STORAGE_KEYS.providerProfileId, 'default-provider');
-    return initialProviderProfiles.some((profile) => profile.id === stored)
-      ? stored
-      : initialProviderProfiles[0]?.id || '';
+    return validProviderProfileId(initialProviderProfiles, stored);
   }, [initialProviderProfiles]);
   const initialProviderProfile = useMemo(
-    () => initialProviderProfiles.find((profile) => profile.id === initialProviderProfileId) || initialProviderProfiles[0],
+    () => activeProviderProfile(initialProviderProfiles, initialProviderProfileId),
     [initialProviderProfileId, initialProviderProfiles],
+  );
+  const initialFormState = useMemo(
+    () => providerProfileFormState(initialProviderProfile),
+    [initialProviderProfile],
   );
 
   const [providerProfiles, setProviderProfiles] = useState(() => initialProviderProfiles);
   const [providerProfileId, setProviderProfileId] = useState(() => initialProviderProfileId);
-  const [provider, setProvider] = useState(() => initialProviderProfile?.provider || 'echo');
-  const [model, setModel] = useState(() => initialProviderProfile?.model || 'echo-v1');
-  const [baseUrl, setBaseUrl] = useState(() => initialProviderProfile?.baseUrl || '');
-  const [contextThreshold, setContextThreshold] = useState(() => initialProviderProfile?.contextThreshold || DEFAULT_CONTEXT_THRESHOLD);
-  const [providerKey, setProviderKey] = useState(() => initialProviderProfile?.apiKey || '');
+  const [provider, setProvider] = useState(() => initialFormState.provider);
+  const [model, setModel] = useState(() => initialFormState.model);
+  const [baseUrl, setBaseUrl] = useState(() => initialFormState.baseUrl);
+  const [contextThreshold, setContextThreshold] = useState(() => initialFormState.contextThreshold);
+  const [providerKey, setProviderKey] = useState(() => initialFormState.apiKey);
 
   useEffect(() => {
     if (!providerProfiles.some((profile) => profile.id === providerProfileId)) {
@@ -90,14 +95,15 @@ export function useProviderSettings() {
   }
 
   function selectProviderProfile(id) {
-    const profile = providerProfiles.find((item) => item.id === id);
+    const profile = providerProfileById(providerProfiles, id);
     if (!profile) return;
+    const formState = providerProfileFormState(profile);
     setProviderProfileId(profile.id);
-    setProvider(profile.provider || 'echo');
-    setModel(profile.model || (profile.provider === 'echo' ? 'echo-v1' : ''));
-    setBaseUrl(profile.baseUrl || '');
-    setProviderKey(profile.apiKey || '');
-    setContextThreshold(profile.contextThreshold || DEFAULT_CONTEXT_THRESHOLD);
+    setProvider(formState.provider);
+    setModel(formState.model);
+    setBaseUrl(formState.baseUrl);
+    setProviderKey(formState.apiKey);
+    setContextThreshold(formState.contextThreshold);
   }
 
   function updateProviderProfile(id, patch) {
@@ -109,12 +115,13 @@ export function useProviderSettings() {
     const next = providerProfiles.filter((item) => item.id !== id);
     setProviderProfiles(next);
     if (providerProfileId === id && next[0]) {
+      const formState = providerProfileFormState(next[0]);
       setProviderProfileId(next[0].id);
-      setProvider(next[0].provider || 'echo');
-      setModel(next[0].model || (next[0].provider === 'echo' ? 'echo-v1' : ''));
-      setBaseUrl(next[0].baseUrl || '');
-      setProviderKey(next[0].apiKey || '');
-      setContextThreshold(next[0].contextThreshold || DEFAULT_CONTEXT_THRESHOLD);
+      setProvider(formState.provider);
+      setModel(formState.model);
+      setBaseUrl(formState.baseUrl);
+      setProviderKey(formState.apiKey);
+      setContextThreshold(formState.contextThreshold);
     }
   }
 

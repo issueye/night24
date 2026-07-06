@@ -1,0 +1,107 @@
+.compact-action {
+  height: 28px;
+  padding: 0 9px;
+}
+
+.hook-status {
+  min-height: 28px;
+  padding: 7px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hook-status.error {
+  color: var(--red);
+  background: #fff7f7;
+  border-color: #fecaca;
+}
+
+.hook-status.success {
+  color: var(--green);
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.hook-status.warning {
+  white-space: pre-wrap;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: #fde68a;
+}
+
+.hook-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--muted);
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+.hook-empty.inline {
+  flex: 1;
+  min-height: 180px;
+}
+
+.hook-empty strong,
+.hook-empty span {
+  display: block;
+}
+
+.hook-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.hook-empty span {
+  max-width: 260px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.danger-outline-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  align-self: end;
+  color: var(--red);
+  background: var(--surface);
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.danger-outline-button:disabled {
+  color: var(--subtle);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .hook-manager,
+  .skill-manager {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 150px minmax(0, 1fr);
+  }
+
+  .skill-meta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skill-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .skill-inspector-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

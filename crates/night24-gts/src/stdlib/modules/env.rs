@@ -1,10 +1,8 @@
-use std::cell::RefCell;
 use std::env;
 use std::fs;
-use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn env_module() -> Object {
     module(vec![
@@ -31,7 +29,8 @@ pub(crate) fn env_module() -> Object {
 }
 
 pub(crate) fn env_get(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let key = match required_string(ctx, "env.get", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.get", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -42,7 +41,8 @@ pub(crate) fn env_get(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_get_int(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let key = match required_string(ctx, "env.getInt", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.getInt", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -63,7 +63,8 @@ pub(crate) fn env_get_int(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_get_float(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let key = match required_string(ctx, "env.getFloat", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.getFloat", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -81,7 +82,8 @@ pub(crate) fn env_get_float(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_get_bool(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let key = match required_string(ctx, "env.getBool", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.getBool", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -105,7 +107,8 @@ pub(crate) fn env_get_bool(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_get_array(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let key = match required_string(ctx, "env.getArray", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.getArray", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -120,7 +123,8 @@ pub(crate) fn env_get_array(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_has(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "env.has", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.has", args);
+    match reader.required_string(0, "key") {
         Ok(key) => bool_obj(env::var_os(key).is_some()),
         Err(err) => err,
     }
@@ -198,7 +202,8 @@ pub(crate) fn env_load_multiple(ctx: &mut CallContext, args: &[Object]) -> Objec
 pub(crate) fn env_get_json(ctx: &mut CallContext, args: &[Object]) -> Object {
     // The Go original's getJson is a stub returning the raw string; preserve
     // that contract for compatibility.
-    let key = match required_string(ctx, "env.getJson", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.getJson", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -209,16 +214,17 @@ pub(crate) fn env_get_json(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let content = match required_string(ctx, "env.parse", args, 0, "content") {
+    let reader = ArgReader::new(ctx, "env.parse", args);
+    let content = match reader.required_string(0, "content") {
         Ok(value) => value,
         Err(err) => return err,
     };
     let entries = parse_env_content(&content);
-    let hash = Rc::new(RefCell::new(HashData::default()));
+    let mut builder = ObjectBuilder::new();
     for (k, v) in entries {
-        hash.borrow_mut().set(k, str_obj(v));
+        builder.insert(k, str_obj(v));
     }
-    Object::Hash(hash)
+    builder.build()
 }
 
 /// Apply parsed entries to the process environment. With override=false, only
@@ -302,7 +308,8 @@ pub(crate) fn expand_env_vars(value: &str, parsed: &[(String, String)]) -> Strin
 }
 
 pub(crate) fn env_set(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let key = match required_string(ctx, "env.set", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.set", args);
+    let key = match reader.required_string(0, "key") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -315,7 +322,8 @@ pub(crate) fn env_set(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_unset(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "env.unset", args, 0, "key") {
+    let reader = ArgReader::new(ctx, "env.unset", args);
+    match reader.required_string(0, "key") {
         Ok(key) => {
             env::remove_var(key);
             Object::Undefined
@@ -325,9 +333,9 @@ pub(crate) fn env_unset(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn env_to_object(_ctx: &mut CallContext, _args: &[Object]) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
+    let mut builder = ObjectBuilder::new();
     for (key, value) in env::vars() {
-        hash.borrow_mut().set(key, str_obj(value));
+        builder.insert(key, str_obj(value));
     }
-    Object::Hash(hash)
+    builder.build()
 }

@@ -1,11 +1,11 @@
 use super::*;
 
 pub(crate) fn module(entries: Vec<(&str, Object)>) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
+    let mut builder = ObjectBuilder::new();
     for (name, value) in entries {
-        hash.borrow_mut().set(name, value);
+        builder.insert(name, value);
     }
-    Object::Hash(hash)
+    builder.build()
 }
 
 pub(crate) fn native(

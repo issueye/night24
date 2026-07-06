@@ -20,13 +20,39 @@ pub(crate) fn hex_encode_fn(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn hex_decode_fn(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "hex.decode", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "hex.decode", args);
+    let text = match reader.required_string(0, "text") {
         Ok(value) => value,
         Err(err) => return err,
     };
     match hex_decode_bytes("hex.decode", &text) {
         Ok(bytes) => bytes_result(ctx, "hex.decode", bytes, args.get(1)),
         Err(msg) => new_error(ctx.pos.clone(), msg),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_decode_bytes_accepts_mixed_case() {
+        assert_eq!(
+            hex_decode_bytes("hex.decode", "4e696768743234").unwrap(),
+            b"Night24"
+        );
+    }
+
+    #[test]
+    fn hex_decode_bytes_rejects_invalid_data() {
+        assert_eq!(
+            hex_decode_bytes("hex.decode", "abc").unwrap_err(),
+            "hex.decode: invalid hex data"
+        );
+        assert_eq!(
+            hex_decode_bytes("hex.decode", "xx").unwrap_err(),
+            "hex.decode: invalid hex data"
+        );
     }
 }
 

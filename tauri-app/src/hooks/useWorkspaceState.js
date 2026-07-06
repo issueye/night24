@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { normalizeError } from '../utils/events.js';
 import {
@@ -12,7 +12,6 @@ import {
 
 export function useWorkspaceState({
   apiJson,
-  headers,
   addTimeline,
   showError,
   clearConversationView,
@@ -28,11 +27,25 @@ export function useWorkspaceState({
   const [workspaceDiff, setWorkspaceDiff] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState('');
+  const diffRequestRef = useRef(null);
+  const diffGenerationRef = useRef(0);
+  const fileRequestRef = useRef(0);
+  const loadWorkspaceRequestRef = useRef(0);
+  const openWorkspaceRequestRef = useRef(0);
+  const workspaceKeyRef = useRef('');
+
+  useEffect(() => {
+    workspaceKeyRef.current = workspace?.root_path || '';
+  }, [workspace?.root_path]);
 
   const loadWorkspace = useCallback(async () => {
+    const requestId = loadWorkspaceRequestRef.current + 1;
+    loadWorkspaceRequestRef.current = requestId;
+    const isCurrentRequest = () => loadWorkspaceRequestRef.current === requestId;
     const storedRecent = readJsonSetting(STORAGE_KEYS.recentWorkspaces, []);
     try {
       let current = await apiJson('/workspaces/current');
+      if (!isCurrentRequest()) return;
       if (!current) {
         const savedPath = readSetting(STORAGE_KEYS.currentWorkspacePath);
         if (savedPath) {
@@ -40,10 +53,12 @@ export function useWorkspaceState({
             method: 'POST',
             body: JSON.stringify({ path: savedPath }),
           }).catch(() => null);
+          if (!isCurrentRequest()) return;
         }
       }
       setWorkspace(current || null);
       const recent = await apiJson('/workspaces/recent').catch(() => ({ workspaces: [] }));
+      if (!isCurrentRequest()) return;
       const mergedRecent = compactWorkspaces([
         ...(current ? [current] : []),
         ...(Array.isArray(recent?.workspaces) ? recent.workspaces : []),
@@ -54,11 +69,13 @@ export function useWorkspaceState({
       if (current) {
         rememberWorkspace(current);
         const data = await apiJson('/workspace/tree');
+        if (!isCurrentRequest()) return;
         setTree(data?.root || null);
       } else {
         setTree(null);
       }
     } catch {
+      if (!isCurrentRequest()) return;
       setWorkspace(null);
       setTree(null);
       setRecentWorkspaces(storedRecent);
@@ -66,26 +83,47 @@ export function useWorkspaceState({
   }, [apiJson]);
 
   const loadWorkspaceDiff = useCallback(async () => {
-    if (!workspace) return;
+    const workspaceKey = workspace?.root_path || '';
+    if (!workspaceKey) return;
+    if (diffRequestRef.current?.workspaceKey === workspaceKey) {
+      return diffRequestRef.current.request;
+    }
+
+    const generation = diffGenerationRef.current;
     setDiffLoading(true);
     setDiffError('');
-    try {
-      const [status, diff] = await Promise.all([
-        apiJson('/workspace/status'),
-        apiJson('/workspace/diff'),
-      ]);
-      setWorkspaceStatus(status);
-      setWorkspaceDiff(diff);
-    } catch (error) {
-      setWorkspaceStatus(null);
-      setWorkspaceDiff(null);
-      setDiffError(normalizeError(error));
-    } finally {
-      setDiffLoading(false);
-    }
+    const request = (async () => {
+      try {
+        const [status, diff] = await Promise.all([
+          apiJson('/workspace/status'),
+          apiJson('/workspace/diff'),
+        ]);
+        if (diffGenerationRef.current !== generation || diffRequestRef.current?.request !== request) return;
+        setWorkspaceStatus(status);
+        setWorkspaceDiff(diff);
+      } catch (error) {
+        if (diffGenerationRef.current !== generation || diffRequestRef.current?.request !== request) return;
+        setWorkspaceStatus(null);
+        setWorkspaceDiff(null);
+        setDiffError(normalizeError(error));
+      } finally {
+        if (diffGenerationRef.current === generation && diffRequestRef.current?.request === request) {
+          setDiffLoading(false);
+        }
+      }
+    })();
+    diffRequestRef.current = { request, workspaceKey };
+    request.finally(() => {
+      if (diffRequestRef.current?.request === request) {
+        diffRequestRef.current = null;
+      }
+    });
+    return request;
   }, [apiJson, workspace]);
 
   async function openWorkspace(pathFromRecent) {
+    let requestId = null;
+    const isCurrentOpenRequest = () => requestId === null || openWorkspaceRequestRef.current === requestId;
     try {
       let path = pathFromRecent;
       if (!path) {
@@ -96,13 +134,19 @@ export function useWorkspaceState({
         }
       }
       if (!path) return;
+      requestId = openWorkspaceRequestRef.current + 1;
+      openWorkspaceRequestRef.current = requestId;
       const opened = await apiJson('/workspaces/open', {
         method: 'POST',
-        headers,
         body: JSON.stringify({ path }),
       });
+      if (!isCurrentOpenRequest()) return;
+      loadWorkspaceRequestRef.current += 1;
       clearConversationView({ abortActive: true });
       onWorkspaceOpened?.();
+      diffGenerationRef.current += 1;
+      diffRequestRef.current = null;
+      fileRequestRef.current += 1;
       setWorkspace(opened);
       rememberWorkspace(opened);
       setRightTab('files');
@@ -110,24 +154,33 @@ export function useWorkspaceState({
       setSelectedFile(null);
       setWorkspaceStatus(null);
       setWorkspaceDiff(null);
+      setDiffLoading(false);
       setDiffError('');
       const data = await apiJson('/workspace/tree');
+      if (!isCurrentOpenRequest()) return;
       setTree(data?.root || null);
       await loadWorkspace();
+      if (!isCurrentOpenRequest()) return;
       addTimeline('workspace', '已打开项目', opened?.root_path || path, 'success');
     } catch (error) {
+      if (!isCurrentOpenRequest()) return;
       showError(`打开项目失败：${normalizeError(error)}`);
     }
   }
 
   async function openFile(node) {
     if (!node || node.kind !== 'file') return;
+    const requestId = fileRequestRef.current + 1;
+    const workspaceKey = workspaceKeyRef.current;
+    fileRequestRef.current = requestId;
     try {
       setRightTab('files');
       setContextOpen(true);
       const file = await apiJson(`/workspace/file?path=${encodeURIComponent(node.path)}`);
+      if (fileRequestRef.current !== requestId || workspaceKeyRef.current !== workspaceKey) return;
       setSelectedFile(file);
     } catch (error) {
+      if (fileRequestRef.current !== requestId || workspaceKeyRef.current !== workspaceKey) return;
       showError(`读取文件失败：${normalizeError(error)}`);
     }
   }

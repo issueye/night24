@@ -1,9 +1,12 @@
 use std::fmt;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use gts::runtime::{RunOptions, Session};
+pub(super) use night24_protocol::HookEvent;
 use night24_protocol::OutputStream;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -11,49 +14,17 @@ use tokio::sync::oneshot;
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const MAX_OUTPUT_CHARS: usize = 8_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum HookEvent {
-    RunStarted,
-    BeforeProviderRequest,
-    BeforeTool,
-    AfterTool,
-    PermissionRequired,
-    RunFinished,
-    RunFailed,
-}
-
-impl HookEvent {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::RunStarted => "run_started",
-            Self::BeforeProviderRequest => "before_provider_request",
-            Self::BeforeTool => "before_tool",
-            Self::AfterTool => "after_tool",
-            Self::PermissionRequired => "permission_required",
-            Self::RunFinished => "run_finished",
-            Self::RunFailed => "run_failed",
-        }
-    }
-}
-
-impl fmt::Display for HookEvent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(super) struct HookRunner {
     hooks: Vec<HookDefinition>,
-    gts_worker: Arc<GtsHookWorker>,
+    gts_engine: Arc<GtsHookEngine>,
 }
 
 impl Default for HookRunner {
     fn default() -> Self {
         Self {
             hooks: Vec::new(),
-            gts_worker: Arc::new(GtsHookWorker::new()),
+            gts_engine: Arc::new(GtsHookEngine::new()),
         }
     }
 }
@@ -72,9 +43,11 @@ struct HookDefinition {
     #[serde(default)]
     inline_script: Option<String>,
     #[serde(default)]
-    engine: Option<HookEngine>,
+    engine: Option<HookEngineKind>,
     #[serde(default)]
     instruction_limit: Option<u64>,
+    #[serde(default)]
+    allowed_modules: Option<Vec<String>>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default = "default_enabled")]
@@ -89,12 +62,12 @@ fn default_enabled() -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum HookEngine {
+enum HookEngineKind {
     #[serde(rename = "gts", alias = "goscript")]
     Gts,
 }
 
-impl fmt::Display for HookEngine {
+impl fmt::Display for HookEngineKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Gts => f.write_str("gts"),
@@ -147,6 +120,22 @@ pub(super) struct HookOutput {
     pub(super) text: String,
 }
 
+type HookFuture<'a> = Pin<Box<dyn Future<Output = Vec<HookOutput>> + Send + 'a>>;
+
+trait HookEngine: fmt::Debug + Send + Sync {
+    fn run_hook<'a>(
+        &'a self,
+        hook: &'a HookDefinition,
+        context: &'a HookContext<'_>,
+    ) -> HookFuture<'a>;
+}
+
+trait ScriptEngine: fmt::Debug + Send + Sync {
+    type Request;
+
+    fn run_script<'a>(&'a self, request: Self::Request) -> HookFuture<'a>;
+}
+
 impl HookRunner {
     pub(super) fn from_environment(working_dir: &Path) -> Self {
         let Some(path) = hook_config_path(working_dir) else {
@@ -174,7 +163,7 @@ impl HookRunner {
                 .into_iter()
                 .filter(|hook| hook.enabled && hook.has_executor())
                 .collect(),
-            gts_worker: Arc::new(GtsHookWorker::new()),
+            gts_engine: Arc::new(GtsHookEngine::new()),
         })
     }
 
@@ -189,7 +178,7 @@ impl HookRunner {
 
         let mut outputs = Vec::new();
         for hook in self.hooks.iter().filter(|hook| hook.event == context.event) {
-            outputs.extend(run_gts_hook(hook, context, &self.gts_worker).await);
+            outputs.extend(self.gts_engine.run_hook(hook, context).await);
         }
         outputs
     }
@@ -212,40 +201,6 @@ fn hook_config_path(working_dir: &Path) -> Option<PathBuf> {
         Some(workspace_config)
     } else {
         None
-    }
-}
-
-async fn run_gts_hook(
-    hook: &HookDefinition,
-    context: &HookContext<'_>,
-    worker: &GtsHookWorker,
-) -> Vec<HookOutput> {
-    let source = hook_source(hook, context.event);
-    let timeout = Duration::from_millis(hook.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).max(1));
-    let request = match GtsHookRequest::from_hook(hook, context, timeout) {
-        Ok(request) => request,
-        Err(err) => {
-            return vec![HookOutput {
-                source,
-                stream: OutputStream::Stderr,
-                text: err.to_string(),
-            }]
-        }
-    };
-
-    match worker.run(request).await {
-        Ok(outputs) => outputs
-            .into_iter()
-            .map(|mut output| {
-                output.source = source.clone();
-                output
-            })
-            .collect(),
-        Err(err) => vec![HookOutput {
-            source,
-            stream: OutputStream::Stderr,
-            text: err,
-        }],
     }
 }
 
@@ -287,7 +242,7 @@ fn hook_source(hook: &HookDefinition, event: HookEvent) -> String {
 
 impl HookDefinition {
     fn has_executor(&self) -> bool {
-        let _engine = self.engine.unwrap_or(HookEngine::Gts);
+        let _engine = self.engine.unwrap_or(HookEngineKind::Gts);
         self.script
             .as_ref()
             .is_some_and(|path| !path.as_os_str().is_empty())
@@ -299,12 +254,76 @@ impl HookDefinition {
 }
 
 #[derive(Debug)]
+struct GtsHookEngine {
+    worker: GtsHookWorker,
+}
+
+impl GtsHookEngine {
+    fn new() -> Self {
+        Self {
+            worker: GtsHookWorker::new(),
+        }
+    }
+}
+
+impl HookEngine for GtsHookEngine {
+    fn run_hook<'a>(
+        &'a self,
+        hook: &'a HookDefinition,
+        context: &'a HookContext<'_>,
+    ) -> HookFuture<'a> {
+        Box::pin(async move {
+            let source = hook_source(hook, context.event);
+            let timeout =
+                Duration::from_millis(hook.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).max(1));
+            let request = match GtsHookRequest::from_hook(hook, context, timeout) {
+                Ok(request) => request,
+                Err(err) => {
+                    return vec![HookOutput {
+                        source,
+                        stream: OutputStream::Stderr,
+                        text: err.to_string(),
+                    }];
+                }
+            };
+
+            self.run_script(request)
+                .await
+                .into_iter()
+                .map(|mut output| {
+                    output.source = source.clone();
+                    output
+                })
+                .collect()
+        })
+    }
+}
+
+impl ScriptEngine for GtsHookEngine {
+    type Request = GtsHookRequest;
+
+    fn run_script<'a>(&'a self, request: Self::Request) -> HookFuture<'a> {
+        Box::pin(async move {
+            match self.worker.run(request).await {
+                Ok(outputs) => outputs,
+                Err(err) => vec![HookOutput {
+                    source: String::new(),
+                    stream: OutputStream::Stderr,
+                    text: err,
+                }],
+            }
+        })
+    }
+}
+
+#[derive(Debug)]
 struct GtsHookRequest {
     script: GtsHookScript,
     file: PathBuf,
     execute_args: serde_json::Value,
     timeout: Duration,
     instruction_limit: u64,
+    allowed_modules: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -333,16 +352,9 @@ impl GtsHookWorker {
             .spawn(move || {
                 while let Ok(job) = rx.recv() {
                     let outputs = if Instant::now() >= job.deadline {
-                        vec![HookOutput {
-                            source: String::new(),
-                            stream: OutputStream::Stderr,
-                            text: format!(
-                                "hook timed out after {} ms",
-                                job.request.timeout.as_millis()
-                            ),
-                        }]
+                        vec![hook_timeout_output(job.request.timeout)]
                     } else {
-                        run_gts_request(job.request)
+                        run_gts_request(job.request, job.deadline)
                     };
                     let _ = job.respond_to.send(outputs);
                 }
@@ -410,6 +422,7 @@ impl GtsHookRequest {
             execute_args,
             timeout,
             instruction_limit: hook.instruction_limit.unwrap_or(1_000_000),
+            allowed_modules: hook.allowed_modules.clone(),
         })
     }
 }
@@ -445,17 +458,18 @@ fn gts_execute_args(
         "hook": {
             "event": hook.event.as_str(),
             "name": hook_name,
-            "engine": hook.engine.unwrap_or(HookEngine::Gts).to_string(),
+            "engine": hook.engine.unwrap_or(HookEngineKind::Gts).to_string(),
             "script": script,
             "file": file.to_string_lossy().to_string(),
             "inline_script": hook.inline_script.as_ref().is_some_and(|value| !value.trim().is_empty()),
             "timeout_ms": hook.timeout_ms,
             "instruction_limit": hook.instruction_limit,
+            "allowed_modules": hook.allowed_modules,
         }
     })
 }
 
-fn run_gts_request(request: GtsHookRequest) -> Vec<HookOutput> {
+fn run_gts_request(request: GtsHookRequest, deadline: Instant) -> Vec<HookOutput> {
     let session = Session::new();
     let legacy_context = request
         .execute_args
@@ -465,10 +479,16 @@ fn run_gts_request(request: GtsHookRequest) -> Vec<HookOutput> {
     session
         .vm()
         .set_instruction_limit(request.instruction_limit);
+    session
+        .vm()
+        .set_allowed_modules(request.allowed_modules.clone());
 
+    let Some(timeout) = remaining_hook_timeout(deadline) else {
+        return vec![hook_timeout_output(request.timeout)];
+    };
     let result = match request.script {
         GtsHookScript::Source(source) => {
-            session.vm().set_timeout(Some(request.timeout));
+            session.vm().set_timeout(Some(timeout));
             let result = session.run_source_with_options(&source, &request.file, false);
             session.vm().clear_timeout();
             result
@@ -478,7 +498,7 @@ fn run_gts_request(request: GtsHookRequest) -> Vec<HookOutput> {
             RunOptions {
                 argv: vec![path.to_string_lossy().to_string()],
                 call_main: false,
-                timeout: Some(request.timeout),
+                timeout: Some(timeout),
             },
         ),
     };
@@ -489,7 +509,16 @@ fn run_gts_request(request: GtsHookRequest) -> Vec<HookOutput> {
         return outputs;
     }
 
-    session.vm().set_timeout(Some(request.timeout));
+    let Some(timeout) = remaining_hook_timeout(deadline) else {
+        push_output(
+            &mut outputs,
+            "",
+            OutputStream::Stderr,
+            hook_timeout_message(request.timeout),
+        );
+        return outputs;
+    };
+    session.vm().set_timeout(Some(timeout));
     let execute_result = session.call_execute_json(&request.execute_args);
     session.vm().clear_timeout();
     outputs.extend(take_gts_vm_output(&session));
@@ -499,6 +528,24 @@ fn run_gts_request(request: GtsHookRequest) -> Vec<HookOutput> {
         Err(err) => push_output(&mut outputs, "", OutputStream::Stderr, err.inspect()),
     }
     outputs
+}
+
+fn remaining_hook_timeout(deadline: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+}
+
+fn hook_timeout_output(timeout: Duration) -> HookOutput {
+    HookOutput {
+        source: String::new(),
+        stream: OutputStream::Stderr,
+        text: hook_timeout_message(timeout),
+    }
+}
+
+fn hook_timeout_message(timeout: Duration) -> String {
+    format!("hook timed out after {} ms", timeout.as_millis())
 }
 
 fn take_gts_vm_output(session: &Session) -> Vec<HookOutput> {
@@ -514,22 +561,60 @@ fn take_gts_vm_output(session: &Session) -> Vec<HookOutput> {
 }
 
 fn push_structured_gts_outputs(outputs: &mut Vec<HookOutput>, value: &serde_json::Value) {
-    let Some(items) = value.get("outputs").and_then(|outputs| outputs.as_array()) else {
+    let Some(outputs_value) = value.get("outputs") else {
         return;
     };
-    for item in items {
+
+    let Some(items) = outputs_value.as_array() else {
+        push_structured_output_warning(outputs, "outputs must be an array".to_string());
+        return;
+    };
+
+    for (index, item) in items.iter().enumerate() {
+        let Some(item) = item.as_object() else {
+            push_structured_output_warning(outputs, format!("outputs[{index}] must be an object"));
+            continue;
+        };
+
         let stream = match item.get("stream").and_then(|stream| stream.as_str()) {
             Some("stderr") => OutputStream::Stderr,
             Some("stdout") | None => OutputStream::Stdout,
-            Some(_) => OutputStream::Stdout,
+            Some(stream) => {
+                push_structured_output_warning(
+                    outputs,
+                    format!("outputs[{index}].stream must be stdout or stderr, got {stream}"),
+                );
+                continue;
+            }
         };
         let text = match item.get("text") {
             Some(serde_json::Value::String(text)) => text.clone(),
-            Some(other) => other.to_string(),
-            None => String::new(),
+            Some(_) => {
+                push_structured_output_warning(
+                    outputs,
+                    format!("outputs[{index}].text must be a string"),
+                );
+                continue;
+            }
+            None => {
+                push_structured_output_warning(
+                    outputs,
+                    format!("outputs[{index}].text is required"),
+                );
+                continue;
+            }
         };
         push_output(outputs, "", stream, text);
     }
+}
+
+fn push_structured_output_warning(outputs: &mut Vec<HookOutput>, warning: String) {
+    push_output(
+        outputs,
+        "",
+        OutputStream::Stderr,
+        format!("hook structured output ignored: {warning}"),
+    );
 }
 
 fn push_output(outputs: &mut Vec<HookOutput>, source: &str, stream: OutputStream, text: String) {

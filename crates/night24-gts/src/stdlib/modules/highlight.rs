@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
-use crate::object::{str_obj, CallContext, HashData, Object};
+use crate::object::{str_obj, CallContext, Object};
 
 pub(crate) fn highlight_module() -> Object {
     module(vec![(
@@ -18,7 +15,8 @@ pub(crate) struct HighlightOpts {
 }
 
 pub(crate) fn highlight_terminal(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let code = match required_string(ctx, "highlight.terminal", args, 0, "code") {
+    let reader = ArgReader::new(ctx, "highlight.terminal", args);
+    let code = match reader.required_string(0, "code") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -27,15 +25,16 @@ pub(crate) fn highlight_terminal(ctx: &mut CallContext, args: &[Object]) -> Obje
         width: 80,
         color: true,
     };
-    if let Some(Object::Hash(h)) = args.get(1) {
-        if let Some(Object::String(s)) = h.borrow().get("lang") {
+    if let Some(opts_obj) = reader.object_view(1) {
+        let view = ObjectView::new(&opts_obj);
+        if let Some(Object::String(s)) = view.object("lang") {
             opts.lang = s.to_ascii_lowercase();
         }
-        if let Some(Object::Number(n)) = h.borrow().get("width") {
-            opts.width = *n as usize;
+        if let Some(n) = view.number("width") {
+            opts.width = n as usize;
         }
-        if let Some(Object::Boolean(b)) = h.borrow().get("color") {
-            opts.color = *b;
+        if let Some(Object::Boolean(b)) = view.object("color") {
+            opts.color = b;
         }
     }
     if opts.width < 1 {
@@ -49,14 +48,14 @@ pub(crate) fn highlight_terminal(ctx: &mut CallContext, args: &[Object]) -> Obje
         }
     }
 
-    let out = Rc::new(RefCell::new(HashData::default()));
-    out.borrow_mut().set(
-        "lines",
-        array(lines.iter().map(|s| str_obj(s.clone())).collect()),
-    );
-    out.borrow_mut().set("text", str_obj(lines.join("\n")));
-    out.borrow_mut().set("lang", str_obj(opts.lang.clone()));
-    Object::Hash(out)
+    ObjectBuilder::new()
+        .set(
+            "lines",
+            array(lines.iter().map(|s| str_obj(s.clone())).collect()),
+        )
+        .set("text", str_obj(lines.join("\n")))
+        .set("lang", str_obj(opts.lang.clone()))
+        .build()
 }
 
 pub(crate) fn wrap_simple(line: &str, width: usize) -> Vec<String> {

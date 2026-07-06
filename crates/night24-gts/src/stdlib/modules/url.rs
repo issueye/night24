@@ -1,7 +1,5 @@
-use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use super::super::helpers::*;
 use crate::object::{new_error, str_obj, CallContext, HashData, Object};
@@ -82,38 +80,37 @@ impl UrlParts {
     }
 
     fn to_object(&self) -> Object {
-        let hash = Rc::new(RefCell::new(HashData::default()));
-        hash.borrow_mut().set("href", str_obj(self.to_string()));
         let protocol = if self.scheme.is_empty() {
             String::new()
         } else {
             format!("{}:", self.scheme)
         };
-        hash.borrow_mut().set("protocol", str_obj(protocol));
-        hash.borrow_mut().set("host", str_obj(self.host.clone()));
-        hash.borrow_mut().set("hostname", str_obj(self.hostname()));
-        hash.borrow_mut().set("port", str_obj(self.port()));
-        hash.borrow_mut()
-            .set("pathname", str_obj(self.path.clone()));
         let search = if self.query.is_empty() {
             String::new()
         } else {
             format!("?{}", self.query)
         };
-        hash.borrow_mut().set("search", str_obj(search));
         let hash_field = if self.fragment.is_empty() {
             String::new()
         } else {
             format!("#{}", self.fragment)
         };
-        hash.borrow_mut().set("hash", str_obj(hash_field));
         let origin = if !self.scheme.is_empty() && !self.host.is_empty() {
             format!("{}://{}", self.scheme, self.host)
         } else {
             "null".to_string()
         };
-        hash.borrow_mut().set("origin", str_obj(origin));
-        Object::Hash(hash)
+        ObjectBuilder::new()
+            .set("href", str_obj(self.to_string()))
+            .set("protocol", str_obj(protocol))
+            .set("host", str_obj(self.host.clone()))
+            .set("hostname", str_obj(self.hostname()))
+            .set("port", str_obj(self.port()))
+            .set("pathname", str_obj(self.path.clone()))
+            .set("search", str_obj(search))
+            .set("hash", str_obj(hash_field))
+            .set("origin", str_obj(origin))
+            .build()
     }
 }
 
@@ -161,7 +158,8 @@ fn parse_url(input: &str) -> Option<UrlParts> {
 }
 
 pub(crate) fn url_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let input = match required_string(ctx, "url.parse", args, 0, "url") {
+    let reader = ArgReader::new(ctx, "url.parse", args);
+    let input = match reader.required_string(0, "url") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -182,40 +180,7 @@ pub(crate) fn url_format(ctx: &mut CallContext, args: &[Object]) -> Object {
         },
         Some(Object::Hash(hash)) => {
             let h = hash.borrow();
-            let mut scheme = hash_string(&h, "protocol").or_else(|| hash_string(&h, "scheme"));
-            if let Some(s) = &scheme {
-                if let Some(stripped) = s.strip_suffix(':') {
-                    scheme = Some(stripped.to_string());
-                }
-            }
-            let host = hash_string(&h, "host").unwrap_or_else(|| {
-                let hostname = hash_string(&h, "hostname").unwrap_or_default();
-                let port = hash_string(&h, "port").unwrap_or_default();
-                if port.is_empty() {
-                    hostname
-                } else {
-                    format!("{}:{}", hostname, port)
-                }
-            });
-            let path = hash_string(&h, "pathname")
-                .or_else(|| hash_string(&h, "path"))
-                .unwrap_or_default();
-            let query = hash_string(&h, "search")
-                .map(|s| s.strip_prefix('?').unwrap_or(&s).to_string())
-                .or_else(|| hash_string(&h, "query"))
-                .unwrap_or_default();
-            let fragment = hash_string(&h, "hash")
-                .map(|s| s.strip_prefix('#').unwrap_or(&s).to_string())
-                .or_else(|| hash_string(&h, "fragment"))
-                .unwrap_or_default();
-            let parts = UrlParts {
-                scheme: scheme.unwrap_or_default(),
-                host,
-                path,
-                query,
-                fragment,
-            };
-            str_obj(parts.to_string())
+            url_format_object(&h)
         }
         Some(_) => new_error(
             ctx.pos.clone(),
@@ -225,12 +190,53 @@ pub(crate) fn url_format(ctx: &mut CallContext, args: &[Object]) -> Object {
     }
 }
 
+pub(crate) fn url_format_object(hash: &HashData) -> Object {
+    str_obj(url_parts_from_object(hash).to_string())
+}
+
+pub(crate) fn url_parts_from_object(hash: &HashData) -> UrlParts {
+    let mut scheme = hash_string(hash, "protocol").or_else(|| hash_string(hash, "scheme"));
+    if let Some(s) = &scheme {
+        if let Some(stripped) = s.strip_suffix(':') {
+            scheme = Some(stripped.to_string());
+        }
+    }
+    let host = hash_string(hash, "host").unwrap_or_else(|| {
+        let hostname = hash_string(hash, "hostname").unwrap_or_default();
+        let port = hash_string(hash, "port").unwrap_or_default();
+        if port.is_empty() {
+            hostname
+        } else {
+            format!("{}:{}", hostname, port)
+        }
+    });
+    let path = hash_string(hash, "pathname")
+        .or_else(|| hash_string(hash, "path"))
+        .unwrap_or_default();
+    let query = hash_string(hash, "search")
+        .map(|s| s.strip_prefix('?').unwrap_or(&s).to_string())
+        .or_else(|| hash_string(hash, "query"))
+        .unwrap_or_default();
+    let fragment = hash_string(hash, "hash")
+        .map(|s| s.strip_prefix('#').unwrap_or(&s).to_string())
+        .or_else(|| hash_string(hash, "fragment"))
+        .unwrap_or_default();
+    UrlParts {
+        scheme: scheme.unwrap_or_default(),
+        host,
+        path,
+        query,
+        fragment,
+    }
+}
+
 pub(crate) fn url_resolve(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let base = match required_string(ctx, "url.resolve", args, 0, "base") {
+    let reader = ArgReader::new(ctx, "url.resolve", args);
+    let base = match reader.required_string(0, "base") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let reference = match required_string(ctx, "url.resolve", args, 1, "ref") {
+    let reference = match reader.required_string(1, "ref") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -310,7 +316,8 @@ pub(crate) fn resolve_reference(base: &UrlParts, reference: &str) -> String {
 }
 
 pub(crate) fn url_path_to_file(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "url.pathToFileURL", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "url.pathToFileURL", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -326,7 +333,8 @@ pub(crate) fn url_path_to_file(ctx: &mut CallContext, args: &[Object]) -> Object
 }
 
 pub(crate) fn url_file_to_path(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let input = match required_string(ctx, "url.fileURLToPath", args, 0, "url") {
+    let reader = ArgReader::new(ctx, "url.fileURLToPath", args);
+    let input = match reader.required_string(0, "url") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -363,6 +371,59 @@ pub(crate) fn url_file_to_path(ctx: &mut CallContext, args: &[Object]) -> Object
         path = path.replace('/', "\\");
     }
     str_obj(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_as_string(object: Object) -> String {
+        match object {
+            Object::String(value) => value.to_string(),
+            _ => panic!("expected string"),
+        }
+    }
+
+    #[test]
+    fn url_format_object_builds_host_from_hostname_and_port() {
+        let object = ObjectBuilder::new()
+            .set("protocol", str_obj("https:"))
+            .set("hostname", str_obj("example.com"))
+            .set("port", str_obj("8443"))
+            .set("pathname", str_obj("/docs"))
+            .set("search", str_obj("?q=night24"))
+            .set("hash", str_obj("#top"))
+            .build();
+        let Object::Hash(hash) = object else {
+            panic!("expected hash");
+        };
+
+        assert_eq!(
+            object_as_string(url_format_object(&hash.borrow())),
+            "https://example.com:8443/docs?q=night24#top"
+        );
+    }
+
+    #[test]
+    fn url_format_object_prefers_host_and_ignores_non_string_fields() {
+        let object = ObjectBuilder::new()
+            .set("scheme", str_obj("https"))
+            .set("host", str_obj("example.com"))
+            .set("hostname", str_obj("ignored.test"))
+            .set("pathname", Object::Boolean(true))
+            .set("path", str_obj("/fallback"))
+            .set("query", Object::Boolean(true))
+            .set("fragment", str_obj("frag"))
+            .build();
+        let Object::Hash(hash) = object else {
+            panic!("expected hash");
+        };
+
+        assert_eq!(
+            object_as_string(url_format_object(&hash.borrow())),
+            "https://example.com/fallback#frag"
+        );
+    }
 }
 
 // (hash_string is defined above near the env module helpers.)

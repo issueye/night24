@@ -7,19 +7,27 @@ import { ContextPanel } from './components/ContextPanel.jsx';
 import { TimelinePanel } from './components/TimelinePanel.jsx';
 import { useApiClient } from './hooks/useApiClient.js';
 import { useProviderSettings } from './hooks/useProviderSettings.js';
+import { useRunControls } from './hooks/useRunControls.js';
+import { useSessions } from './hooks/useSessions.js';
+import { useMessageActions } from './hooks/useMessageActions.js';
+import { useAgentEvents } from './hooks/useAgentEvents.js';
+import { useAppSettingsPersistence } from './hooks/useAppSettingsPersistence.js';
+import { useServerStatus } from './hooks/useServerStatus.js';
+import { useSubAgents } from './hooks/useSubAgents.js';
+import { useTimeline } from './hooks/useTimeline.js';
 import { useWorkspaceState } from './hooks/useWorkspaceState.js';
-import { classNames, isVisibleChatMessage, messageText, messageToolBlocks, safeText } from './utils/format.js';
-import { normalizeError, unwrapSsePayload } from './utils/events.js';
-import { appendMessageDelta, withMessageText } from './utils/messages.js';
+import { classNames } from './utils/format.js';
+import { estimateContextUsage } from './utils/context.js';
+import { normalizeError } from './utils/events.js';
+import { buildReplyRequestBody } from './utils/reply.js';
+import { readSseStream } from './utils/sse.js';
 import {
   DEFAULT_SERVER,
   STORAGE_KEYS,
   apiUrl,
-  parseOptionalPositiveInt,
   readAccessMode,
   readSetting,
   sameWorkspacePath,
-  writeSetting,
 } from './utils/settings.js';
 
 export default function App() {
@@ -49,44 +57,23 @@ export default function App() {
     deleteProviderProfile,
   } = useProviderSettings();
 
-  const [serverStatus, setServerStatus] = useState({ state: 'checking', detail: '正在连接 server' });
-  const [coreRestarting, setCoreRestarting] = useState(false);
-  const [contextCompacting, setContextCompacting] = useState(false);
-  const [sessions, setSessions] = useState([]);
-  const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [messages, setMessages] = useState([]);
   const [taskText, setTaskText] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [activeRun, setActiveRun] = useState(null);
-  const [timeline, setTimeline] = useState([]);
   const [pendingPermissions, setPendingPermissions] = useState([]);
   const [eventsOpen, setEventsOpen] = useState(false);
-  const [subAgentPool, setSubAgentPool] = useState(null);
-  const [subAgentLoading, setSubAgentLoading] = useState(false);
-  const [subAgentError, setSubAgentError] = useState('');
 
   const abortRef = useRef(null);
   const runTerminalRef = useRef(null);
   const messageEndRef = useRef(null);
+  const messageSetterRef = useRef(null);
+  const clearCurrentSessionRef = useRef(null);
   const { headers, apiJson } = useApiClient(apiBase, apiKey);
-
-  const addTimeline = useCallback((type, title, detail, tone = 'neutral') => {
-    setTimeline((items) => [
-      {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        type,
-        title,
-        detail,
-        tone,
-        createdAt: new Date().toISOString(),
-      },
-      ...items,
-    ].slice(0, 80));
-  }, []);
+  const { timeline, addTimeline, clearTimeline } = useTimeline();
 
   const showError = useCallback((message) => {
     const text = String(message || '发生未知错误');
-    setMessages((items) => [
+    messageSetterRef.current?.((items) => [
       ...items,
       {
         id: `error-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -98,53 +85,18 @@ export default function App() {
     ]);
   }, []);
 
-  const addOrReplaceMessage = useCallback((message) => {
-    if (!isVisibleChatMessage(message)) return;
-    setMessages((items) => {
-      const index = message.id ? items.findIndex((item) => item.id === message.id) : -1;
-      if (index < 0) return [...items, message];
-      return items.map((item, itemIndex) => (itemIndex === index ? message : item));
-    });
-  }, []);
-
-  const addTypewriterMessage = useCallback((message) => {
-    const fullText = messageText(message);
-    if (!fullText.trim()) {
-      addOrReplaceMessage(message);
-      return;
-    }
-
-    const baseMessage = withMessageText(message, '');
-    setMessages((items) => {
-      const index = message.id ? items.findIndex((item) => item.id === message.id) : -1;
-      if (index >= 0) return items.map((item, itemIndex) => (itemIndex === index ? message : item));
-      return [...items, baseMessage];
-    });
-
-    let offset = 0;
-    const step = () => {
-      offset = Math.min(fullText.length, offset + Math.max(2, Math.ceil(fullText.length / 90)));
-      const visibleMessage = withMessageText(message, fullText.slice(0, offset));
-      setMessages((items) => items.map((item) => (item.id === message.id ? visibleMessage : item)));
-      if (offset < fullText.length) {
-        window.setTimeout(step, 16);
-      }
-    };
-    window.setTimeout(step, 16);
-  }, [addOrReplaceMessage]);
-
   const clearConversationView = useCallback(({ abortActive = false } = {}) => {
     if (abortActive) {
       abortRef.current?.abort();
       abortRef.current = null;
     }
     runTerminalRef.current = null;
-    setMessages([]);
+    messageSetterRef.current?.([]);
     setPendingPermissions([]);
-    setTimeline([]);
+    clearTimeline();
     setActiveRun(null);
     setIsRunning(false);
-  }, []);
+  }, [clearTimeline]);
 
   const {
     workspace,
@@ -165,103 +117,42 @@ export default function App() {
     openContextTab,
   } = useWorkspaceState({
     apiJson,
-    headers,
     addTimeline,
     showError,
     clearConversationView,
-    onWorkspaceOpened: () => setCurrentSessionId(null),
+    onWorkspaceOpened: () => clearCurrentSessionRef.current?.(),
   });
 
-  const checkServer = useCallback(async () => {
-    setServerStatus({ state: 'checking', detail: '正在连接 server' });
-    try {
-      await apiJson('/healthz');
-      const ready = await apiJson('/readyz').catch(() => null);
-      setServerStatus({
-        state: 'connected',
-        detail: ready?.ready ? 'server 与 core 已就绪' : ready?.core?.reason || 'server 已连接，core 尚未就绪',
-        ready,
-      });
-      return true;
-    } catch (error) {
-      setServerStatus({ state: 'failed', detail: normalizeError(error) });
-      return false;
-    }
-  }, [apiJson]);
+  const {
+    sessions,
+    currentSessionId,
+    messages,
+    setMessages,
+    loadSessions,
+    createSession,
+    selectSession,
+    deleteSession,
+    ensureSession,
+    clearCurrentSession,
+  } = useSessions({
+    apiJson,
+    workspace,
+    showError,
+    onBeforeSessionChange: clearConversationView,
+  });
 
-  const restartCore = useCallback(async () => {
-    setCoreRestarting(true);
-    setServerStatus({ state: 'checking', detail: '正在重启 core' });
-    try {
-      const result = await apiJson('/agent/core/restart', {
-        method: 'POST',
-        headers,
-      });
-      if (result?.accepted === false) {
-        throw new Error(result.reason || 'core 重启失败');
-      }
-      addTimeline('core', 'Core 已重启', result?.core?.reason || 'agent-core 已重新初始化', 'success');
-      await checkServer();
-    } catch (error) {
-      const detail = normalizeError(error);
-      setServerStatus({ state: 'failed', detail });
-      addTimeline('core', 'Core 重启失败', detail, 'error');
-      showError(`Core 重启失败：${detail}`);
-    } finally {
-      setCoreRestarting(false);
-    }
-  }, [addTimeline, apiJson, checkServer, headers, showError]);
+  messageSetterRef.current = setMessages;
+  clearCurrentSessionRef.current = clearCurrentSession;
 
-  const loadSessions = useCallback(async () => {
-    try {
-      const data = await apiJson('/sessions');
-      setSessions(Array.isArray(data) ? data : []);
-    } catch (error) {
-      showError(`加载会话失败：${normalizeError(error)}`);
-    }
-  }, [apiJson, showError]);
+  const { addOrReplaceMessage, addTypewriterMessage } = useMessageActions(setMessages);
 
-  const loadSubAgents = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) {
-      setSubAgentLoading(true);
-    }
-    setSubAgentError('');
-    try {
-      const data = await apiJson('/agent/subagents?include_messages=true&include_result=true');
-      setSubAgentPool(data || null);
-    } catch (error) {
-      setSubAgentError(normalizeError(error));
-    } finally {
-      if (!silent) {
-        setSubAgentLoading(false);
-      }
-    }
-  }, [apiJson]);
+  const { serverStatus, coreRestarting, checkServer, restartCore } = useServerStatus({
+    apiJson,
+    addTimeline,
+    showError,
+  });
 
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.apiBase, apiBase);
-  }, [apiBase]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.apiKey, apiKey);
-  }, [apiKey]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.networkProxy, networkProxy);
-  }, [networkProxy]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.accessMode, accessMode);
-    writeSetting(STORAGE_KEYS.fullAccess, accessMode === 'allow_all' ? 'true' : 'false');
-  }, [accessMode]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.theme, theme);
-  }, [theme]);
-
-  useEffect(() => {
-    writeSetting(STORAGE_KEYS.fontSize, fontSize);
-  }, [fontSize]);
+  useAppSettingsPersistence({ apiBase, apiKey, networkProxy, accessMode, theme, fontSize });
 
   useEffect(() => {
     checkServer().then((ok) => {
@@ -276,266 +167,20 @@ export default function App() {
     messageEndRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
 
-  useEffect(() => {
-    if (contextOpen && rightTab === 'agents') {
-      loadSubAgents();
-    }
-  }, [contextOpen, loadSubAgents, rightTab]);
-
-  async function createSession() {
-    clearConversationView({ abortActive: true });
-    try {
-      const session = await apiJson('/sessions', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          name: 'session',
-          session_type: 'user',
-          working_dir: workspace?.root_path,
-        }),
-      });
-      setSessions((items) => [session, ...items]);
-      setCurrentSessionId(session.id);
-    } catch (error) {
-      showError(`新建会话失败：${normalizeError(error)}`);
-    }
-  }
-
-  async function selectSession(id) {
-    clearConversationView({ abortActive: true });
-    try {
-      const history = await apiJson(`/sessions/${id}/history`);
-      setCurrentSessionId(id);
-      setMessages(Array.isArray(history) ? history.filter(isVisibleChatMessage) : []);
-    } catch (error) {
-      showError(`加载会话失败：${normalizeError(error)}`);
-    }
-  }
-
-  async function deleteSession(id, event) {
-    event?.stopPropagation();
-    if (!window.confirm('删除这个会话？')) return;
-    try {
-      await apiJson(`/sessions/${id}`, { method: 'DELETE' });
-      setSessions((items) => items.filter((item) => item.id !== id));
-      if (currentSessionId === id) {
-        setCurrentSessionId(null);
-        clearConversationView({ abortActive: true });
-      }
-    } catch (error) {
-      showError(`删除会话失败：${normalizeError(error)}`);
-    }
-  }
-
-  function handleAgentEvent(eventName, payload) {
-    const envelope = unwrapSsePayload(eventName, payload);
-    const eventType = envelope?.type || (eventName && eventName !== 'message' ? eventName : 'message');
-    const eventPayload = envelope?.payload || envelope;
-    const runId = envelope?.run_id || eventPayload?.run_id;
-    if (runId) {
-      setActiveRun((run) => ({
-        ...(run || {}),
-        run_id: runId,
-        status: eventType === 'finish' ? 'finished' : eventType === 'error' ? 'error' : 'running',
-      }));
-    }
-
-    if (!envelope?.type && envelope?.role) {
-      addOrReplaceMessage(envelope);
-      return;
-    }
-
-    if (eventType === 'message') {
-      const message = eventPayload?.message || eventPayload;
-      if (message?.role) {
-        const existing = message.id && messages.some((item) => item.id === message.id);
-        const canType =
-          !existing &&
-          String(message.role).toLowerCase() === 'assistant' &&
-          messageText(message).length > 0 &&
-          messageToolBlocks(message).length === 0;
-        if (canType) {
-          addTypewriterMessage(message);
-        } else {
-          addOrReplaceMessage(message);
-        }
-      } else {
-        const text = eventPayload?.text || eventPayload?.content || safeText(eventPayload);
-        if (String(text || '').trim()) {
-          setMessages((items) => [
-            ...items,
-            {
-              id: `${Date.now()}`,
-              role: 'assistant',
-              content: [{ type: 'text', text }],
-              created_at: new Date().toISOString(),
-            },
-          ]);
-        }
-      }
-      return;
-    }
-
-    if (eventType === 'message_delta') {
-      const messageId = eventPayload?.message_id || eventPayload?.id || `${runId || 'run'}-delta`;
-      const delta = eventPayload?.delta || eventPayload?.text || '';
-      if (!delta) return;
-      setMessages((items) => {
-        const existingIndex = items.findIndex((item) => item.id === messageId);
-        if (existingIndex < 0) {
-          return [
-            ...items,
-            {
-              id: messageId,
-              role: 'assistant',
-              content: [{ type: 'text', text: delta }],
-              created_at: envelope?.created_at || new Date().toISOString(),
-            },
-          ];
-        }
-        return items.map((item, index) => (index === existingIndex ? appendMessageDelta(item, delta) : item));
-      });
-      return;
-    }
-
-    if (eventType === 'permission_required') {
-      const permissionId =
-        eventPayload?.permission_id ||
-        envelope?.permission_id ||
-        eventPayload?.tool_call_id ||
-        `${runId || 'run'}-${Date.now()}`;
-      const permission = {
-        permission_id: permissionId,
-        run_id: runId,
-        tool_name: eventPayload?.tool_name || 'tool',
-        risk: eventPayload?.risk || 'high',
-        summary: eventPayload?.summary || '需要确认权限',
-        arguments: eventPayload?.arguments || eventPayload?.params,
-      };
-      setPendingPermissions((items) => [permission, ...items.filter((item) => item.permission_id !== permission.permission_id)]);
-      addTimeline(eventType, '等待权限确认', `${permission.tool_name} · ${permission.summary}`, 'warning');
-      return;
-    }
-
-    if (eventType === 'tool_started') {
-      addTimeline(eventType, eventPayload?.tool_name || '工具开始', eventPayload?.summary || safeText(eventPayload), 'neutral');
-      return;
-    }
-
-    if (eventType === 'tool_finished') {
-      addTimeline(
-        eventType,
-        eventPayload?.tool_name || '工具完成',
-        eventPayload?.summary || eventPayload?.result_preview || safeText(eventPayload),
-        eventPayload?.is_error ? 'error' : 'success',
-      );
-      return;
-    }
-
-    if (eventType === 'tool_failed') {
-      const toolName = eventPayload?.tool_name || '工具';
-      const detail = eventPayload?.error?.message || eventPayload?.error || safeText(eventPayload);
-      addTimeline(eventType, `${toolName} 失败`, detail, 'error');
-      setMessages((items) => [
-        ...items,
-        {
-          id: `tool-error-${eventPayload?.tool_call_id || Date.now()}-${Math.random().toString(16).slice(2)}`,
-          role: 'assistant',
-          content: [{ type: 'text', text: `工具调用失败：${toolName}\n\n${detail}` }],
-          tone: 'error',
-          created_at: envelope?.created_at || new Date().toISOString(),
-        },
-      ]);
-      return;
-    }
-
-    if (eventType === 'run_output') {
-      addTimeline(eventType, eventPayload?.source || '运行输出', eventPayload?.text || safeText(eventPayload), eventPayload?.stream === 'stderr' ? 'warning' : 'neutral');
-      return;
-    }
-
-    if (eventType === 'diff_ready') {
-      openContextTab('diff');
-      loadWorkspaceDiff();
-      addTimeline(eventType, '变更已生成', eventPayload?.summary || safeText(eventPayload), 'success');
-      return;
-    }
-
-    if (eventType === 'finish') {
-      runTerminalRef.current = { type: 'finish', runId };
-      const finishMessages = Array.isArray(eventPayload?.messages) ? eventPayload.messages : [];
-      if (finishMessages.length) {
-        setMessages((items) => {
-          const seen = new Set(items.map((item) => item.id).filter(Boolean));
-          const next = [...items];
-          finishMessages.forEach((message) => {
-            if (message?.role && isVisibleChatMessage(message) && (!message.id || !seen.has(message.id))) {
-              next.push(message);
-              if (message.id) seen.add(message.id);
-            }
-          });
-          return next;
-        });
-      }
-      setIsRunning(false);
-      const finishStatus = eventPayload?.status || 'completed';
-      setActiveRun((run) => (run ? { ...run, status: finishStatus } : null));
-      if (runId) {
-        setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
-      }
-      loadWorkspaceDiff();
-      addTimeline(eventType, '任务结束', finishStatus, finishStatus === 'failed' ? 'error' : finishStatus === 'cancelled' ? 'warning' : 'success');
-      loadSessions();
-      return;
-    }
-
-    if (eventType === 'error') {
-      runTerminalRef.current = { type: 'error', runId };
-      const detail = eventPayload?.message || eventPayload?.error || safeText(eventPayload);
-      addTimeline(eventType, '任务错误', detail, 'error');
-      if (runId) {
-        setPendingPermissions((items) => items.filter((item) => item.run_id !== runId));
-      }
-      setIsRunning(false);
-      setActiveRun((run) => (run ? { ...run, status: 'error' } : { status: 'error' }));
-      showError(detail);
-      return;
-    }
-
-    addTimeline(eventType, eventType, safeText(eventPayload), 'neutral');
-  }
-
-  function parseSseBlock(block) {
-    let eventName = 'message';
-    const dataLines = [];
-    block.split(/\r?\n/).forEach((line) => {
-      if (line.startsWith('event:')) eventName = line.slice(6).trim() || 'message';
-      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
-    });
-    if (!dataLines.length) return;
-    const raw = dataLines.join('\n');
-    try {
-      handleAgentEvent(eventName, JSON.parse(raw));
-    } catch {
-      handleAgentEvent(eventName, { type: 'message', payload: { text: raw } });
-    }
-  }
-
-  async function ensureSession() {
-    if (currentSessionId) return currentSessionId;
-    const session = await apiJson('/sessions', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        name: 'session',
-        session_type: 'user',
-        working_dir: workspace?.root_path,
-      }),
-    });
-    setSessions((items) => [session, ...items]);
-    setCurrentSessionId(session.id);
-    return session.id;
-  }
+  const { handleAgentEvent } = useAgentEvents({
+    messages,
+    setMessages,
+    addTimeline,
+    openContextTab,
+    loadWorkspaceDiff,
+    setIsRunning,
+    setActiveRun,
+    setPendingPermissions,
+    showError,
+    addOrReplaceMessage,
+    addTypewriterMessage,
+    runTerminalRef,
+  });
 
   async function sendTask() {
     const text = taskText.trim();
@@ -566,17 +211,17 @@ export default function App() {
       const response = await fetch(apiUrl(apiBase, '/reply'), {
         method: 'POST',
         headers,
-        body: JSON.stringify({
+        body: JSON.stringify(buildReplyRequestBody({
           text,
-          session_id: sessionId,
+          sessionId,
           provider,
-          model: model.trim() || undefined,
-          base_url: baseUrl.trim() || undefined,
-          api_key: providerKey.trim() || undefined,
-          permission_mode: accessMode,
-          network_proxy: networkProxy.trim() || undefined,
-          context_threshold_tokens: parseOptionalPositiveInt(contextThreshold),
-        }),
+          model,
+          baseUrl,
+          providerKey,
+          accessMode,
+          networkProxy,
+          contextThreshold,
+        })),
         signal: controller.signal,
       });
 
@@ -585,24 +230,7 @@ export default function App() {
         throw new Error(errorText || `HTTP ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('server 没有返回事件流');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let splitIndex = buffer.search(/\r?\n\r?\n/);
-        while (splitIndex >= 0) {
-          const block = buffer.slice(0, splitIndex);
-          buffer = buffer.slice(buffer[splitIndex] === '\r' ? splitIndex + 4 : splitIndex + 2);
-          parseSseBlock(block);
-          splitIndex = buffer.search(/\r?\n\r?\n/);
-        }
-      }
-      if (buffer.trim()) parseSseBlock(buffer);
+      await readSseStream(response.body, (event) => handleAgentEvent(event.eventName, event.payload));
       if (!runTerminalRef.current) {
         const detail = '事件流已断开，未收到任务结束信号';
         showError(detail);
@@ -627,124 +255,46 @@ export default function App() {
     }
   }
 
-  async function cancelRun() {
-    runTerminalRef.current = { type: 'cancelled', runId: activeRun?.run_id };
-    abortRef.current?.abort();
-    setActiveRun((run) => (run ? { ...run, status: 'cancelling' } : { status: 'cancelling' }));
-    try {
-      const result = await apiJson('/agent/cancel', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ run_id: activeRun?.run_id, reason: 'user_cancelled' }),
-      });
-      if (result?.accepted === false) {
-        addTimeline('cancel', '本地已停止，server 未接管取消', result.reason || activeRun?.run_id || '当前任务', 'warning');
-      } else {
-        addTimeline('cancel', '已请求取消', result?.run_id || activeRun?.run_id || '当前任务', 'warning');
-      }
-      const cancelledRunId = result?.run_id || activeRun?.run_id;
-      if (cancelledRunId) {
-        setPendingPermissions((items) => items.filter((item) => item.run_id !== cancelledRunId));
-      }
-    } catch (error) {
-      addTimeline('cancel', '本地已停止，取消接口不可用', normalizeError(error), 'warning');
-    } finally {
-      setIsRunning(false);
-      setActiveRun((run) => (run ? { ...run, status: 'cancelled' } : { status: 'cancelled' }));
-    }
-  }
-
-  async function compactContext() {
-    if (!currentSessionId || contextCompacting || isRunning) return;
-    setContextCompacting(true);
-    try {
-      const data = await apiJson(`/sessions/${encodeURIComponent(currentSessionId)}/compact`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          threshold_tokens: contextUsage.threshold || undefined,
-          force: true,
-        }),
-      });
-      const nextMessages = Array.isArray(data?.conversation)
-        ? data.conversation.filter(isVisibleChatMessage)
-        : [];
-      setMessages(nextMessages);
-      loadSessions();
-      if (data?.compacted) {
-        addTimeline(
-          'context',
-          '上下文已压缩',
-          `移除 ${data.removed} 条，当前 ${data.current} 条，估算 ${data.token_estimate} tokens`,
-          'success',
-        );
-      } else {
-        addTimeline('context', '无需压缩', '当前会话上下文还不足以压缩', 'neutral');
-      }
-    } catch (error) {
-      const detail = normalizeError(error);
-      addTimeline('context', '压缩失败', detail, 'error');
-      showError(`压缩摘要失败：${detail}`);
-    } finally {
-      setContextCompacting(false);
-    }
-  }
-
-  async function resolvePermission(permission, decision) {
-    if (!permission?.permission_id) return;
-    try {
-      const result = await apiJson(`/permissions/${encodeURIComponent(permission.permission_id)}/${decision}`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ run_id: permission.run_id, reason: `user_${decision}` }),
-      });
-      setPendingPermissions((items) => items.filter((item) => item.permission_id !== permission.permission_id));
-      if (result?.accepted === false) {
-        addTimeline('permission', '权限接口暂不可用', result.reason || permission.summary, 'warning');
-      } else {
-        addTimeline('permission', decision === 'approve' ? '已批准权限' : '已拒绝权限', permission.summary, decision === 'approve' ? 'success' : 'warning');
-      }
-    } catch (error) {
-      showError(`处理权限失败：${normalizeError(error)}`);
-    }
-  }
-
   const canSend = taskText.trim().length > 0 && !isRunning && Boolean(workspace);
-  const contextUsage = useMemo(() => {
-    const threshold = parseOptionalPositiveInt(contextThreshold) || 0;
-    const text = [
-      ...messages.map(messageText),
-      taskText,
-    ].join('\n\n');
-    const asciiChars = (text.match(/[\x00-\x7F]/g) || []).length;
-    const nonAsciiChars = Math.max(0, text.length - asciiChars);
-    const estimatedTokens = Math.ceil(asciiChars / 4 + nonAsciiChars * 0.8);
-    const ratio = threshold > 0 ? Math.min(1, estimatedTokens / threshold) : 0;
-    return {
-      threshold,
-      estimatedTokens,
-      percent: threshold > 0 ? Math.round(ratio * 100) : 0,
-      reached: threshold > 0 && estimatedTokens >= threshold,
-      warning: threshold > 0 && estimatedTokens >= threshold * 0.7,
-    };
-  }, [contextThreshold, messages, taskText]);
+  const contextUsage = useMemo(
+    () => estimateContextUsage(messages, taskText, contextThreshold),
+    [contextThreshold, messages, taskText],
+  );
+  const {
+    cancelRun,
+    compactContext,
+    contextCompacting,
+    resolvePermission,
+  } = useRunControls({
+    abortRef,
+    activeRun,
+    apiJson,
+    addTimeline,
+    contextUsage,
+    currentSessionId,
+    isRunning,
+    loadSessions,
+    runTerminalRef,
+    setActiveRun,
+    setIsRunning,
+    setMessages,
+    setPendingPermissions,
+    showError,
+  });
   const projectSessions = useMemo(() => {
     if (!workspace?.root_path) return [];
     return sessions.filter((session) => sameWorkspacePath(session.working_dir, workspace.root_path));
   }, [sessions, workspace]);
-  const hasLiveSubAgents = useMemo(() => {
-    const agents = Array.isArray(subAgentPool?.subagents) ? subAgentPool.subagents : [];
-    return agents.some((agent) => agent.status === 'queued' || agent.status === 'running');
-  }, [subAgentPool]);
-
-  useEffect(() => {
-    if (!(contextOpen && rightTab === 'agents')) return undefined;
-    if (!isRunning && !hasLiveSubAgents) return undefined;
-    const timer = window.setInterval(() => {
-      loadSubAgents({ silent: true });
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [contextOpen, hasLiveSubAgents, isRunning, loadSubAgents, rightTab]);
+  const {
+    subAgentPool,
+    subAgentLoading,
+    subAgentError,
+    loadSubAgents,
+  } = useSubAgents({
+    apiJson,
+    active: contextOpen && rightTab === 'agents',
+    running: isRunning,
+  });
 
   return (
     <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>

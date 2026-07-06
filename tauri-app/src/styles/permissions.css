@@ -1,0 +1,52 @@
+.permissions {
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+.permission-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  background: var(--amber-soft);
+  border: 1px solid #f2daa6;
+  border-radius: 8px;
+}
+
+.permission-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.permission-card pre {
+  max-height: 86px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.permission-card div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.permission-card button {
+  height: 28px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.permission-card button:last-child {
+  color: #ffffff;
+  background: var(--blue);
+  border-color: var(--blue);
+}

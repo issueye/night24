@@ -210,6 +210,219 @@ async fn skill_load_tool_loads_workspace_skill_body() {
 }
 
 #[tokio::test]
+async fn skill_load_tool_failure_events_precede_tool_response_message() {
+    let temp_dir = test_temp_dir("skill-load-missing-events").await;
+    let mut core = initialized_core().await;
+    let working_dir = temp_dir.to_string_lossy().to_string();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-skill-load-missing",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": working_dir,
+                "conversation": []
+            },
+            "input": { "text": "tool:skill_load:missing" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let events = agent_events(&output);
+
+    let started_index = events
+        .iter()
+        .position(|event| event["params"]["type"] == "tool_started")
+        .expect("tool_started event");
+    let lifecycle_failed_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "skill_tool_failed"
+        })
+        .expect("skill lifecycle tool_failed event");
+    let outer_failed_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "tool_execution_failed"
+        })
+        .expect("outer tool_failed event");
+    let assistant_error_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "message"
+                && event["params"]["payload"]["message"]["role"] == "assistant"
+                && event["params"]["payload"]["message"]["content"]
+                    .as_array()
+                    .is_some_and(|content| {
+                        content.iter().any(|block| {
+                            block["type"] == "text"
+                                && block["text"]
+                                    .as_str()
+                                    .is_some_and(|text| text.contains("skill not found"))
+                        })
+                    })
+        })
+        .expect("assistant error message");
+    let finish_index = events
+        .iter()
+        .position(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
+    let finish_messages = events[finish_index]["params"]["payload"]["messages"]
+        .as_array()
+        .expect("finish messages");
+    let finish_has_tool_response_error = finish_messages.iter().any(|message| {
+        message["role"] == "tool"
+            && message["content"].as_array().is_some_and(|content| {
+                content.iter().any(|block| {
+                    block["type"] == "tool_response"
+                        && block["is_error"] == true
+                        && block["content"]
+                            .as_str()
+                            .is_some_and(|text| text.contains("skill not found"))
+                })
+            })
+    });
+
+    assert!(started_index < lifecycle_failed_index);
+    assert!(lifecycle_failed_index < outer_failed_index);
+    assert!(outer_failed_index < assistant_error_index);
+    assert!(assistant_error_index < finish_index);
+    assert!(
+        finish_has_tool_response_error,
+        "finish messages: {}",
+        serde_json::to_string_pretty(finish_messages).unwrap()
+    );
+    assert_eq!(
+        events[started_index]["params"]["payload"]["tool_name"],
+        "developer__skill_load"
+    );
+    assert_eq!(
+        events[finish_index]["params"]["payload"]["status"],
+        "completed"
+    );
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn builtin_tool_failure_events_precede_tool_response_message() {
+    let temp_dir = test_temp_dir("read-missing-events").await;
+    let mut core = initialized_core().await;
+    let working_dir = temp_dir.to_string_lossy().to_string();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-read-missing",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": working_dir,
+                "conversation": []
+            },
+            "input": { "text": "tool:read:missing.txt" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let events = agent_events(&output);
+
+    let started_index = events
+        .iter()
+        .position(|event| event["params"]["type"] == "tool_started")
+        .expect("tool_started event");
+    let lifecycle_failed_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "tool_failed"
+        })
+        .expect("builtin lifecycle tool_failed event");
+    let outer_failed_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "tool_execution_failed"
+        })
+        .expect("outer tool_failed event");
+    let finish_index = events
+        .iter()
+        .position(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
+    let finish_messages = events[finish_index]["params"]["payload"]["messages"]
+        .as_array()
+        .expect("finish messages");
+    let finish_has_tool_request_path = finish_messages.iter().any(|message| {
+        message["role"] == "assistant"
+            && message["content"].as_array().is_some_and(|content| {
+                content.iter().any(|block| {
+                    block["type"] == "tool_request"
+                        && block["name"] == "developer__read_file"
+                        && block["arguments"]["path"] == "missing.txt"
+                })
+            })
+    });
+    let finish_has_tool_response_error = finish_messages.iter().any(|message| {
+        message["role"] == "tool"
+            && message["content"].as_array().is_some_and(|content| {
+                content.iter().any(|block| {
+                    block["type"] == "tool_response"
+                        && block["is_error"] == true
+                        && block["content"]
+                            .as_str()
+                            .is_some_and(|text| text.starts_with("error:"))
+                })
+            })
+    });
+
+    assert!(started_index < lifecycle_failed_index);
+    assert!(lifecycle_failed_index < outer_failed_index);
+    assert!(outer_failed_index < finish_index);
+    assert!(finish_has_tool_request_path);
+    assert!(finish_has_tool_response_error);
+    assert_eq!(
+        events[started_index]["params"]["payload"]["tool_name"],
+        "developer__read_file"
+    );
+    assert_eq!(
+        events[finish_index]["params"]["payload"]["status"],
+        "completed"
+    );
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn subagent_sync_spawn_returns_child_result() {
     let mut core = initialized_core().await;
     let request = json!({
@@ -325,6 +538,89 @@ async fn subagent_async_spawn_is_visible_in_pool_status() {
 }
 
 #[tokio::test]
+async fn subagent_cancel_tool_marks_target_cancelled() {
+    let mut core = initialized_core().await;
+    let handle = core
+        .subagents
+        .create(
+            "run-subagent-cancel-tool",
+            "run-subagent-cancel-tool:child",
+            Some("worker"),
+            "long task",
+            SubAgentMode::Async,
+        )
+        .unwrap();
+    core.subagents.mark_running(&handle.id);
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-subagent-cancel-tool",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": format!("tool:subagent_cancel:{}", handle.id) },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let events = agent_events(&output);
+
+    let started_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "tool_started"
+                && event["params"]["payload"]["tool_name"] == "developer__subagent_cancel"
+        })
+        .expect("subagent cancel tool_started event");
+    let finished_index = events
+        .iter()
+        .position(|event| {
+            event["params"]["type"] == "tool_finished"
+                && event["params"]["payload"]["tool_name"] == "developer__subagent_cancel"
+        })
+        .expect("subagent cancel tool_finished event");
+    let finish_index = events
+        .iter()
+        .position(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
+    assert!(started_index < finished_index);
+    assert!(finished_index < finish_index);
+    assert_eq!(
+        events[finish_index]["params"]["payload"]["status"],
+        "completed"
+    );
+
+    let snapshot = core
+        .subagents
+        .snapshot(Some(&handle.id), true, true)
+        .unwrap();
+    assert_eq!(snapshot["status"], "cancelled");
+    assert_eq!(snapshot["task"], "long task");
+
+    let finish_text = events[finish_index].to_string();
+    assert!(finish_text.contains("developer__subagent_cancel"));
+    assert!(finish_text.contains("cancelled"));
+}
+
+#[tokio::test]
 async fn strict_tool_call_waits_for_permission_and_continues_after_approve() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut core = AgentCore::with_output(tx);
@@ -392,6 +688,322 @@ async fn strict_tool_call_waits_for_permission_and_continues_after_approve() {
 }
 
 #[tokio::test]
+async fn denied_tool_permission_fails_without_starting_tool() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut core = AgentCore::with_output(tx);
+    initialize_core(&mut core).await;
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-permission-deny",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:datetime:" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "strict"
+            }
+        }
+    });
+
+    let accepted = core.handle_line(&request.to_string()).await;
+    let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+    assert_eq!(accepted["result"]["accepted"], true);
+
+    let permission = next_event_of_type(&mut rx, "permission_required").await;
+    let permission_id = permission["params"]["payload"]["permission_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resolve = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-permission",
+        "method": "permission.resolve",
+        "params": {
+            "run_id": "run-permission-deny",
+            "permission_id": permission_id,
+            "decision": "deny"
+        }
+    });
+    let resolved = core.handle_line(&resolve.to_string()).await;
+    let resolved: serde_json::Value = serde_json::from_str(&resolved[0]).unwrap();
+    assert_eq!(resolved["result"]["accepted"], true);
+
+    let events = collect_events_until_finish(&mut rx).await;
+    assert!(!events
+        .iter()
+        .any(|event| event["params"]["type"] == "tool_started"));
+
+    let failed = events
+        .iter()
+        .find(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "tool_execution_failed"
+        })
+        .expect("tool_execution_failed event");
+    assert_eq!(
+        failed["params"]["payload"]["tool_name"],
+        "developer__datetime"
+    );
+    assert!(failed["params"]["payload"]["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("permission denied")));
+
+    let finish = events
+        .iter()
+        .find(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
+    assert_eq!(finish["params"]["payload"]["status"], "completed");
+    let finish_messages = finish["params"]["payload"]["messages"]
+        .as_array()
+        .expect("finish messages");
+    let has_denied_tool_response = finish_messages.iter().any(|message| {
+        message["role"] == "tool"
+            && message["content"].as_array().is_some_and(|content| {
+                content.iter().any(|block| {
+                    block["type"] == "tool_response"
+                        && block["is_error"] == true
+                        && block["content"].as_str().is_some_and(|text| {
+                            text.contains("permission denied for developer__datetime")
+                        })
+                })
+            })
+    });
+    assert!(has_denied_tool_response);
+}
+
+#[tokio::test]
+async fn denied_subagent_tool_permission_fails_without_starting_tool() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut core = AgentCore::with_output(tx);
+    initialize_core(&mut core).await;
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-subagent-permission-deny",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_async: summarize files" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "strict"
+            }
+        }
+    });
+
+    let accepted = core.handle_line(&request.to_string()).await;
+    let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+    assert_eq!(accepted["result"]["accepted"], true);
+
+    let permission = next_event_of_type(&mut rx, "permission_required").await;
+    assert_eq!(
+        permission["params"]["payload"]["tool_name"],
+        "developer__subagent_spawn"
+    );
+    let permission_id = permission["params"]["payload"]["permission_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resolve = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-permission",
+        "method": "permission.resolve",
+        "params": {
+            "run_id": "run-subagent-permission-deny",
+            "permission_id": permission_id,
+            "decision": "deny"
+        }
+    });
+    let resolved = core.handle_line(&resolve.to_string()).await;
+    let resolved: serde_json::Value = serde_json::from_str(&resolved[0]).unwrap();
+    assert_eq!(resolved["result"]["accepted"], true);
+
+    let events = collect_events_until_finish(&mut rx).await;
+    assert!(!events
+        .iter()
+        .any(|event| event["params"]["type"] == "tool_started"));
+    assert_eq!(
+        core.subagents.snapshot(None, false, false).unwrap()["total"],
+        0
+    );
+
+    let failed = events
+        .iter()
+        .find(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "tool_execution_failed"
+        })
+        .expect("tool_execution_failed event");
+    assert_eq!(
+        failed["params"]["payload"]["tool_name"],
+        "developer__subagent_spawn"
+    );
+    assert!(failed["params"]["payload"]["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("permission denied")));
+
+    let finish = events
+        .iter()
+        .find(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
+    assert_eq!(finish["params"]["payload"]["status"], "completed");
+    let finish_messages = finish["params"]["payload"]["messages"]
+        .as_array()
+        .expect("finish messages");
+    let has_denied_tool_response = finish_messages.iter().any(|message| {
+        message["role"] == "tool"
+            && message["content"].as_array().is_some_and(|content| {
+                content.iter().any(|block| {
+                    block["type"] == "tool_response"
+                        && block["is_error"] == true
+                        && block["content"].as_str().is_some_and(|text| {
+                            text.contains("permission denied for developer__subagent_spawn")
+                        })
+                })
+            })
+    });
+    assert!(has_denied_tool_response);
+}
+
+#[tokio::test]
+async fn denied_skill_tool_permission_fails_without_starting_tool() {
+    let temp_dir = test_temp_dir("skill-permission-deny").await;
+    let skill_dir = temp_dir.join(".night24").join("skills").join("review");
+    tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+    tokio::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: review\ndescription: Review changed code.\n---\n# Review\nFind bugs.\n",
+    )
+    .await
+    .unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut core = AgentCore::with_output(tx);
+    initialize_core(&mut core).await;
+    let working_dir = temp_dir.to_string_lossy().to_string();
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-skill-permission-deny",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": working_dir,
+                "conversation": []
+            },
+            "input": { "text": "tool:skill_load:review" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "strict"
+            }
+        }
+    });
+
+    let accepted = core.handle_line(&request.to_string()).await;
+    let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+    assert_eq!(accepted["result"]["accepted"], true);
+
+    let permission = next_event_of_type(&mut rx, "permission_required").await;
+    assert_eq!(
+        permission["params"]["payload"]["tool_name"],
+        "developer__skill_load"
+    );
+    let permission_id = permission["params"]["payload"]["permission_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resolve = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-permission",
+        "method": "permission.resolve",
+        "params": {
+            "run_id": "run-skill-permission-deny",
+            "permission_id": permission_id,
+            "decision": "deny"
+        }
+    });
+    let resolved = core.handle_line(&resolve.to_string()).await;
+    let resolved: serde_json::Value = serde_json::from_str(&resolved[0]).unwrap();
+    assert_eq!(resolved["result"]["accepted"], true);
+
+    let events = collect_events_until_finish(&mut rx).await;
+    assert!(!events
+        .iter()
+        .any(|event| event["params"]["type"] == "tool_started"));
+
+    let failed = events
+        .iter()
+        .find(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "tool_execution_failed"
+        })
+        .expect("tool_execution_failed event");
+    assert_eq!(
+        failed["params"]["payload"]["tool_name"],
+        "developer__skill_load"
+    );
+    assert!(failed["params"]["payload"]["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("permission denied")));
+
+    let finish = events
+        .iter()
+        .find(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
+    assert_eq!(finish["params"]["payload"]["status"], "completed");
+    let finish_text = finish.to_string();
+    assert!(finish_text.contains("permission denied for developer__skill_load"));
+    assert!(!finish_text.contains("# Review"));
+    assert!(!finish_text.contains("Find bugs."));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn cancel_unblocks_pending_permission_and_finishes_cancelled() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut core = AgentCore::with_output(tx);
@@ -444,6 +1056,89 @@ async fn cancel_unblocks_pending_permission_and_finishes_cancelled() {
     assert_eq!(cancelled["result"]["accepted"], true);
 
     let finish = next_event_of_type(&mut rx, "finish").await;
+    assert_eq!(finish["params"]["payload"]["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn cancel_running_builtin_tool_finishes_cancelled() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut core = AgentCore::with_output(tx);
+    initialize_core(&mut core).await;
+
+    let command = if cfg!(target_os = "windows") {
+        "ping -n 2 127.0.0.1 > nul"
+    } else {
+        "sleep 1"
+    };
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-cancel-running-tool",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": format!("tool:shell:{command}") },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "allow_all"
+            }
+        }
+    });
+
+    let accepted = core.handle_line(&request.to_string()).await;
+    let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+    assert_eq!(accepted["result"]["accepted"], true);
+
+    let tool_started = next_event_of_type(&mut rx, "tool_started").await;
+    assert_eq!(
+        tool_started["params"]["payload"]["tool_name"],
+        "developer__shell"
+    );
+
+    let cancel = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-cancel",
+        "method": "agent.cancel",
+        "params": {
+            "run_id": "run-cancel-running-tool",
+            "reason": "test"
+        }
+    });
+    let cancelled = core.handle_line(&cancel.to_string()).await;
+    let cancelled: serde_json::Value = serde_json::from_str(&cancelled[0]).unwrap();
+    assert_eq!(cancelled["result"]["accepted"], true);
+
+    let events = collect_events_until_finish(&mut rx).await;
+    assert!(!events
+        .iter()
+        .any(|event| event["params"]["type"] == "tool_finished"));
+
+    let failed = events
+        .iter()
+        .find(|event| {
+            event["params"]["type"] == "tool_failed"
+                && event["params"]["payload"]["error"]["code"] == "cancelled"
+        })
+        .expect("cancelled tool_failed event");
+    assert_eq!(failed["params"]["payload"]["tool_name"], "developer__shell");
+
+    let finish = events
+        .iter()
+        .find(|event| event["params"]["type"] == "finish")
+        .expect("finish event");
     assert_eq!(finish["params"]["payload"]["status"], "cancelled");
 }
 
@@ -577,6 +1272,34 @@ async fn sensitive_tool_output_requires_user_decision_outside_full_access() {
     assert!(!finish_text.contains("sk-test1234567890abcdef"));
 
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[test]
+fn permission_manager_mode_aliases_use_shared_normalization() {
+    assert_eq!(
+        permission_manager_for_mode(Some("allow-all")).check_sync("developer__shell"),
+        night24_core::permission::PermissionLevel::Allow
+    );
+    assert_eq!(
+        permission_manager_for_mode(Some("full_access")).check_sync("developer__write_file"),
+        night24_core::permission::PermissionLevel::Allow
+    );
+    assert_eq!(
+        permission_manager_for_mode(Some("deny-all")).check_sync("developer__read_file"),
+        night24_core::permission::PermissionLevel::Deny
+    );
+    assert_eq!(
+        permission_manager_for_mode(Some("permissive")).check_sync("developer__read_file"),
+        night24_core::permission::PermissionLevel::Allow
+    );
+    assert_eq!(
+        permission_manager_for_mode(None).check_sync("developer__read_file"),
+        night24_core::permission::PermissionLevel::Confirm
+    );
+    assert_eq!(
+        permission_manager_for_mode(Some("unknown")).check_sync("developer__read_file"),
+        night24_core::permission::PermissionLevel::Confirm
+    );
 }
 
 #[test]
@@ -781,6 +1504,201 @@ async fn gts_hook_calls_execute_with_args_and_structured_outputs() {
 }
 
 #[tokio::test]
+async fn gts_hook_reports_malformed_structured_outputs_as_stderr() {
+    let temp_dir = test_temp_dir("gts-malformed-output-hook").await;
+    let config = serde_json::json!({
+        "hooks": [
+            {
+                "event": "run_started",
+                "name": "bad-array",
+                "engine": "gts",
+                "inline_script": "function execute(args) { return { outputs: \"not-an-array\" }; }",
+                "timeout_ms": 5000
+            },
+            {
+                "event": "run_started",
+                "name": "bad-items",
+                "engine": "gts",
+                "inline_script": r#"function execute(args) {
+                  return {
+                    outputs: [
+                      { stream: "telemetry", text: "ignored" },
+                      { stream: "stdout", text: 42 },
+                      { stream: "stderr" },
+                      "bad-item"
+                    ]
+                  };
+                }"#,
+                "timeout_ms": 5000
+            }
+        ]
+    });
+    let runner = HookRunner::from_config_str(&config.to_string()).unwrap();
+
+    let outputs = runner
+        .run(&HookContext {
+            event: HookEvent::RunStarted,
+            run_id: "run-gts-malformed",
+            working_dir: &temp_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    assert_eq!(outputs.len(), 5);
+    assert!(outputs
+        .iter()
+        .all(|output| matches!(output.stream, night24_protocol::OutputStream::Stderr)));
+    let stderr = outputs
+        .iter()
+        .map(|output| output.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(stderr.contains("outputs must be an array"));
+    assert!(stderr.contains("outputs[0].stream must be stdout or stderr, got telemetry"));
+    assert!(stderr.contains("outputs[1].text must be a string"));
+    assert!(stderr.contains("outputs[2].text is required"));
+    assert!(stderr.contains("outputs[3] must be an object"));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn gts_hook_runs_top_level_before_execute() {
+    let temp_dir = test_temp_dir("gts-top-level-hook").await;
+    let config = serde_json::json!({
+        "hooks": [
+            {
+                "event": "run_started",
+                "name": "lifecycle",
+                "engine": "gts",
+                "inline_script": r#"println("top-level");
+function execute(args) {
+  return {
+    outputs: [
+      { stream: "stdout", text: "execute=" + args.run_id }
+    ]
+  };
+}"#,
+                "timeout_ms": 5000
+            }
+        ]
+    });
+    let runner = HookRunner::from_config_str(&config.to_string()).unwrap();
+
+    let outputs = runner
+        .run(&HookContext {
+            event: HookEvent::RunStarted,
+            run_id: "run-gts-lifecycle",
+            working_dir: &temp_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    let stdout = outputs
+        .iter()
+        .filter(|output| matches!(output.stream, night24_protocol::OutputStream::Stdout))
+        .map(|output| output.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(stdout, vec!["top-level", "execute=run-gts-lifecycle"]);
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn gts_hook_timeout_releases_worker_for_next_hook() {
+    let temp_dir = test_temp_dir("gts-shared-deadline-hook").await;
+    let config = serde_json::json!({
+        "hooks": [
+            {
+                "event": "run_started",
+                "name": "slow-execute",
+                "engine": "gts",
+                "inline_script": r#"let started = Date().getTime();
+while (Date().getTime() - started < 80) {}
+
+function execute(args) {
+  while (true) {}
+}"#,
+                "timeout_ms": 120,
+                "instruction_limit": 100000000
+            },
+            {
+                "event": "run_started",
+                "name": "after-timeout",
+                "engine": "gts",
+                "inline_script": r#"function execute(args) {
+  return { outputs: [{ stream: "stdout", text: "second-ok" }] };
+}"#,
+                "timeout_ms": 120
+            }
+        ]
+    });
+    let runner = HookRunner::from_config_str(&config.to_string()).unwrap();
+
+    let outputs = runner
+        .run(&HookContext {
+            event: HookEvent::RunStarted,
+            run_id: "run-gts-shared-deadline",
+            working_dir: &temp_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    let stderr = outputs
+        .iter()
+        .filter(|output| matches!(output.stream, night24_protocol::OutputStream::Stderr))
+        .map(|output| output.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        stderr.contains("Timeout") || stderr.contains("timed out"),
+        "expected timeout output, got: {stderr}"
+    );
+
+    let stdout = outputs
+        .iter()
+        .filter(|output| matches!(output.stream, night24_protocol::OutputStream::Stdout))
+        .map(|output| output.text.as_str())
+        .collect::<Vec<_>>();
+    assert!(stdout.contains(&"second-ok"), "stdout was: {stdout:?}");
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn gts_hook_can_call_cli_from_inside_script() {
     let temp_dir = test_temp_dir("gts-cli-hook").await;
     let hook_dir = temp_dir.join("hooks");
@@ -855,6 +1773,58 @@ function execute(args) {
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
+#[tokio::test]
+async fn gts_hook_allowed_modules_can_reject_dangerous_modules() {
+    let temp_dir = test_temp_dir("gts-allowlist-hook").await;
+    let config = serde_json::json!({
+        "hooks": [
+            {
+                "event": "run_started",
+                "name": "restricted",
+                "engine": "gts",
+                "inline_script": r#"let exec = require("@std/exec");
+function execute(args) {
+  return { outputs: [{ stream: "stdout", text: "unexpected" }] };
+}"#,
+                "allowed_modules": [],
+                "timeout_ms": 5000
+            }
+        ]
+    });
+    let runner = HookRunner::from_config_str(&config.to_string()).unwrap();
+
+    let outputs = runner
+        .run(&HookContext {
+            event: HookEvent::RunStarted,
+            run_id: "run-gts-allowlist",
+            working_dir: &temp_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    assert_eq!(outputs.len(), 1);
+    assert!(matches!(
+        outputs[0].stream,
+        night24_protocol::OutputStream::Stderr
+    ));
+    assert!(outputs[0]
+        .text
+        .contains("module '@std/exec' is not allowed"));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
 #[test]
 fn hook_context_json_includes_provider_and_tool_fields() {
     let temp_dir = std::path::PathBuf::from("E:/workspace/example");
@@ -925,4 +1895,31 @@ async fn next_event_of_type(
         }
     }
     panic!("event type {event_type} was not emitted");
+}
+
+async fn collect_events_until_finish(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+) -> Vec<serde_json::Value> {
+    let mut events = Vec::new();
+    for _ in 0..20 {
+        let raw = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for agent event")
+            .expect("agent event channel closed");
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let is_finish = value["params"]["type"] == "finish";
+        events.push(value);
+        if is_finish {
+            return events;
+        }
+    }
+    panic!("finish event was not emitted");
+}
+
+fn agent_events(output: &[String]) -> Vec<serde_json::Value> {
+    output
+        .iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .filter(|value| value["method"] == "agent.event")
+        .collect()
 }

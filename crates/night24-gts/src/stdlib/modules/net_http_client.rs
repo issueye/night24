@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 #[cfg(feature = "tokio")]
 use std::sync::OnceLock;
 
@@ -305,66 +303,150 @@ fn owned_http_request_from_args(
     name: &str,
     args: &[Object],
 ) -> Result<OwnedHttpRequest, Object> {
-    let opts = match args.first() {
-        Some(Object::Hash(h)) => h.clone(),
-        Some(Object::String(url)) => {
-            // Simple URL string, default to GET
-            let hash = Rc::new(RefCell::new(HashData::default()));
-            hash.borrow_mut().set("url", Object::String(url.clone()));
-            hash.borrow_mut().set("method", str_obj("GET".to_string()));
-            hash
+    match args.first() {
+        Some(Object::Hash(h)) => {
+            let opts = h.borrow();
+            owned_http_request_from_options(name, &opts)
+                .map_err(|message| new_error(ctx.pos.clone(), message))
         }
+        Some(Object::String(url)) => Ok(OwnedHttpRequest {
+            url: url.to_string(),
+            method: "GET".to_string(),
+            body: None,
+            headers: Vec::new(),
+            timeout_ms: None,
+            proxy: None,
+        }),
         _ => {
             return Err(new_error(
                 ctx.pos.clone(),
                 format!("{name}: requires an options object or URL string"),
             ))
         }
-    };
-
-    let url = match opts.borrow().get("url") {
-        Some(Object::String(s)) => s.to_string(),
-        _ => {
-            return Err(new_error(
-                ctx.pos.clone(),
-                format!("{name}: url is required"),
-            ))
-        }
-    };
-
-    let method = match opts.borrow().get("method") {
-        Some(Object::String(s)) => s.to_uppercase(),
-        _ => "GET".to_string(),
-    };
-
-    let body = opts.borrow().get("body").map(http_body_to_string);
-
-    let timeout_ms = match opts.borrow().get("timeoutMs") {
-        Some(Object::Number(ms)) if *ms > 0.0 => Some(*ms as u64),
-        _ => None,
-    };
-
-    let mut request_headers = Vec::new();
-    if let Some(Object::Hash(headers_obj)) = opts.borrow().get("headers") {
-        let headers_data = headers_obj.borrow();
-        for (key, value) in &headers_data.entries {
-            request_headers.push((key.clone(), value_to_string(value)));
-        }
     }
+}
 
-    let proxy = match opts.borrow().get("proxy") {
-        Some(Object::String(s)) if !s.is_empty() => Some(s.to_string()),
-        _ => None,
+fn owned_http_request_from_options(
+    name: &str,
+    opts: &HashData,
+) -> Result<OwnedHttpRequest, String> {
+    let view = ObjectView::new(opts);
+
+    let url = match hash_string(opts, "url") {
+        Some(url) => url,
+        _ => return Err(format!("{name}: url is required")),
     };
+
+    let method = hash_string(opts, "method")
+        .map(|value| value.to_uppercase())
+        .unwrap_or_else(|| "GET".to_string());
+
+    let body = opts.get("body").map(http_body_to_string);
+
+    let timeout_ms = view
+        .number("timeoutMs")
+        .filter(|ms| *ms > 0.0)
+        .map(|ms| ms as u64);
+
+    let headers = http_headers_from_options(opts);
+    let proxy = hash_string(opts, "proxy").filter(|value| !value.is_empty());
 
     Ok(OwnedHttpRequest {
         url,
         method,
         body,
-        headers: request_headers,
+        headers,
         timeout_ms,
         proxy,
     })
+}
+
+fn http_headers_from_options(opts: &HashData) -> Vec<(String, String)> {
+    match opts.get("headers") {
+        Some(Object::Hash(headers_obj)) => {
+            let headers_data = headers_obj.borrow();
+            headers_data
+                .entries
+                .iter()
+                .map(|(key, value)| (key.clone(), value_to_string(value)))
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owned_http_request_from_options_reads_supported_fields() {
+        let headers = ObjectBuilder::new()
+            .set("Accept", str_obj("application/json".to_string()))
+            .set("X-Retry", Object::Number(2.0))
+            .build();
+        let opts = ObjectBuilder::new()
+            .set("url", str_obj("https://example.test/api".to_string()))
+            .set("method", str_obj("post".to_string()))
+            .set("body", str_obj("payload".to_string()))
+            .set("timeoutMs", Object::Number(1500.0))
+            .set("headers", headers)
+            .set("proxy", str_obj("http://127.0.0.1:7890".to_string()))
+            .build();
+
+        let Object::Hash(hash) = opts else {
+            panic!("expected hash options");
+        };
+        let request = owned_http_request_from_options("http.request", &hash.borrow()).unwrap();
+
+        assert_eq!(request.url, "https://example.test/api");
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.body.as_deref(), Some("payload"));
+        assert_eq!(request.timeout_ms, Some(1500));
+        assert_eq!(
+            request.headers,
+            vec![
+                ("Accept".to_string(), "application/json".to_string()),
+                ("X-Retry".to_string(), "2".to_string())
+            ]
+        );
+        assert_eq!(request.proxy.as_deref(), Some("http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn owned_http_request_from_options_keeps_defaults_for_unsupported_fields() {
+        let opts = ObjectBuilder::new()
+            .set("url", str_obj("https://example.test".to_string()))
+            .set("method", Object::Number(1.0))
+            .set("timeoutMs", Object::Number(0.0))
+            .set("headers", Object::Boolean(true))
+            .set("proxy", str_obj(String::new()))
+            .build();
+
+        let Object::Hash(hash) = opts else {
+            panic!("expected hash options");
+        };
+        let request = owned_http_request_from_options("http.request", &hash.borrow()).unwrap();
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.timeout_ms, None);
+        assert!(request.headers.is_empty());
+        assert_eq!(request.proxy, None);
+    }
+
+    #[test]
+    fn owned_http_request_from_options_requires_string_url() {
+        let opts = ObjectBuilder::new()
+            .set("url", Object::Boolean(true))
+            .build();
+
+        let Object::Hash(hash) = opts else {
+            panic!("expected hash options");
+        };
+        let err = owned_http_request_from_options("http.request", &hash.borrow()).unwrap_err();
+
+        assert_eq!(err, "http.request: url is required");
+    }
 }
 
 fn perform_owned_http_request(request: OwnedHttpRequest) -> Result<AsyncHttpResponse, String> {
@@ -507,48 +589,32 @@ fn async_http_response_to_object(response: AsyncHttpResponse) -> Object {
 }
 
 pub(crate) fn http_client_stream(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let opts = match args.first() {
-        Some(Object::Hash(h)) => h.clone(),
+    let request = match args.first() {
+        Some(Object::Hash(opts)) => {
+            let opts = opts.borrow();
+            match owned_http_request_from_options("http.stream", &opts) {
+                Ok(request) => request,
+                Err(message) => return new_error(ctx.pos.clone(), message),
+            }
+        }
         _ => return new_error(ctx.pos.clone(), "http.stream: requires an options object"),
     };
 
-    let url = match opts.borrow().get("url") {
-        Some(Object::String(s)) => s.to_string(),
-        _ => return new_error(ctx.pos.clone(), "http.stream: url is required"),
-    };
-
-    let method = match opts.borrow().get("method") {
-        Some(Object::String(s)) => s.to_uppercase(),
-        _ => "GET".to_string(),
-    };
-
-    let body = opts.borrow().get("body").map(http_body_to_string);
-
-    let proxy = match opts.borrow().get("proxy") {
-        Some(Object::String(s)) if !s.is_empty() => Some(s.to_string()),
-        _ => None,
-    };
-    let agent = match ureq_agent(proxy.as_deref()) {
+    let agent = match ureq_agent(request.proxy.as_deref()) {
         Ok(a) => a,
         Err(e) => return new_error(ctx.pos.clone(), format!("http.stream: {}", e)),
     };
-    let mut req = agent.request(&method, &url);
+    let mut req = agent.request(&request.method, &request.url);
 
-    if let Some(Object::Number(timeout_ms)) = opts.borrow().get("timeoutMs") {
-        if *timeout_ms > 0.0 {
-            req = req.timeout(std::time::Duration::from_millis(*timeout_ms as u64));
-        }
+    if let Some(timeout_ms) = request.timeout_ms {
+        req = req.timeout(std::time::Duration::from_millis(timeout_ms));
     }
 
-    if let Some(Object::Hash(headers)) = opts.borrow().get("headers") {
-        let headers_data = headers.borrow();
-        for (key, value) in &headers_data.entries {
-            let v = value_to_string(value);
-            req = req.set(key, &v);
-        }
+    for (key, value) in request.headers {
+        req = req.set(&key, &value);
     }
 
-    let result = if let Some(body_str) = body {
+    let result = if let Some(body_str) = request.body {
         req.send_string(&body_str)
     } else {
         req.call()
@@ -569,14 +635,12 @@ pub(crate) fn build_http_response(response: ureq::Response) -> Object {
 
     let body = response.into_string().unwrap_or_default();
 
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("status", num_obj(status as f64));
-    hash.borrow_mut().set("statusText", str_obj(status_text));
-    hash.borrow_mut().set("body", str_obj(body));
-    hash.borrow_mut()
-        .set("ok", bool_obj((200..300).contains(&status)));
-
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("status", num_obj(status as f64))
+        .set("statusText", str_obj(status_text))
+        .set("body", str_obj(body))
+        .set("ok", bool_obj((200..300).contains(&status)))
+        .build()
 }
 
 pub(crate) fn build_http_stream_response(
@@ -588,18 +652,16 @@ pub(crate) fn build_http_stream_response(
     let body_text = response.into_string().unwrap_or_default();
     let body = stream_from_text_object(body_text);
 
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("status", num_obj(status as f64));
-    hash.borrow_mut().set("statusText", str_obj(status_text));
-    hash.borrow_mut()
-        .set("ok", bool_obj((200..300).contains(&status)));
-    hash.borrow_mut().set("body", body);
-    hash.borrow_mut().set(
-        "close",
-        native("http.stream.close", |_ctx, _args| Object::Undefined),
-    );
-
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("status", num_obj(status as f64))
+        .set("statusText", str_obj(status_text))
+        .set("ok", bool_obj((200..300).contains(&status)))
+        .set("body", body)
+        .set(
+            "close",
+            native("http.stream.close", |_ctx, _args| Object::Undefined),
+        )
+        .build()
 }
 
 pub(crate) fn http_body_to_string(obj: &Object) -> String {
@@ -622,12 +684,10 @@ pub(crate) fn build_http_response_with_status(
 
     let body = response.into_string().unwrap_or_default();
 
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("status", num_obj(status_code as f64));
-    hash.borrow_mut().set("statusText", str_obj(status_text));
-    hash.borrow_mut().set("body", str_obj(body));
-    hash.borrow_mut()
-        .set("ok", bool_obj((200..300).contains(&status_code)));
-
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("status", num_obj(status_code as f64))
+        .set("statusText", str_obj(status_text))
+        .set("body", str_obj(body))
+        .set("ok", bool_obj((200..300).contains(&status_code)))
+        .build()
 }

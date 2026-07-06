@@ -1,0 +1,18 @@
+.conversation-area {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  overflow: auto;
+  background: #fbfcff;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 22px;
+  overflow: visible;
+  background: transparent;
+}

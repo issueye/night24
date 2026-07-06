@@ -21,7 +21,8 @@ pub(crate) fn yaml_stringify_value(value: &Object) -> Result<String, String> {
 }
 
 pub(crate) fn yaml_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "yaml.parse", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "yaml.parse", args);
+    let text = match reader.required_string(0, "text") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -43,7 +44,8 @@ pub(crate) fn yaml_stringify(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn yaml_read_file(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "yaml.readFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "yaml.readFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -58,6 +60,63 @@ pub(crate) fn yaml_read_file(ctx: &mut CallContext, args: &[Object]) -> Object {
 
 pub(crate) fn yaml_write_file(ctx: &mut CallContext, args: &[Object]) -> Object {
     codec_write_file(ctx, "yaml", args, "value", yaml_stringify_value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Position;
+    use crate::object::{bool_obj, num_obj, Environment, VirtualMachine};
+
+    fn test_context(env: &crate::object::EnvRef) -> CallContext<'_> {
+        CallContext::new(env, Position::default())
+    }
+
+    #[test]
+    fn parse_converts_yaml_mapping_to_object() {
+        let env = Environment::new_root(VirtualMachine::new());
+        let mut ctx = test_context(&env);
+        let parsed = yaml_parse(
+            &mut ctx,
+            &[str_obj(
+                "name: night24\nversion: 24\nfeatures:\n  - yaml\n  - stdlib\n",
+            )],
+        );
+
+        let Object::Hash(hash) = parsed else {
+            panic!("expected hash object");
+        };
+        let hash = hash.borrow();
+
+        assert!(
+            matches!(hash.get("name"), Some(Object::String(value)) if value.as_str() == "night24")
+        );
+        assert!(matches!(hash.get("version"), Some(Object::Number(value)) if *value == 24.0));
+
+        let Some(Object::Array(features)) = hash.get("features") else {
+            panic!("expected features array");
+        };
+        let features = features.borrow();
+        assert!(matches!(&features.elements[0], Object::String(value) if value.as_str() == "yaml"));
+        assert!(
+            matches!(&features.elements[1], Object::String(value) if value.as_str() == "stdlib")
+        );
+    }
+
+    #[test]
+    fn stringify_writes_basic_yaml_mapping() {
+        let object = ObjectBuilder::new()
+            .set("enabled", bool_obj(true))
+            .set("name", str_obj("night24"))
+            .set("version", num_obj(24.0))
+            .build();
+
+        let yaml = yaml_stringify_value(&object).unwrap();
+
+        assert!(yaml.contains("enabled: true"));
+        assert!(yaml.contains("name: night24"));
+        assert!(yaml.contains("version: 24"));
+    }
 }
 
 // ---------------------------------------------------------------------------

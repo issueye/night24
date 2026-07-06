@@ -1,8 +1,7 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, num_obj, str_obj, CallContext, Object};
 
 /// A live TCP stream held inside a Hash via a sentinel state cell. The GTS VM
 /// is single-threaded (synchronous tree-walker), so a plain `RefCell` is safe.
@@ -20,13 +19,11 @@ pub(crate) fn new_socket_conn_object(
     let conn = Rc::new(SocketStream {
         stream: std::cell::RefCell::new(Some(stream)),
     });
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut().set(
-        SOCKET_CONN_STATE_KEY,
-        Object::Hash(Rc::new(RefCell::new(HashData::default()))),
-    );
-    obj.borrow_mut().set("remoteAddr", str_obj(remote));
-    obj.borrow_mut().set("localAddr", str_obj(local));
+    let obj = ObjectBuilder::new()
+        .set(SOCKET_CONN_STATE_KEY, ObjectBuilder::new().build())
+        .set("remoteAddr", str_obj(remote))
+        .set("localAddr", str_obj(local))
+        .into_shared();
 
     let c = conn.clone();
     obj.borrow_mut().set(
@@ -72,11 +69,12 @@ pub(crate) fn socket_client_module() -> Object {
 }
 
 pub(crate) fn socket_connect(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let host = match required_string(ctx, "socket.connect", args, 0, "host") {
+    let reader = ArgReader::new(ctx, "socket.connect", args);
+    let host = match reader.required_string(0, "host") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let port = match required_number(ctx, "socket.connect", args, 1, "port") {
+    let port = match reader.required_number(1, "port") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -173,7 +171,8 @@ pub(crate) fn socket_set_deadline(
     conn: &Rc<SocketStream>,
     args: &[Object],
 ) -> Object {
-    let ms = match required_number(ctx, "socket.setDeadline", args, 0, "timeout") {
+    let reader = ArgReader::new(ctx, "socket.setDeadline", args);
+    let ms = match reader.required_number(0, "timeout") {
         Ok(v) => v,
         Err(e) => return e,
     };

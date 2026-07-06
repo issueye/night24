@@ -1,9 +1,8 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
 use super::net_socket_client::new_socket_conn_object;
-use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, num_obj, str_obj, CallContext, Object};
 
 /// The synchronous VM has no event loop, so a Go-style background accept loop
 /// cannot be reproduced. We expose the same `listen` / `createServer` surface
@@ -28,16 +27,15 @@ pub(crate) fn socket_server_module() -> Object {
 }
 
 pub(crate) fn socket_listen(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let port = match required_number(ctx, "socket.listen", args, 0, "port") {
+    let reader = ArgReader::new(ctx, "socket.listen", args);
+    let port = match reader.required_number(0, "port") {
         Ok(v) => v,
         Err(e) => return e,
     };
     // Capture the handler (if provided) so acceptOne can use it without
     // re-passing it on every call.
     let handler = match args.get(1) {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            Some(v.clone())
-        }
+        Some(value) if is_callable(value) => Some(value.clone()),
         _ => None,
     };
     let addr = format!("0.0.0.0:{}", port as i64);
@@ -57,14 +55,11 @@ pub(crate) fn socket_listen(ctx: &mut CallContext, args: &[Object]) -> Object {
         listener: std::cell::RefCell::new(Some(listener)),
         handler: std::cell::RefCell::new(handler),
     });
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut().set(
-        SOCKET_SERVER_STATE_KEY,
-        Object::Hash(Rc::new(RefCell::new(HashData::default()))),
-    );
-    obj.borrow_mut().set("port", num_obj(bound_port as f64));
-    obj.borrow_mut()
-        .set("address", str_obj(format!(":{}", bound_port)));
+    let obj = ObjectBuilder::new()
+        .set(SOCKET_SERVER_STATE_KEY, ObjectBuilder::new().build())
+        .set("port", num_obj(bound_port as f64))
+        .set("address", str_obj(format!(":{}", bound_port)))
+        .into_shared();
 
     let s = server.clone();
     obj.borrow_mut().set(
@@ -101,9 +96,7 @@ pub(crate) fn socket_accept_one(
     // Prefer an explicitly-passed handler; fall back to the one registered at
     // listen time.
     let handler = match args.first() {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            Some(v.clone())
-        }
+        Some(value) if is_callable(value) => Some(value.clone()),
         Some(_) => {
             return new_error(
                 ctx.pos.clone(),

@@ -22,7 +22,8 @@ pub(crate) fn base64_encode(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn base64_decode(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "base64.decode", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "base64.decode", args);
+    let text = match reader.required_string(0, "text") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -45,7 +46,8 @@ pub(crate) fn base64_encode_url(ctx: &mut CallContext, args: &[Object]) -> Objec
 }
 
 pub(crate) fn base64_decode_url(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "base64.decodeURL", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "base64.decodeURL", args);
+    let text = match reader.required_string(0, "text") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -53,5 +55,31 @@ pub(crate) fn base64_decode_url(ctx: &mut CallContext, args: &[Object]) -> Objec
     match base64_decode_into(&table, "base64.decodeURL", &text, true) {
         Ok(bytes) => bytes_result(ctx, "base64.decodeURL", bytes, args.get(1)),
         Err(msg) => new_error(ctx.pos.clone(), msg),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_decode_into_decodes_standard_and_urlsafe_text() {
+        assert_eq!(
+            base64_decode_into(&base64_std_table(), "base64.decode", "TmlnaHQyNA==", true).unwrap(),
+            b"Night24"
+        );
+        assert_eq!(
+            base64_decode_into(&base64_url_table(), "base64.decodeURL", "TmlnaHQyNA", true)
+                .unwrap(),
+            b"Night24"
+        );
+    }
+
+    #[test]
+    fn base64_decode_into_rejects_invalid_data() {
+        assert_eq!(
+            base64_decode_into(&base64_std_table(), "base64.decode", "??", true).unwrap_err(),
+            "base64.decode: invalid base64 data"
+        );
     }
 }

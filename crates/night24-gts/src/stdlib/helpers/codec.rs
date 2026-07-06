@@ -10,7 +10,9 @@ pub(crate) fn codec_write_file(
     node_label: &str,
     stringify: fn(&Object) -> Result<String, String>,
 ) -> Object {
-    let path = match required_string(ctx, &format!("{}.writeFileSync", module), args, 0, "path") {
+    let function_name = format!("{}.writeFileSync", module);
+    let reader = ArgReader::new(ctx, &function_name, args);
+    let path = match reader.required_string(0, "path") {
         Ok(p) => p,
         Err(e) => return e,
     };

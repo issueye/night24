@@ -24,11 +24,12 @@ pub(crate) fn random_module() -> Object {
 }
 
 pub(crate) fn random_int(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let min = match required_number(ctx, "random.int", args, 0, "min") {
+    let reader = ArgReader::new(ctx, "random.int", args);
+    let min = match reader.required_number(0, "min") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let max = match required_number(ctx, "random.int", args, 1, "max") {
+    let max = match reader.required_number(1, "max") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -46,11 +47,12 @@ pub(crate) fn random_int(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn random_float(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let min = match required_number(ctx, "random.float", args, 0, "min") {
+    let reader = ArgReader::new(ctx, "random.float", args);
+    let min = match reader.required_number(0, "min") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let max = match required_number(ctx, "random.float", args, 1, "max") {
+    let max = match reader.required_number(1, "max") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -102,7 +104,8 @@ pub(crate) fn random_sample(ctx: &mut CallContext, args: &[Object]) -> Object {
         }
         None => return new_error(ctx.pos.clone(), "random.sample requires array and count"),
     };
-    let count = match required_number(ctx, "random.sample", args, 1, "count") {
+    let reader = ArgReader::new(ctx, "random.sample", args);
+    let count = match reader.required_number(1, "count") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -147,7 +150,8 @@ pub(crate) fn random_length_bounded(
     label: &str,
     max: u32,
 ) -> Result<u32, Object> {
-    match required_number(ctx, name, args, 0, label) {
+    let reader = ArgReader::new(ctx, name, args);
+    match reader.required_number(0, label) {
         Ok(n) => {
             if n < 0.0 || n > max as f64 {
                 Err(new_error(
@@ -240,7 +244,8 @@ pub(crate) fn random_uuid(ctx: &mut CallContext, _args: &[Object]) -> Object {
 }
 
 pub(crate) fn random_bytes(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let size = match required_number(ctx, "random.bytes", args, 0, "size") {
+    let reader = ArgReader::new(ctx, "random.bytes", args);
+    let size = match reader.required_number(0, "size") {
         Ok(v) => v,
         Err(e) => return e,
     };

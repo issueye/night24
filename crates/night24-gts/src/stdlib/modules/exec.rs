@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use super::super::helpers::*;
 use super::process::process_result;
-use crate::object::{format_number, new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{format_number, new_error, str_obj, CallContext, Object};
 
 pub(crate) fn exec_module() -> Object {
     module(vec![
@@ -99,14 +99,15 @@ pub(crate) fn exec_command(ctx: &mut CallContext, args: &[Object]) -> Object {
     let state = Rc::new(RefCell::new(ExecCommandState { dir: None }));
 
     // Return a command builder object with chainable configuration and run/output methods.
-    let hash = Rc::new(RefCell::new(HashData::default()));
+    let hash = ObjectBuilder::new().into_shared();
 
     let state_for_set_dir = state.clone();
     let builder_for_set_dir = hash.clone();
     hash.borrow_mut().set(
         "setDir",
         native("command.setDir", move |ctx, args| {
-            let dir = match required_string(ctx, "command.setDir", args, 0, "dir") {
+            let reader = ArgReader::new(ctx, "command.setDir", args);
+            let dir = match reader.required_string(0, "dir") {
                 Ok(v) => v,
                 Err(err) => return err,
             };

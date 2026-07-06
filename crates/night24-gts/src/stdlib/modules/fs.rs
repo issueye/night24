@@ -54,7 +54,8 @@ pub(crate) fn fs_module() -> Object {
 }
 
 pub(crate) fn fs_read_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.readFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.readFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -65,7 +66,8 @@ pub(crate) fn fs_read_file_sync(ctx: &mut CallContext, args: &[Object]) -> Objec
 }
 
 pub(crate) fn fs_write_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.writeFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.writeFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -79,7 +81,8 @@ pub(crate) fn fs_write_file_sync(ctx: &mut CallContext, args: &[Object]) -> Obje
 }
 
 pub(crate) fn fs_append_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.appendFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.appendFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -96,7 +99,8 @@ pub(crate) fn fs_append_file_sync(ctx: &mut CallContext, args: &[Object]) -> Obj
 }
 
 pub(crate) fn fs_write_file_atomic_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.writeFileAtomicSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.writeFileAtomicSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -110,7 +114,8 @@ pub(crate) fn fs_write_file_atomic_sync(ctx: &mut CallContext, args: &[Object]) 
 }
 
 pub(crate) fn fs_create_throttled_writer(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.createThrottledWriter", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.createThrottledWriter", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -162,18 +167,23 @@ pub(crate) fn fs_create_throttled_writer(ctx: &mut CallContext, args: &[Object])
 }
 
 pub(crate) fn fs_exists_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "fs.existsSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.existsSync", args);
+    match reader.required_string(0, "path") {
         Ok(path) => bool_obj(Path::new(&path).exists()),
         Err(err) => err,
     }
 }
 
 pub(crate) fn fs_readdir_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.readdirSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.readdirSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
-    let with_file_types = hash_bool_arg(args.get(1), "withFileTypes").unwrap_or(false);
+    let with_file_types = reader
+        .object_view(1)
+        .and_then(|opts| ObjectView::new(&opts).bool("withFileTypes"))
+        .unwrap_or(false);
     match fs::read_dir(&path) {
         Ok(entries) => {
             let mut values = Vec::new();
@@ -207,11 +217,15 @@ pub(crate) fn fs_readdir_sync(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn fs_walk_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let root = match required_string(ctx, "fs.walkSync", args, 0, "root") {
+    let reader = ArgReader::new(ctx, "fs.walkSync", args);
+    let root = match reader.required_string(0, "root") {
         Ok(root) => root,
         Err(err) => return err,
     };
-    let include_dirs = hash_bool_arg(args.get(1), "includeDirs").unwrap_or(true);
+    let include_dirs = reader
+        .object_view(1)
+        .and_then(|opts| ObjectView::new(&opts).bool("includeDirs"))
+        .unwrap_or(true);
     let root_path = PathBuf::from(&root);
     let mut entries = Vec::new();
     if let Err(e) = walk_dir_collect(&root_path, &root_path, include_dirs, &mut entries) {
@@ -222,7 +236,8 @@ pub(crate) fn fs_walk_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_glob_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let pattern = match required_string(ctx, "fs.globSync", args, 0, "pattern") {
+    let reader = ArgReader::new(ctx, "fs.globSync", args);
+    let pattern = match reader.required_string(0, "pattern") {
         Ok(pattern) => pattern,
         Err(err) => return err,
     };
@@ -238,13 +253,17 @@ pub(crate) fn fs_glob_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_mkdir_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.mkdirSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.mkdirSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
     let recursive = match args.get(1) {
         Some(Object::Boolean(value)) => *value,
-        other => hash_bool_arg(other, "recursive").unwrap_or(false),
+        _ => reader
+            .object_view(1)
+            .and_then(|opts| ObjectView::new(&opts).bool("recursive"))
+            .unwrap_or(false),
     };
     let result = if recursive {
         fs::create_dir_all(&path)
@@ -258,7 +277,8 @@ pub(crate) fn fs_mkdir_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_stat_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.statSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.statSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -270,7 +290,8 @@ pub(crate) fn fs_stat_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_lstat_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.lstatSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.lstatSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -282,7 +303,8 @@ pub(crate) fn fs_lstat_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_realpath_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.realpathSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.realpathSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -293,11 +315,12 @@ pub(crate) fn fs_realpath_sync(ctx: &mut CallContext, args: &[Object]) -> Object
 }
 
 pub(crate) fn fs_copy_file_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let from = match required_string(ctx, "fs.copyFileSync", args, 0, "from") {
+    let reader = ArgReader::new(ctx, "fs.copyFileSync", args);
+    let from = match reader.required_string(0, "from") {
         Ok(path) => path,
         Err(err) => return err,
     };
-    let to = match required_string(ctx, "fs.copyFileSync", args, 1, "to") {
+    let to = match reader.required_string(1, "to") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -308,11 +331,12 @@ pub(crate) fn fs_copy_file_sync(ctx: &mut CallContext, args: &[Object]) -> Objec
 }
 
 pub(crate) fn fs_rename_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let from = match required_string(ctx, "fs.renameSync", args, 0, "from") {
+    let reader = ArgReader::new(ctx, "fs.renameSync", args);
+    let from = match reader.required_string(0, "from") {
         Ok(path) => path,
         Err(err) => return err,
     };
-    let to = match required_string(ctx, "fs.renameSync", args, 1, "to") {
+    let to = match reader.required_string(1, "to") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -323,7 +347,8 @@ pub(crate) fn fs_rename_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_unlink_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.unlinkSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.unlinkSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
@@ -334,12 +359,21 @@ pub(crate) fn fs_unlink_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_rm_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "fs.rmSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "fs.rmSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(path) => path,
         Err(err) => return err,
     };
-    let recursive = hash_bool_arg(args.get(1), "recursive").unwrap_or(false);
-    let force = hash_bool_arg(args.get(1), "force").unwrap_or(false);
+    let (recursive, force) = reader
+        .object_view(1)
+        .map(|opts| {
+            let opts = ObjectView::new(&opts);
+            (
+                opts.bool("recursive").unwrap_or(false),
+                opts.bool("force").unwrap_or(false),
+            )
+        })
+        .unwrap_or((false, false));
     let target = Path::new(&path);
     let result = if recursive {
         fs::remove_dir_all(target)
@@ -360,7 +394,8 @@ pub(crate) fn fs_rm_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn fs_mkdtemp_sync(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let prefix = match required_string(ctx, "fs.mkdtempSync", args, 0, "prefix") {
+    let reader = ArgReader::new(ctx, "fs.mkdtempSync", args);
+    let prefix = match reader.required_string(0, "prefix") {
         Ok(prefix) => prefix,
         Err(err) => return err,
     };

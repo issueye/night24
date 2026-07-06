@@ -17,8 +17,8 @@ use skills::SkillRegistry;
 #[cfg(test)]
 use tools::arguments_with_network_proxy;
 use tools::{
-    cleanup_run, deny_pending_permissions_for_run, execute_tool_with_events,
-    permission_manager_for_mode, text_content,
+    cleanup_run, deny_pending_permissions_for_run, ensure_tool_permission,
+    execute_tool_with_events, permission_manager_for_mode, text_content, ToolLifecycle,
 };
 use types::{CoreState, PermissionHandle, RunContext, RunHandle};
 
@@ -30,9 +30,8 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::StreamExt;
-use night24_core::model::{ContentBlock, Message, Role};
-use night24_core::permission::PermissionLevel;
-use night24_core::provider::ModelConfig;
+use night24_core::model::{ContentBlock, Message, Role, Tool};
+use night24_core::provider::{ModelConfig, Provider};
 use night24_core::security::SecurityInspector;
 #[cfg(test)]
 use night24_protocol::ProviderConfig;
@@ -437,30 +436,7 @@ impl AgentCore {
             permission_manager_for_mode(params.options.permission_mode.as_deref());
         let security = SecurityInspector::new(Arc::new(permission_manager));
 
-        let mut system = "You are Night24 Agent Core. When a task benefits from delegation, parallel analysis, background work, or isolated investigation, you may autonomously create and manage sub-agents using the developer__subagent_* tools. Use sync sub-agents when you need the result before continuing; use async sub-agents when work can continue while the child runs. Query the sub-agent pool before depending on asynchronous results.".to_string();
-        let skill_list = context.skills.available_for_prompt();
-        if !skill_list.trim().is_empty() {
-            system.push_str("\n\n");
-            system.push_str(&skill_list);
-            system.push_str(
-                "\nUse developer__skill_load to load full skill instructions or bundle files when needed.",
-            );
-        }
-        if let Some((_, skill)) = context.skills.explicit_invocation(&params.input.text) {
-            match context.skills.load_skill(&skill.name, None) {
-                Ok(loaded) => {
-                    system.push_str("\n\nActive skill loaded by explicit user request:\n");
-                    system.push_str(&format!(
-                        "Skill: {}\nDescription: {}\nInstructions:\n{}\n",
-                        loaded.skill.name, loaded.skill.description, loaded.body
-                    ));
-                }
-                Err(err) => {
-                    system.push_str("\n\nExplicit skill request could not be loaded: ");
-                    system.push_str(&err.to_string());
-                }
-            }
-        }
+        let system = build_system_prompt(context, &params.input.text);
         let tools = night24_core::tool_executor::builtin_tools();
         let mut messages = params.session.conversation.clone();
         messages.push(Message {
@@ -489,98 +465,24 @@ impl AgentCore {
                     };
                     let turn_result = tokio::time::timeout(
                         Duration::from_millis(params.limits.turn_timeout_ms.max(1)),
-                        async {
-                            context
-                                .run_hooks(HookContext {
-                                    event: HookEvent::BeforeProviderRequest,
-                                    run_id: &params.run_id,
-                                    working_dir: &params.session.working_dir,
-                                    provider: Some(provider.name()),
-                                    model: Some(&model_config.model),
-                                    message_count: Some(messages.len()),
-                                    tool_count: Some(tools.len()),
-                                    tool_call_id: None,
-                                    tool_name: None,
-                                    summary: None,
-                                    arguments: None,
-                                    result_preview: None,
-                                    error: None,
-                                    duration_ms: None,
-                                    finish_status: None,
-                                })
-                                .await;
-                            let mut stream = provider
-                                .stream(&model_config, &system, &messages, &tools)
-                                .await?;
-                            let mut message_order = Vec::new();
-                            let mut latest_messages: HashMap<String, Message> = HashMap::new();
-                            let mut streamed_text: HashMap<String, String> = HashMap::new();
-                            let mut has_tool_requests = false;
-                            while let Some(result) = stream.next().await {
-                                if context.is_cancelled() {
-                                    anyhow::bail!("cancelled");
-                                }
-                                let (message, _usage) = result?;
-                                if let Some(message) = message {
-                                    has_tool_requests |= message.content.iter().any(|block| {
-                                        matches!(block, ContentBlock::ToolRequest { .. })
-                                    });
-                                    if params.options.stream_message_delta {
-                                        let current_text = text_content(&message);
-                                        let previous_text =
-                                            streamed_text.entry(message.id.clone()).or_default();
-                                        if current_text.starts_with(previous_text.as_str())
-                                            && current_text.len() > previous_text.len()
-                                        {
-                                            let delta = current_text[previous_text.len()..].to_string();
-                                            context.send(AgentEventKind::MessageDelta {
-                                                message_id: message.id.clone(),
-                                                delta,
-                                            });
-                                            *previous_text = current_text;
-                                        } else if !current_text.is_empty()
-                                            && current_text != *previous_text
-                                        {
-                                            context.send(AgentEventKind::Message {
-                                                message: message.clone(),
-                                            });
-                                            *previous_text = current_text;
-                                        }
-
-                                        if message.content.iter().any(|block| {
-                                            matches!(
-                                                block,
-                                                ContentBlock::ToolRequest { .. }
-                                                    | ContentBlock::ToolResponse { .. }
-                                            )
-                                        }) {
-                                            context.send(AgentEventKind::Message {
-                                                message: message.clone(),
-                                            });
-                                        }
-                                    } else {
-                                        context.send(AgentEventKind::Message {
-                                            message: message.clone(),
-                                        });
-                                    }
-
-                                    if !latest_messages.contains_key(&message.id) {
-                                        message_order.push(message.id.clone());
-                                    }
-                                    latest_messages.insert(message.id.clone(), message);
-                                }
-                            }
-
-                            let turn_messages = message_order
-                                .into_iter()
-                                .filter_map(|id| latest_messages.remove(&id))
-                                .collect::<Vec<_>>();
-                            anyhow::Ok((turn_messages, has_tool_requests))
-                        },
+                        run_provider_turn(
+                            context,
+                            &params.run_id,
+                            &params.session.working_dir,
+                            provider.as_ref(),
+                            &model_config,
+                            &system,
+                            &messages,
+                            &tools,
+                            params.options.stream_message_delta,
+                        ),
                     )
                     .await
                     .map_err(|_| anyhow::anyhow!("agent turn timed out"))??;
-                    let (turn_messages, has_tool_requests) = turn_result;
+                    let ProviderTurn {
+                        messages: turn_messages,
+                        has_tool_requests,
+                    } = turn_result;
 
                     if turn_messages.is_empty() {
                         if awaiting_tool_followup {
@@ -591,101 +493,14 @@ impl AgentCore {
                         break;
                     }
 
-                    let mut executed_messages = Vec::new();
-                    for message in &turn_messages {
-                        let mut had_tool_request = false;
-                        let mut blocks = Vec::new();
-                        for block in &message.content {
-                            match block {
-                                ContentBlock::ToolRequest {
-                                    id,
-                                    name,
-                                    arguments,
-                                } => {
-                                    had_tool_request = true;
-                                    let started = Instant::now();
-                                    let result = if is_subagent_tool(name) {
-                                        Self::execute_subagent_tool_with_events(
-                                            params,
-                                            default_provider,
-                                            context,
-                                            &security,
-                                            id,
-                                            name,
-                                            arguments,
-                                        )
-                                        .await
-                                    } else if is_skill_tool(name) {
-                                        Self::execute_skill_tool_with_events(
-                                            params,
-                                            context,
-                                            &security,
-                                            id,
-                                            name,
-                                            arguments,
-                                        )
-                                        .await
-                                    } else {
-                                        execute_tool_with_events(
-                                            context,
-                                            &security,
-                                            id,
-                                            name,
-                                            arguments,
-                                            &params.session.working_dir,
-                                            Duration::from_millis(
-                                                params.limits.tool_timeout_ms.max(1),
-                                            ),
-                                            params.options.network_proxy.as_deref(),
-                                        )
-                                        .await
-                                    };
-                                    match result {
-                                        Ok(content) => {
-                                            blocks.push(ContentBlock::ToolResponse {
-                                                id: id.clone(),
-                                                content,
-                                                is_error: false,
-                                            });
-                                        }
-                                        Err(err) => {
-                                            let content = format!("error: {err}");
-                                            if context.emit_tool_events {
-                                                context.send(AgentEventKind::ToolFailed {
-                                                    tool_call_id: id.clone(),
-                                                    tool_name: name.clone(),
-                                                    duration_ms: started.elapsed().as_millis()
-                                                        as u64,
-                                                    error: EventError {
-                                                        code: if context.is_cancelled() {
-                                                            "cancelled".to_string()
-                                                        } else {
-                                                            "tool_execution_failed".to_string()
-                                                        },
-                                                        message: err.to_string(),
-                                                    },
-                                                });
-                                            }
-                                            blocks.push(ContentBlock::ToolResponse {
-                                                id: id.clone(),
-                                                content,
-                                                is_error: true,
-                                            });
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        if had_tool_request && !blocks.is_empty() {
-                            executed_messages.push(Message {
-                                id: message.id.clone(),
-                                role: Role::Tool,
-                                content: blocks,
-                                created_at: message.created_at,
-                            });
-                        }
-                    }
+                    let executed_messages = Self::execute_turn_tools(
+                        params,
+                        default_provider,
+                        context,
+                        &security,
+                        &turn_messages,
+                    )
+                    .await;
 
                     messages.extend(turn_messages.clone());
                     messages.extend(executed_messages.clone());
@@ -709,6 +524,129 @@ impl AgentCore {
         }
     }
 
+    async fn execute_turn_tools(
+        params: &ReplyParams,
+        default_provider: &str,
+        context: &RunContext,
+        security: &SecurityInspector,
+        turn_messages: &[Message],
+    ) -> Vec<Message> {
+        let mut executed_messages = Vec::new();
+        for message in turn_messages {
+            let mut blocks = Vec::new();
+            for block in &message.content {
+                if let ContentBlock::ToolRequest {
+                    id,
+                    name,
+                    arguments,
+                } = block
+                {
+                    blocks.push(
+                        Self::execute_tool_request_response(
+                            params,
+                            default_provider,
+                            context,
+                            security,
+                            id,
+                            name,
+                            arguments,
+                        )
+                        .await,
+                    );
+                }
+            }
+
+            if !blocks.is_empty() {
+                executed_messages.push(Message {
+                    id: message.id.clone(),
+                    role: Role::Tool,
+                    content: blocks,
+                    created_at: message.created_at,
+                });
+            }
+        }
+
+        executed_messages
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_tool_request_response(
+        params: &ReplyParams,
+        default_provider: &str,
+        context: &RunContext,
+        security: &SecurityInspector,
+        tool_call_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> ContentBlock {
+        let started = Instant::now();
+        let result = if is_subagent_tool(tool_name) {
+            Self::execute_subagent_tool_with_events(
+                params,
+                default_provider,
+                context,
+                security,
+                tool_call_id,
+                tool_name,
+                arguments,
+            )
+            .await
+        } else if is_skill_tool(tool_name) {
+            Self::execute_skill_tool_with_events(
+                params,
+                context,
+                security,
+                tool_call_id,
+                tool_name,
+                arguments,
+            )
+            .await
+        } else {
+            execute_tool_with_events(
+                context,
+                security,
+                tool_call_id,
+                tool_name,
+                arguments,
+                &params.session.working_dir,
+                Duration::from_millis(params.limits.tool_timeout_ms.max(1)),
+                params.options.network_proxy.as_deref(),
+            )
+            .await
+        };
+
+        match result {
+            Ok(content) => ContentBlock::ToolResponse {
+                id: tool_call_id.to_string(),
+                content,
+                is_error: false,
+            },
+            Err(err) => {
+                let content = format!("error: {err}");
+                if context.emit_tool_events {
+                    context.send(AgentEventKind::ToolFailed {
+                        tool_call_id: tool_call_id.to_string(),
+                        tool_name: tool_name.to_string(),
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        error: EventError {
+                            code: if context.is_cancelled() {
+                                "cancelled".to_string()
+                            } else {
+                                "tool_execution_failed".to_string()
+                            },
+                            message: err.to_string(),
+                        },
+                    });
+                }
+                ContentBlock::ToolResponse {
+                    id: tool_call_id.to_string(),
+                    content,
+                    is_error: true,
+                }
+            }
+        }
+    }
+
     async fn execute_subagent_tool_with_events(
         params: &ReplyParams,
         default_provider: &str,
@@ -718,40 +656,26 @@ impl AgentCore {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> anyhow::Result<String> {
-        match security.require_permission(tool_name).await {
-            PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
-            PermissionLevel::Confirm | PermissionLevel::Allow => {}
-        }
-
         let summary = summarize_subagent_tool(tool_name, arguments);
-        context
-            .run_hooks(HookContext {
-                event: HookEvent::BeforeTool,
-                run_id: &context.run_id,
-                working_dir: &params.session.working_dir,
-                provider: None,
-                model: None,
-                message_count: None,
-                tool_count: None,
-                tool_call_id: Some(tool_call_id),
-                tool_name: Some(tool_name),
-                summary: Some(&summary),
-                arguments: Some(arguments),
-                result_preview: None,
-                error: None,
-                duration_ms: None,
-                finish_status: None,
-            })
-            .await;
+        ensure_tool_permission(
+            context,
+            security,
+            &params.session.working_dir,
+            tool_call_id,
+            tool_name,
+            arguments,
+            &summary,
+        )
+        .await?;
 
-        if context.emit_tool_events {
-            context.send(AgentEventKind::ToolStarted {
-                tool_call_id: tool_call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                summary: summary.clone(),
-                arguments: arguments.clone(),
-            });
-        }
+        let lifecycle = ToolLifecycle::new(
+            context,
+            &params.session.working_dir,
+            tool_call_id,
+            tool_name,
+            arguments,
+        );
+        lifecycle.before(&summary).await;
 
         let started = Instant::now();
         let result =
@@ -761,70 +685,20 @@ impl AgentCore {
         match result {
             Ok(output) => {
                 let result_preview = preview_text(&output);
-                context
-                    .run_hooks(HookContext {
-                        event: HookEvent::AfterTool,
-                        run_id: &context.run_id,
-                        working_dir: &params.session.working_dir,
-                        provider: None,
-                        model: None,
-                        message_count: None,
-                        tool_count: None,
-                        tool_call_id: Some(tool_call_id),
-                        tool_name: Some(tool_name),
-                        summary: None,
-                        arguments: Some(arguments),
-                        result_preview: Some(&result_preview),
-                        error: None,
-                        duration_ms: Some(duration_ms),
-                        finish_status: None,
-                    })
-                    .await;
-
-                if context.emit_tool_events {
-                    context.send(AgentEventKind::ToolFinished {
-                        tool_call_id: tool_call_id.to_string(),
-                        tool_name: tool_name.to_string(),
+                lifecycle
+                    .success(
                         duration_ms,
-                        summary: format!("{tool_name} completed"),
+                        format!("{tool_name} completed"),
                         result_preview,
-                        is_error: false,
-                    });
-                }
+                    )
+                    .await;
                 Ok(output)
             }
             Err(err) => {
                 let error = err.to_string();
-                context
-                    .run_hooks(HookContext {
-                        event: HookEvent::AfterTool,
-                        run_id: &context.run_id,
-                        working_dir: &params.session.working_dir,
-                        provider: None,
-                        model: None,
-                        message_count: None,
-                        tool_count: None,
-                        tool_call_id: Some(tool_call_id),
-                        tool_name: Some(tool_name),
-                        summary: None,
-                        arguments: Some(arguments),
-                        result_preview: None,
-                        error: Some(&error),
-                        duration_ms: Some(duration_ms),
-                        finish_status: None,
-                    })
+                lifecycle
+                    .failure(duration_ms, "subagent_tool_failed", &error)
                     .await;
-                if context.emit_tool_events {
-                    context.send(AgentEventKind::ToolFailed {
-                        tool_call_id: tool_call_id.to_string(),
-                        tool_name: tool_name.to_string(),
-                        duration_ms,
-                        error: EventError {
-                            code: "subagent_tool_failed".to_string(),
-                            message: error,
-                        },
-                    });
-                }
                 Err(err)
             }
         }
@@ -838,40 +712,26 @@ impl AgentCore {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> anyhow::Result<String> {
-        match security.require_permission(tool_name).await {
-            PermissionLevel::Deny => anyhow::bail!("permission denied for {tool_name}"),
-            PermissionLevel::Confirm | PermissionLevel::Allow => {}
-        }
-
         let summary = summarize_skill_tool(arguments);
-        context
-            .run_hooks(HookContext {
-                event: HookEvent::BeforeTool,
-                run_id: &context.run_id,
-                working_dir: &params.session.working_dir,
-                provider: None,
-                model: None,
-                message_count: None,
-                tool_count: None,
-                tool_call_id: Some(tool_call_id),
-                tool_name: Some(tool_name),
-                summary: Some(&summary),
-                arguments: Some(arguments),
-                result_preview: None,
-                error: None,
-                duration_ms: None,
-                finish_status: None,
-            })
-            .await;
+        ensure_tool_permission(
+            context,
+            security,
+            &params.session.working_dir,
+            tool_call_id,
+            tool_name,
+            arguments,
+            &summary,
+        )
+        .await?;
 
-        if context.emit_tool_events {
-            context.send(AgentEventKind::ToolStarted {
-                tool_call_id: tool_call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                summary: summary.clone(),
-                arguments: arguments.clone(),
-            });
-        }
+        let lifecycle = ToolLifecycle::new(
+            context,
+            &params.session.working_dir,
+            tool_call_id,
+            tool_name,
+            arguments,
+        );
+        lifecycle.before(&summary).await;
 
         let started = Instant::now();
         let result = execute_skill_tool(context, arguments).await;
@@ -880,69 +740,20 @@ impl AgentCore {
         match result {
             Ok(output) => {
                 let result_preview = preview_text(&output);
-                context
-                    .run_hooks(HookContext {
-                        event: HookEvent::AfterTool,
-                        run_id: &context.run_id,
-                        working_dir: &params.session.working_dir,
-                        provider: None,
-                        model: None,
-                        message_count: None,
-                        tool_count: None,
-                        tool_call_id: Some(tool_call_id),
-                        tool_name: Some(tool_name),
-                        summary: None,
-                        arguments: Some(arguments),
-                        result_preview: Some(&result_preview),
-                        error: None,
-                        duration_ms: Some(duration_ms),
-                        finish_status: None,
-                    })
-                    .await;
-                if context.emit_tool_events {
-                    context.send(AgentEventKind::ToolFinished {
-                        tool_call_id: tool_call_id.to_string(),
-                        tool_name: tool_name.to_string(),
+                lifecycle
+                    .success(
                         duration_ms,
-                        summary: "developer__skill_load completed".to_string(),
+                        "developer__skill_load completed".to_string(),
                         result_preview,
-                        is_error: false,
-                    });
-                }
+                    )
+                    .await;
                 Ok(output)
             }
             Err(err) => {
                 let error = err.to_string();
-                context
-                    .run_hooks(HookContext {
-                        event: HookEvent::AfterTool,
-                        run_id: &context.run_id,
-                        working_dir: &params.session.working_dir,
-                        provider: None,
-                        model: None,
-                        message_count: None,
-                        tool_count: None,
-                        tool_call_id: Some(tool_call_id),
-                        tool_name: Some(tool_name),
-                        summary: None,
-                        arguments: Some(arguments),
-                        result_preview: None,
-                        error: Some(&error),
-                        duration_ms: Some(duration_ms),
-                        finish_status: None,
-                    })
+                lifecycle
+                    .failure(duration_ms, "skill_tool_failed", &error)
                     .await;
-                if context.emit_tool_events {
-                    context.send(AgentEventKind::ToolFailed {
-                        tool_call_id: tool_call_id.to_string(),
-                        tool_name: tool_name.to_string(),
-                        duration_ms,
-                        error: EventError {
-                            code: "skill_tool_failed".to_string(),
-                            message: error,
-                        },
-                    });
-                }
                 Err(err)
             }
         }
@@ -966,6 +777,121 @@ impl AgentCore {
     }
 }
 
+struct ProviderTurn {
+    messages: Vec<Message>,
+    has_tool_requests: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_provider_turn(
+    context: &RunContext,
+    run_id: &str,
+    working_dir: &std::path::Path,
+    provider: &dyn Provider,
+    model_config: &ModelConfig,
+    system: &str,
+    messages: &[Message],
+    tools: &[Tool],
+    stream_message_delta: bool,
+) -> anyhow::Result<ProviderTurn> {
+    context
+        .run_hooks(HookContext {
+            event: HookEvent::BeforeProviderRequest,
+            run_id,
+            working_dir,
+            provider: Some(provider.name()),
+            model: Some(&model_config.model),
+            message_count: Some(messages.len()),
+            tool_count: Some(tools.len()),
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error: None,
+            duration_ms: None,
+            finish_status: None,
+        })
+        .await;
+
+    let mut stream = provider
+        .stream(model_config, system, messages, tools)
+        .await?;
+    let mut message_order = Vec::new();
+    let mut latest_messages: HashMap<String, Message> = HashMap::new();
+    let mut streamed_text: HashMap<String, String> = HashMap::new();
+    let mut has_tool_requests = false;
+
+    while let Some(result) = stream.next().await {
+        if context.is_cancelled() {
+            anyhow::bail!("cancelled");
+        }
+        let (message, _usage) = result?;
+        if let Some(message) = message {
+            has_tool_requests |= message
+                .content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::ToolRequest { .. }));
+            emit_provider_message(context, &mut streamed_text, &message, stream_message_delta);
+
+            if !latest_messages.contains_key(&message.id) {
+                message_order.push(message.id.clone());
+            }
+            latest_messages.insert(message.id.clone(), message);
+        }
+    }
+
+    Ok(ProviderTurn {
+        messages: message_order
+            .into_iter()
+            .filter_map(|id| latest_messages.remove(&id))
+            .collect(),
+        has_tool_requests,
+    })
+}
+
+fn emit_provider_message(
+    context: &RunContext,
+    streamed_text: &mut HashMap<String, String>,
+    message: &Message,
+    stream_message_delta: bool,
+) {
+    if !stream_message_delta {
+        context.send(AgentEventKind::Message {
+            message: message.clone(),
+        });
+        return;
+    }
+
+    let current_text = text_content(message);
+    let previous_text = streamed_text.entry(message.id.clone()).or_default();
+    if current_text.starts_with(previous_text.as_str()) && current_text.len() > previous_text.len()
+    {
+        let delta = current_text[previous_text.len()..].to_string();
+        context.send(AgentEventKind::MessageDelta {
+            message_id: message.id.clone(),
+            delta,
+        });
+        *previous_text = current_text;
+    } else if !current_text.is_empty() && current_text != *previous_text {
+        context.send(AgentEventKind::Message {
+            message: message.clone(),
+        });
+        *previous_text = current_text;
+    }
+
+    if message.content.iter().any(|block| {
+        matches!(
+            block,
+            ContentBlock::ToolRequest { .. } | ContentBlock::ToolResponse { .. }
+        )
+    }) {
+        context.send(AgentEventKind::Message {
+            message: message.clone(),
+        });
+    }
+}
+
 fn is_subagent_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
@@ -979,6 +905,34 @@ fn is_subagent_tool(tool_name: &str) -> bool {
 
 fn is_skill_tool(tool_name: &str) -> bool {
     tool_name == "developer__skill_load"
+}
+
+fn build_system_prompt(context: &RunContext, input_text: &str) -> String {
+    let mut system = "You are Night24 Agent Core. When a task benefits from delegation, parallel analysis, background work, or isolated investigation, you may autonomously create and manage sub-agents using the developer__subagent_* tools. Use sync sub-agents when you need the result before continuing; use async sub-agents when work can continue while the child runs. Query the sub-agent pool before depending on asynchronous results.".to_string();
+    let skill_list = context.skills.available_for_prompt();
+    if !skill_list.trim().is_empty() {
+        system.push_str("\n\n");
+        system.push_str(&skill_list);
+        system.push_str(
+            "\nUse developer__skill_load to load full skill instructions or bundle files when needed.",
+        );
+    }
+    if let Some((_, skill)) = context.skills.explicit_invocation(input_text) {
+        match context.skills.load_skill(&skill.name, None) {
+            Ok(loaded) => {
+                system.push_str("\n\nActive skill loaded by explicit user request:\n");
+                system.push_str(&format!(
+                    "Skill: {}\nDescription: {}\nInstructions:\n{}\n",
+                    loaded.skill.name, loaded.skill.description, loaded.body
+                ));
+            }
+            Err(err) => {
+                system.push_str("\n\nExplicit skill request could not be loaded: ");
+                system.push_str(&err.to_string());
+            }
+        }
+    }
+    system
 }
 
 async fn execute_skill_tool(
@@ -1338,6 +1292,12 @@ async fn reply_events(
     default_provider: String,
     context: RunContext,
 ) -> Vec<String> {
+    run_started_hook(&params, &context).await;
+    let result = AgentCore::run_agent_with_events(&params, &default_provider, &context).await;
+    finish_reply_events(params, context, result).await
+}
+
+async fn run_started_hook(params: &ReplyParams, context: &RunContext) {
     context
         .run_hooks(HookContext {
             event: HookEvent::RunStarted,
@@ -1357,33 +1317,21 @@ async fn reply_events(
             finish_status: None,
         })
         .await;
+}
 
-    match AgentCore::run_agent_with_events(&params, &default_provider, &context).await {
+async fn finish_reply_events(
+    params: ReplyParams,
+    context: RunContext,
+    result: anyhow::Result<Vec<Message>>,
+) -> Vec<String> {
+    match result {
         Ok(messages) => {
             let status = if context.is_cancelled() {
                 "cancelled"
             } else {
                 "completed"
             };
-            context
-                .run_hooks(HookContext {
-                    event: HookEvent::RunFinished,
-                    run_id: &params.run_id,
-                    working_dir: &params.session.working_dir,
-                    provider: None,
-                    model: None,
-                    message_count: None,
-                    tool_count: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    summary: None,
-                    arguments: None,
-                    result_preview: None,
-                    error: None,
-                    duration_ms: None,
-                    finish_status: Some(status),
-                })
-                .await;
+            run_end_hook(&params, &context, HookEvent::RunFinished, status, None).await;
             let mut output = context.drain_collected();
             output.push(agent_event_notification(AgentEvent::new(
                 params.run_id.clone(),
@@ -1402,37 +1350,16 @@ async fn reply_events(
         }
         Err(err) => {
             let message = err.to_string();
-            let status = if context.is_cancelled() || message.contains("cancelled") {
-                "cancelled"
-            } else {
-                "failed"
-            };
+            let is_cancelled = is_cancelled_error(&context, &message);
+            let status = if is_cancelled { "cancelled" } else { "failed" };
             let event = if status == "failed" {
                 HookEvent::RunFailed
             } else {
                 HookEvent::RunFinished
             };
-            context
-                .run_hooks(HookContext {
-                    event,
-                    run_id: &params.run_id,
-                    working_dir: &params.session.working_dir,
-                    provider: None,
-                    model: None,
-                    message_count: None,
-                    tool_count: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    summary: None,
-                    arguments: None,
-                    result_preview: None,
-                    error: Some(&message),
-                    duration_ms: None,
-                    finish_status: Some(status),
-                })
-                .await;
+            run_end_hook(&params, &context, event, status, Some(&message)).await;
             let mut output = context.drain_collected();
-            if context.is_cancelled() || message.contains("cancelled") {
+            if is_cancelled {
                 output.push(agent_event_notification(AgentEvent::new(
                     params.run_id,
                     context.next_seq(),
@@ -1457,6 +1384,38 @@ async fn reply_events(
             }
         }
     }
+}
+
+async fn run_end_hook(
+    params: &ReplyParams,
+    context: &RunContext,
+    event: HookEvent,
+    status: &str,
+    error: Option<&str>,
+) {
+    context
+        .run_hooks(HookContext {
+            event,
+            run_id: &params.run_id,
+            working_dir: &params.session.working_dir,
+            provider: None,
+            model: None,
+            message_count: None,
+            tool_count: None,
+            tool_call_id: None,
+            tool_name: None,
+            summary: None,
+            arguments: None,
+            result_preview: None,
+            error,
+            duration_ms: None,
+            finish_status: Some(status),
+        })
+        .await;
+}
+
+fn is_cancelled_error(context: &RunContext, message: &str) -> bool {
+    context.is_cancelled() || message.contains("cancelled")
 }
 
 #[cfg(test)]

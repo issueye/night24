@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 use crate::VERSION;
 
 pub(crate) fn process_module() -> Object {
@@ -21,11 +18,11 @@ pub(crate) fn process_module() -> Object {
     entries.push(("argv0", argv0));
     entries.push(("pid", num_obj(std::process::id() as f64)));
     // Snapshot environment as an object (consistent with Go's `process.env`).
-    let env_hash = Rc::new(RefCell::new(HashData::default()));
+    let mut env = ObjectBuilder::new();
     for (k, v) in std::env::vars() {
-        env_hash.borrow_mut().set(k, str_obj(v));
+        env.insert(k, str_obj(v));
     }
-    entries.push(("env", Object::Hash(env_hash)));
+    entries.push(("env", env.build()));
     entries.push(("version", str_obj(VERSION)));
     entries.push(("cwd", native("process.cwd", process_cwd)));
     entries.push(("chdir", native("process.chdir", process_chdir)));
@@ -48,7 +45,8 @@ pub(crate) fn process_cwd(ctx: &mut CallContext, _args: &[Object]) -> Object {
 }
 
 pub(crate) fn process_chdir(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "process.chdir", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "process.chdir", args);
+    let path = match reader.required_string(0, "path") {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -66,7 +64,8 @@ pub(crate) fn process_exec_path(ctx: &mut CallContext, _args: &[Object]) -> Obje
 }
 
 pub(crate) fn process_getenv(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let name = match required_string(ctx, "process.getenv", args, 0, "name") {
+    let reader = ArgReader::new(ctx, "process.getenv", args);
+    let name = match reader.required_string(0, "name") {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -77,11 +76,11 @@ pub(crate) fn process_getenv(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn process_env_object(_ctx: &mut CallContext, _args: &[Object]) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
+    let mut env = ObjectBuilder::new();
     for (k, v) in std::env::vars() {
-        hash.borrow_mut().set(k, str_obj(v));
+        env.insert(k, str_obj(v));
     }
-    Object::Hash(hash)
+    env.build()
 }
 
 pub(crate) fn process_uptime(_ctx: &mut CallContext, _args: &[Object]) -> Object {
@@ -119,11 +118,12 @@ pub(crate) fn process_hrtime(_ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn process_setenv(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let name = match required_string(ctx, "process.setenv", args, 0, "name") {
+    let reader = ArgReader::new(ctx, "process.setenv", args);
+    let name = match reader.required_string(0, "name") {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let value = match required_string(ctx, "process.setenv", args, 1, "value") {
+    let value = match reader.required_string(1, "value") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -132,7 +132,8 @@ pub(crate) fn process_setenv(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn process_unsetenv(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let name = match required_string(ctx, "process.unsetenv", args, 0, "name") {
+    let reader = ArgReader::new(ctx, "process.unsetenv", args);
+    let name = match reader.required_string(0, "name") {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -171,12 +172,12 @@ pub(crate) fn process_exit(ctx: &mut CallContext, args: &[Object]) -> Object {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn process_result(exit_code: i32, stdout: String, stderr: String) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("exitCode", num_obj(exit_code as f64));
-    hash.borrow_mut().set("stdout", str_obj(stdout));
-    hash.borrow_mut().set("stderr", str_obj(stderr));
-    hash.borrow_mut().set("success", bool_obj(exit_code == 0));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("exitCode", num_obj(exit_code as f64))
+        .set("stdout", str_obj(stdout))
+        .set("stderr", str_obj(stderr))
+        .set("success", bool_obj(exit_code == 0))
+        .build()
 }
 
 // ---------------------------------------------------------------------------

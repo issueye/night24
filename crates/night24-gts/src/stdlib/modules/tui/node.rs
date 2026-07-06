@@ -11,9 +11,9 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::rc::Rc;
 
-use crate::object::{str_obj, HashData, Object};
+use crate::object::{str_obj, Object};
+use crate::stdlib::helpers::ObjectBuilder;
 
 /// Flexbox main-axis direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -149,11 +149,10 @@ impl TuiNode {
 /// identity, which is unstable for Vec entries).
 pub fn node_object(node: TuiNode) -> Object {
     let id = next_node_id();
-    let marker = Rc::new(RefCell::new(HashData::default()));
-    marker.borrow_mut().set("__kind", str_obj("tuiNode"));
-    marker
-        .borrow_mut()
-        .set("__id", crate::object::num_obj(id as f64));
+    let marker = ObjectBuilder::new()
+        .set("__kind", str_obj("tuiNode"))
+        .set("__id", crate::object::num_obj(id as f64))
+        .into_shared();
     TUI_NODES.with(|nodes| nodes.borrow_mut().push((id, node)));
     Object::Hash(marker)
 }

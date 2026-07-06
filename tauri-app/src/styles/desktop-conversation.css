@@ -1,0 +1,156 @@
+.center-panel {
+  grid-template-rows: 48px minmax(0, 1fr) auto;
+  background: #ffffff;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.conversation-head {
+  padding: 0 22px 0 38px;
+  background: #ffffff;
+  border-bottom-color: #f0efeb;
+}
+
+.conversation-head > div:first-child {
+  min-width: 0;
+}
+
+.conversation-head > div:first-child span {
+  display: none;
+}
+
+.conversation-head strong {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.core-note {
+  margin-left: auto;
+  color: var(--green);
+  font-size: 12px;
+}
+
+.context-actions {
+  gap: 4px;
+}
+
+.conversation-area {
+  width: min(940px, calc(100% - 52px));
+  margin: 0 auto;
+  background: transparent;
+}
+
+.conversation-timeline {
+  border-right-color: #f0efeb;
+}
+
+.timeline-point > span {
+  box-shadow: 0 0 0 3px #ffffff;
+}
+
+.timeline-point:hover > span,
+.timeline-point:focus-visible > span {
+  box-shadow: 0 0 0 4px rgba(55, 125, 255, 0.12), 0 0 0 3px #ffffff;
+}
+
+.messages {
+  width: min(760px, calc(100% - 92px));
+  margin: 0 auto;
+  padding: 34px 0 24px;
+  background: transparent;
+}
+
+.welcome-panel,
+.placeholder,
+.empty-block {
+  background: #fafaf9;
+  border-color: var(--line);
+  border-radius: 12px;
+}
+
+.message {
+  max-width: min(720px, 88%);
+}
+
+.message-body pre {
+  border-color: #ededeb;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.message.user .message-body pre {
+  color: #ffffff;
+  background: #4b5563;
+  border-color: #4b5563;
+}
+
+.message.error .avatar {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.message.error .message-body pre {
+  color: #991b1b;
+  background: #fff7f7;
+  border-color: #fecaca;
+}
+
+.composer {
+  width: min(738px, calc(100% - 92px));
+  margin: 12px auto 16px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #e8e6e1;
+  border-radius: 20px;
+  box-shadow: 0 16px 44px rgba(30, 30, 30, 0.12);
+}
+
+.composer textarea {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.composer textarea:focus {
+  box-shadow: none;
+}
+
+.composer-actions {
+  min-height: 30px;
+}
+
+.primary-button,
+.danger-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  gap: 0;
+  padding: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  color: transparent;
+  font-size: 0;
+}
+
+.primary-button svg,
+.danger-button svg {
+  color: #ffffff;
+}
+
+.primary-button:disabled svg {
+  color: var(--subtle);
+}
+
+@media (max-width: 1180px) {
+  .messages,
+  .composer {
+    width: min(700px, calc(100% - 56px));
+  }
+}

@@ -1,0 +1,120 @@
+@media (max-width: 1180px) {
+  .settings-strip {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    width: min(700px, calc(100vw - 290px));
+  }
+
+  .context-float {
+    width: min(520px, calc(100vw - 300px));
+    min-width: 380px;
+  }
+}
+
+.settings-strip {
+  top: 48px;
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+}
+
+.context-float {
+  top: 68px;
+  right: auto;
+  bottom: auto;
+  width: min(300px, calc(100vw - 300px));
+  min-width: 300px;
+  grid-template-rows: 42px 38px minmax(0, 1fr);
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #eceae4;
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
+.events-float {
+  position: fixed;
+  right: 20px;
+  bottom: 38px;
+  z-index: 26;
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  width: min(420px, calc(100vw - 300px));
+  max-height: min(480px, calc(100vh - 120px));
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #eceae4;
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.event-list {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  padding: 8px;
+  overflow: auto;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 8px;
+  color: var(--muted);
+  border-radius: 10px;
+}
+
+.event-row:hover {
+  background: #f4f4f2;
+}
+
+.event-row.success {
+  color: var(--green);
+}
+
+.event-row.warning {
+  color: var(--amber);
+}
+
+.event-row.error {
+  color: var(--red);
+}
+
+.event-row strong,
+.event-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-row strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.event-row span,
+.event-row time {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.float-head {
+  padding: 0 10px 0 18px;
+}
+
+.tabs button {
+  font-size: 12px;
+}
+
+.file-preview pre {
+  background: #ffffff;
+}
+
+@media (max-width: 1180px) {
+  .context-float {
+    width: min(300px, calc(100vw - 260px));
+    min-width: 280px;
+  }
+}

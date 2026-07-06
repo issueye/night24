@@ -1,8 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn semver_module() -> Object {
     module(vec![
@@ -87,10 +84,6 @@ pub(crate) fn valid_meta_segment(seg: &str) -> bool {
 }
 
 pub(crate) fn semver_to_object(sv: &Semver) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("major", num_obj(sv.major as f64));
-    hash.borrow_mut().set("minor", num_obj(sv.minor as f64));
-    hash.borrow_mut().set("patch", num_obj(sv.patch as f64));
     // Go emits numeric prerelease segments as numbers and textual ones as strings.
     let pre: Vec<Object> = sv
         .prerelease
@@ -100,12 +93,16 @@ pub(crate) fn semver_to_object(sv: &Semver) -> Object {
             Err(_) => str_obj(s.clone()),
         })
         .collect();
-    hash.borrow_mut().set("prerelease", array(pre));
-    hash.borrow_mut().set(
-        "build",
-        array(sv.build.iter().map(|s| str_obj(s.clone())).collect()),
-    );
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("major", num_obj(sv.major as f64))
+        .set("minor", num_obj(sv.minor as f64))
+        .set("patch", num_obj(sv.patch as f64))
+        .set("prerelease", array(pre))
+        .set(
+            "build",
+            array(sv.build.iter().map(|s| str_obj(s.clone())).collect()),
+        )
+        .build()
 }
 
 /// Compare two semvers, returning -1/0/1. Build metadata is ignored.
@@ -160,8 +157,9 @@ pub(crate) fn two_semvers(
     name: &str,
     args: &[Object],
 ) -> Result<(Semver, Semver), Object> {
-    let v1 = required_string(ctx, name, args, 0, "version")?;
-    let v2 = required_string(ctx, name, args, 1, "version")?;
+    let reader = ArgReader::new(ctx, name, args);
+    let v1 = reader.required_string(0, "version")?;
+    let v2 = reader.required_string(1, "version")?;
     match (parse_semver(&v1), parse_semver(&v2)) {
         (Some(a), Some(b)) => Ok((a, b)),
         _ => Err(new_error(
@@ -172,7 +170,8 @@ pub(crate) fn two_semvers(
 }
 
 pub(crate) fn semver_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let version = match required_string(ctx, "semver.parse", args, 0, "version") {
+    let reader = ArgReader::new(ctx, "semver.parse", args);
+    let version = match reader.required_string(0, "version") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -242,15 +241,16 @@ pub(crate) fn semver_neq(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn semver_inc(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let version = match required_string(ctx, "semver.inc", args, 0, "version") {
+    let reader = ArgReader::new(ctx, "semver.inc", args);
+    let version = match reader.required_string(0, "version") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let release = match required_string(ctx, "semver.inc", args, 1, "release") {
+    let release = match reader.required_string(1, "release") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let mut sv = match parse_semver(&version) {
+    let sv = match parse_semver(&version) {
         Some(sv) => sv,
         None => {
             return new_error(
@@ -259,7 +259,14 @@ pub(crate) fn semver_inc(ctx: &mut CallContext, args: &[Object]) -> Object {
             )
         }
     };
-    match release.as_str() {
+    match inc_semver(sv, &release) {
+        Ok(version) => str_obj(version),
+        Err(msg) => new_error(ctx.pos.clone(), msg),
+    }
+}
+
+pub(crate) fn inc_semver(mut sv: Semver, release: &str) -> Result<String, String> {
+    match release {
         "major" => {
             sv.major += 1;
             sv.minor = 0;
@@ -275,26 +282,24 @@ pub(crate) fn semver_inc(ctx: &mut CallContext, args: &[Object]) -> Object {
             sv.prerelease = vec!["0".to_string()];
         }
         other => {
-            return new_error(
-                ctx.pos.clone(),
-                format!("semver.inc: invalid release type: {}", other),
-            )
+            return Err(format!("semver.inc: invalid release type: {}", other));
         }
     }
     sv.build.clear();
     if release == "prerelease" {
-        str_obj(format!("{}.{}.{}-0", sv.major, sv.minor, sv.patch))
+        Ok(format!("{}.{}.{}-0", sv.major, sv.minor, sv.patch))
     } else {
-        str_obj(format!("{}.{}.{}", sv.major, sv.minor, sv.patch))
+        Ok(format!("{}.{}.{}", sv.major, sv.minor, sv.patch))
     }
 }
 
 pub(crate) fn semver_satisfies(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let version = match required_string(ctx, "semver.satisfies", args, 0, "version") {
+    let reader = ArgReader::new(ctx, "semver.satisfies", args);
+    let version = match reader.required_string(0, "version") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let range = match required_string(ctx, "semver.satisfies", args, 1, "range") {
+    let range = match reader.required_string(1, "range") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -357,6 +362,65 @@ pub(crate) fn satisfies_range(sv: &Semver, range: &str) -> Result<bool, String> 
     match parse_semver(range) {
         Some(base) => Ok(compare_semver(sv, &base) == 0),
         None => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parsed(version: &str) -> Semver {
+        parse_semver(version).expect("version should parse")
+    }
+
+    #[test]
+    fn compare_prerelease_orders_numeric_textual_and_release_versions() {
+        assert_eq!(
+            compare_semver(&parsed("1.0.0-alpha"), &parsed("1.0.0-alpha.1")),
+            -1
+        );
+        assert_eq!(
+            compare_semver(&parsed("1.0.0-alpha.1"), &parsed("1.0.0-alpha.beta")),
+            -1
+        );
+        assert_eq!(
+            compare_semver(&parsed("1.0.0-beta.2"), &parsed("1.0.0-beta.11")),
+            -1
+        );
+        assert_eq!(compare_semver(&parsed("1.0.0-rc.1"), &parsed("1.0.0")), -1);
+        assert_eq!(
+            compare_semver(&parsed("1.0.0+build.1"), &parsed("1.0.0+build.2")),
+            0
+        );
+    }
+
+    #[test]
+    fn inc_semver_updates_core_versions_and_drops_metadata() {
+        assert_eq!(
+            inc_semver(parsed("1.2.3+build.1"), "major").unwrap(),
+            "2.0.0"
+        );
+        assert_eq!(inc_semver(parsed("1.2.3"), "minor").unwrap(), "1.3.0");
+        assert_eq!(inc_semver(parsed("1.2.3"), "patch").unwrap(), "1.2.4");
+        assert_eq!(
+            inc_semver(parsed("1.2.3"), "prerelease").unwrap(),
+            "1.2.4-0"
+        );
+        assert_eq!(
+            inc_semver(parsed("1.2.3"), "banana").unwrap_err(),
+            "semver.inc: invalid release type: banana"
+        );
+    }
+
+    #[test]
+    fn satisfies_range_supports_core_range_forms() {
+        assert!(satisfies_range(&parsed("1.2.4"), "^1.2.3").unwrap());
+        assert!(!satisfies_range(&parsed("2.0.0"), "^1.2.3").unwrap());
+        assert!(satisfies_range(&parsed("1.2.9"), "~1.2.3").unwrap());
+        assert!(!satisfies_range(&parsed("1.3.0"), "~1.2.3").unwrap());
+        assert!(satisfies_range(&parsed("1.2.4"), ">= 1.2.3 < 2.0.0").unwrap());
+        assert!(!satisfies_range(&parsed("2.0.0"), ">= 1.2.3 < 2.0.0").unwrap());
+        assert!(satisfies_range(&parsed("1.2.3"), "1.2.3").unwrap());
     }
 }
 

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) const SSE_READER_STATE_KEY: &str = "__sse_state__";
 
@@ -14,7 +14,8 @@ pub(crate) fn sse_module() -> Object {
 }
 
 pub(crate) fn sse_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "sse.parse", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "sse.parse", args);
+    let text = match reader.required_string(0, "text") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -51,12 +52,10 @@ pub(crate) fn sse_reader(ctx: &mut CallContext, args: &[Object]) -> Object {
 
     let state = Rc::new(RefCell::new(state));
 
-    let instance = Rc::new(RefCell::new(HashData::default()));
     // Sentinel marker so callers can detect an SSE reader object if needed.
-    instance.borrow_mut().set(
-        SSE_READER_STATE_KEY,
-        Object::Hash(Rc::new(RefCell::new(HashData::default()))),
-    );
+    let instance = ObjectBuilder::new()
+        .set(SSE_READER_STATE_KEY, ObjectBuilder::new().build())
+        .into_shared();
 
     let st = state.clone();
     instance.borrow_mut().set(
@@ -141,7 +140,7 @@ pub(crate) fn sse_reader_next(
             _ => None,
         };
         let read_line = match read_line {
-            Some(f @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => f,
+            Some(f) if is_callable(&f) => f,
             _ => return new_error(ctx.pos.clone(), "sse.reader: stream requires readLine()"),
         };
         drop(g);
@@ -237,21 +236,60 @@ pub(crate) fn parse_sse_block(lines: &[&str]) -> Vec<Object> {
                 _ => {}
             }
         }
-        let event = Rc::new(RefCell::new(HashData::default()));
-        event.borrow_mut().set("type", str_obj(event_type.clone()));
-        event.borrow_mut().set("event", str_obj(event_type.clone()));
-        event
-            .borrow_mut()
+        let mut event = ObjectBuilder::new()
+            .set("type", str_obj(event_type.clone()))
+            .set("event", str_obj(event_type.clone()))
             .set("data", str_obj(data_parts.join("\n")));
         if !event_id.is_empty() {
-            event.borrow_mut().set("id", str_obj(event_id));
+            event.insert("id", str_obj(event_id));
         }
         if !retry.is_empty() {
-            event.borrow_mut().set("retry", str_obj(retry));
+            event.insert("retry", str_obj(retry));
         }
-        events.push(Object::Hash(event));
+        events.push(event.build());
     }
     events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_field<'a>(object: &'a Object, key: &str) -> Object {
+        let Object::Hash(hash) = object else {
+            panic!("expected event object");
+        };
+        hash.borrow()
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| panic!("expected field {key}"))
+    }
+
+    fn string_field(object: &Object, key: &str) -> String {
+        match object_field(object, key) {
+            Object::String(value) => value.to_string(),
+            _ => panic!("expected string field {key}"),
+        }
+    }
+
+    #[test]
+    fn parse_sse_block_reads_event_data_id_and_retry() {
+        let events = parse_sse_block(&[
+            "event: update",
+            "data: first",
+            "data: second",
+            "id: 42",
+            "retry: 1500",
+            "",
+        ]);
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(string_field(&events[0], "type"), "update");
+        assert_eq!(string_field(&events[0], "event"), "update");
+        assert_eq!(string_field(&events[0], "data"), "first\nsecond");
+        assert_eq!(string_field(&events[0], "id"), "42");
+        assert_eq!(string_field(&events[0], "retry"), "1500");
+    }
 }
 
 // ---------------------------------------------------------------------------

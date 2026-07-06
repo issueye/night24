@@ -57,8 +57,8 @@ fn register_hook(
 
 pub(crate) fn hook_before_each(ctx: &mut CallContext, args: &[Object]) -> Object {
     match args.first() {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            register_hook(&BEFORE_EACH, v.clone());
+        Some(value) if is_callable(value) => {
+            register_hook(&BEFORE_EACH, value.clone());
             Object::Undefined
         }
         _ => new_error(ctx.pos.clone(), "beforeEach requires a function"),
@@ -67,8 +67,8 @@ pub(crate) fn hook_before_each(ctx: &mut CallContext, args: &[Object]) -> Object
 
 pub(crate) fn hook_after_each(ctx: &mut CallContext, args: &[Object]) -> Object {
     match args.first() {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            register_hook(&AFTER_EACH, v.clone());
+        Some(value) if is_callable(value) => {
+            register_hook(&AFTER_EACH, value.clone());
             Object::Undefined
         }
         _ => new_error(ctx.pos.clone(), "afterEach requires a function"),
@@ -77,8 +77,8 @@ pub(crate) fn hook_after_each(ctx: &mut CallContext, args: &[Object]) -> Object 
 
 pub(crate) fn hook_before_all(ctx: &mut CallContext, args: &[Object]) -> Object {
     match args.first() {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            register_hook(&BEFORE_ALL, v.clone());
+        Some(value) if is_callable(value) => {
+            register_hook(&BEFORE_ALL, value.clone());
             Object::Undefined
         }
         _ => new_error(ctx.pos.clone(), "beforeAll requires a function"),
@@ -87,8 +87,8 @@ pub(crate) fn hook_before_all(ctx: &mut CallContext, args: &[Object]) -> Object 
 
 pub(crate) fn hook_after_all(ctx: &mut CallContext, args: &[Object]) -> Object {
     match args.first() {
-        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
-            register_hook(&AFTER_ALL, v.clone());
+        Some(value) if is_callable(value) => {
+            register_hook(&AFTER_ALL, value.clone());
             Object::Undefined
         }
         _ => new_error(ctx.pos.clone(), "afterAll requires a function"),
@@ -96,7 +96,8 @@ pub(crate) fn hook_after_all(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn test_test(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let name = match required_string(ctx, "test.test", args, 0, "name") {
+    let reader = ArgReader::new(ctx, "test.test", args);
+    let name = match reader.required_string(0, "name") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -111,7 +112,8 @@ pub(crate) fn test_test(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn test_describe(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let name = match required_string(ctx, "test.describe", args, 0, "name") {
+    let reader = ArgReader::new(ctx, "test.describe", args);
+    let name = match reader.required_string(0, "name") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -132,8 +134,7 @@ pub(crate) fn test_expect(ctx: &mut CallContext, args: &[Object]) -> Object {
         Some(v) => v.clone(),
         None => return new_error(ctx.pos.clone(), "expect requires a value"),
     };
-    let expectation = Rc::new(RefCell::new(HashData::default()));
-    expectation.borrow_mut().set("__value__", value);
+    let expectation = ObjectBuilder::new().set("__value__", value).into_shared();
 
     // Each matcher closure captures its own clone of the Rc so the original
     // can still be returned.
@@ -241,9 +242,10 @@ pub(crate) fn test_expect(ctx: &mut CallContext, args: &[Object]) -> Object {
 /// original value, whose matchers invert their pass/fail result. Used by
 /// `.not`. (Takes the value by clone to avoid borrowing the source Rc.)
 fn build_negated_chain(value: Object) -> Object {
-    let neg = Rc::new(RefCell::new(HashData::default()));
-    neg.borrow_mut().set("__value__", value);
-    neg.borrow_mut().set("__negate__", Object::Boolean(true));
+    let neg = ObjectBuilder::new()
+        .set("__value__", value)
+        .set("__negate__", Object::Boolean(true))
+        .into_shared();
 
     let n1 = neg.clone();
     neg.borrow_mut().set(
@@ -501,10 +503,7 @@ pub(crate) fn expect_throw(ctx: &mut CallContext, expectation: &Rc<RefCell<HashD
         .get("__value__")
         .cloned()
         .unwrap_or(Object::Undefined);
-    let is_fn = matches!(
-        func,
-        Object::Function(_) | Object::Builtin(_) | Object::Closure(_)
-    );
+    let is_fn = is_callable(&func);
     if !is_fn {
         return new_error(ctx.pos.clone(), "toThrow: expect value must be a function");
     }
@@ -569,9 +568,9 @@ pub(crate) fn test_run(ctx: &mut CallContext, _args: &[Object]) -> Object {
         }
     });
 
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("total", num_obj(total as f64));
-    hash.borrow_mut().set("passed", num_obj(passed as f64));
-    hash.borrow_mut().set("failed", num_obj(failed as f64));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("total", num_obj(total as f64))
+        .set("passed", num_obj(passed as f64))
+        .set("failed", num_obj(failed as f64))
+        .build()
 }

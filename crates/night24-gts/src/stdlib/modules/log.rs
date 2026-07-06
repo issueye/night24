@@ -12,11 +12,12 @@ pub(crate) fn log_module() -> Object {
 }
 
 pub(crate) fn log_format(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let level = match required_string(ctx, "log.format", args, 0, "level") {
+    let reader = ArgReader::new(ctx, "log.format", args);
+    let level = match reader.required_string(0, "level") {
         Ok(level) => level,
         Err(err) => return err,
     };
-    let message = match required_string(ctx, "log.format", args, 1, "message") {
+    let message = match reader.required_string(1, "message") {
         Ok(message) => message,
         Err(err) => return err,
     };
@@ -40,7 +41,8 @@ pub(crate) fn log_error(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn log_named(ctx: &mut CallContext, args: &[Object], name: &str, level: &str) -> Object {
-    match required_string(ctx, name, args, 0, "message") {
+    let reader = ArgReader::new(ctx, name, args);
+    match reader.required_string(0, "message") {
         Ok(message) => str_obj(format_log_line(level, &message)),
         Err(err) => err,
     }
@@ -48,6 +50,19 @@ pub(crate) fn log_named(ctx: &mut CallContext, args: &[Object], name: &str, leve
 
 pub(crate) fn format_log_line(level: &str, message: &str) -> String {
     format!("[{}] {}", level.to_ascii_uppercase(), message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_log_line_uppercases_level() {
+        assert_eq!(
+            format_log_line("warn", "disk nearly full"),
+            "[WARN] disk nearly full"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

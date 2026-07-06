@@ -1,10 +1,8 @@
-use std::cell::RefCell;
 use std::fs;
 use std::io::Write;
-use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn archive_zip_module() -> Object {
     module(vec![
@@ -15,7 +13,8 @@ pub(crate) fn archive_zip_module() -> Object {
 }
 
 pub(crate) fn zip_list(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "zip.list", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "zip.list", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -41,24 +40,26 @@ pub(crate) fn zip_list(ctx: &mut CallContext, args: &[Object]) -> Object {
             .last_modified()
             .map(|d| format!("{}", d))
             .unwrap_or_default();
-        let hash = Rc::new(RefCell::new(HashData::default()));
-        hash.borrow_mut().set("name", str_obj(name));
-        hash.borrow_mut().set("size", num_obj(size as f64));
-        hash.borrow_mut()
-            .set("compressedSize", num_obj(compressed as f64));
-        hash.borrow_mut().set("isDir", bool_obj(is_dir));
-        hash.borrow_mut().set("modified", str_obj(modified));
-        entries.push(Object::Hash(hash));
+        entries.push(
+            ObjectBuilder::new()
+                .set("name", str_obj(name))
+                .set("size", num_obj(size as f64))
+                .set("compressedSize", num_obj(compressed as f64))
+                .set("isDir", bool_obj(is_dir))
+                .set("modified", str_obj(modified))
+                .build(),
+        );
     }
     array(entries)
 }
 
 pub(crate) fn zip_extract(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let archive_path = match required_string(ctx, "zip.extract", args, 0, "archive path") {
+    let reader = ArgReader::new(ctx, "zip.extract", args);
+    let archive_path = match reader.required_string(0, "archive path") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let dest_path = match required_string(ctx, "zip.extract", args, 1, "destination path") {
+    let dest_path = match reader.required_string(1, "destination path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -96,11 +97,12 @@ pub(crate) fn zip_extract(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn zip_create(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let reader = ArgReader::new(ctx, "zip.create", args);
     let files = match args.first() {
         Some(Object::Array(_)) => args[0].clone(),
         _ => return new_error(ctx.pos.clone(), "zip.create: files must be an array"),
     };
-    let output_path = match required_string(ctx, "zip.create", args, 1, "output path") {
+    let output_path = match reader.required_string(1, "output path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -193,10 +195,14 @@ fn safe_zip_target(dest: &str, name: &str) -> Result<std::path::PathBuf, String>
 
 pub(crate) fn clean_zip_name(name: &str) -> String {
     let slashed = name.replace('\\', "/");
-    let stripped = slashed.strip_prefix('/').unwrap_or(&slashed);
-    let cleaned = std::path::Path::new(stripped)
+    let cleaned = std::path::Path::new(&slashed)
         .components()
-        .filter(|c| !matches!(c, std::path::Component::ParentDir))
+        .filter(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
         .collect::<std::path::PathBuf>();
     let s = cleaned.to_string_lossy().to_string();
     if s == "." || s == ".." {
@@ -237,6 +243,52 @@ pub(crate) fn walkdir_inner(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_parent_dir(path: &str) -> bool {
+        std::path::Path::new(path)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    }
+
+    #[test]
+    fn clean_zip_name_removes_parent_segments() {
+        let cleaned = clean_zip_name("../../etc/passwd");
+
+        assert!(!cleaned.is_empty());
+        assert!(!has_parent_dir(&cleaned));
+        assert!(cleaned.ends_with("etc/passwd") || cleaned.ends_with("etc\\passwd"));
+    }
+
+    #[test]
+    fn clean_zip_name_removes_rooted_segments() {
+        let cleaned = clean_zip_name("/tmp/archive.txt");
+
+        assert_eq!(
+            std::path::Path::new(&cleaned)
+                .components()
+                .next()
+                .map(|component| matches!(component, std::path::Component::RootDir)),
+            Some(false)
+        );
+        assert!(cleaned.ends_with("tmp/archive.txt") || cleaned.ends_with("tmp\\archive.txt"));
+    }
+
+    #[test]
+    fn safe_zip_target_keeps_cleaned_name_under_destination() {
+        let dest = "extract-root";
+        let target = safe_zip_target(dest, "../nested/file.txt").unwrap();
+
+        assert!(target.starts_with(dest));
+        assert!(!target
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir)));
+        assert!(target.ends_with(std::path::Path::new("nested/file.txt")));
+    }
 }
 
 // ===========================================================================

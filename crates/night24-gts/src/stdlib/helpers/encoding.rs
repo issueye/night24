@@ -127,10 +127,10 @@ pub(crate) fn bytes_result(
 pub(crate) fn make_buffer(bytes: Vec<u8>) -> Object {
     let elements: Vec<Object> = bytes.iter().map(|b| num_obj(*b as f64)).collect();
     let inner = array(elements);
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set(BUFFER_DATA_KEY, inner);
-    hash.borrow_mut().set("length", num_obj(bytes.len() as f64));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set(BUFFER_DATA_KEY, inner)
+        .set("length", num_obj(bytes.len() as f64))
+        .build()
 }
 
 // ---------------------------------------------------------------------------

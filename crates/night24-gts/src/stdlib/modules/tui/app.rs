@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
-use crate::stdlib::helpers::{call_script_function, value_to_string};
+use crate::stdlib::helpers::{call_script_function, is_callable, value_to_string, ObjectBuilder};
 
 use super::super::terminal::{terminal_cols, terminal_rows, terminal_size_object};
 use super::layout::{layout, Rect};
@@ -47,9 +47,10 @@ fn next_app_id() -> usize {
 /// Register an app and return a marker object (`{__kind:"tuiApp", __id:N}`).
 fn app_marker(app: Rc<TuiApp>) -> Object {
     let id = next_app_id();
-    let marker = Rc::new(RefCell::new(HashData::default()));
-    marker.borrow_mut().set("__kind", str_obj("tuiApp"));
-    marker.borrow_mut().set("__id", num_obj(id as f64));
+    let marker = ObjectBuilder::new()
+        .set("__kind", str_obj("tuiApp"))
+        .set("__id", num_obj(id as f64))
+        .into_shared();
     TUI_APPS.with(|apps| apps.borrow_mut().push((id, app)));
     Object::Hash(marker)
 }
@@ -125,8 +126,9 @@ pub(crate) fn tui_create_app(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 fn app_object(app: Rc<TuiApp>) -> Object {
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut().set("__tuiApp", app_marker(app.clone()));
+    let obj = ObjectBuilder::new()
+        .set("__tuiApp", app_marker(app.clone()))
+        .into_shared();
     obj.borrow_mut().set(
         "dispatch",
         native_bound("tui.app.dispatch", app_dispatch, app_marker(app.clone())),
@@ -599,16 +601,13 @@ fn mouse_event_message(event: crossterm::event::MouseEvent) -> Object {
         MouseEventKind::ScrollLeft => ("wheelLeft", 66),
         MouseEventKind::ScrollRight => ("wheelRight", 67),
     };
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("type", str_obj("mouse"));
-    hash.borrow_mut().set("action", str_obj(action));
-    hash.borrow_mut()
-        .set("button", crate::object::num_obj(button as f64));
-    hash.borrow_mut()
-        .set("x", crate::object::num_obj(event.column as f64));
-    hash.borrow_mut()
-        .set("y", crate::object::num_obj(event.row as f64));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("type", str_obj("mouse"))
+        .set("action", str_obj(action))
+        .set("button", crate::object::num_obj(button as f64))
+        .set("x", crate::object::num_obj(event.column as f64))
+        .set("y", crate::object::num_obj(event.row as f64))
+        .build()
 }
 
 fn mouse_button_number(button: crossterm::event::MouseButton) -> i32 {
@@ -626,9 +625,7 @@ fn mouse_button_number(button: crossterm::event::MouseButton) -> i32 {
 
 fn hash_function(hash: &HashData, key: &str) -> Option<Object> {
     match hash.get(key) {
-        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => {
-            hash.get(key).cloned()
-        }
+        Some(value) if is_callable(value) => hash.get(key).cloned(),
         _ => None,
     }
 }

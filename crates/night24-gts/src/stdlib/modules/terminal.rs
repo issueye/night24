@@ -1,7 +1,5 @@
-use std::cell::RefCell;
 use std::env;
 use std::io::{IsTerminal, Write};
-use std::rc::Rc;
 
 use super::super::helpers::*;
 use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
@@ -142,7 +140,10 @@ pub(crate) fn terminal_render_frame(ctx: &mut CallContext, args: &[Object]) -> O
         return new_error(ctx.pos.clone(), "terminal.renderFrame requires frame");
     };
     let mut text = String::new();
-    let full = hash_bool_arg(args.get(1), "full").unwrap_or(false);
+    let full = ArgReader::new(ctx, "terminal.renderFrame", args)
+        .object_view(1)
+        .and_then(|opts| ObjectView::new(&opts).bool("full"))
+        .unwrap_or(false);
     if full {
         text.push_str("\x1b[2J");
     }
@@ -280,11 +281,12 @@ pub(crate) fn terminal_clear_line(_ctx: &mut CallContext, _args: &[Object]) -> O
 }
 
 pub(crate) fn terminal_move_to(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let row = match required_number(ctx, "terminal.moveTo", args, 0, "row") {
+    let reader = ArgReader::new(ctx, "terminal.moveTo", args);
+    let row = match reader.required_number(0, "row") {
         Ok(row) => row.max(1.0) as i64,
         Err(err) => return err,
     };
-    let col = match required_number(ctx, "terminal.moveTo", args, 1, "col") {
+    let col = match reader.required_number(1, "col") {
         Ok(col) => col.max(1.0) as i64,
         Err(err) => return err,
     };
@@ -292,7 +294,8 @@ pub(crate) fn terminal_move_to(ctx: &mut CallContext, args: &[Object]) -> Object
 }
 
 pub(crate) fn terminal_set_title(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let title = match required_string(ctx, "terminal.setTitle", args, 0, "title") {
+    let reader = ArgReader::new(ctx, "terminal.setTitle", args);
+    let title = match reader.required_string(0, "title") {
         Ok(title) => title,
         Err(err) => return err,
     };
@@ -307,14 +310,20 @@ pub(crate) fn terminal_set_title(ctx: &mut CallContext, args: &[Object]) -> Obje
 }
 
 pub(crate) fn terminal_style(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "terminal.style", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "terminal.style", args);
+    let text = match reader.required_string(0, "text") {
         Ok(text) => text,
         Err(err) => return err,
     };
-    let Some(Object::Hash(hash)) = args.get(1) else {
-        return str_obj(text);
+    let hash = reader.object_view(1);
+    str_obj(terminal_style_text(&text, hash.as_deref()))
+}
+
+fn terminal_style_text(text: &str, hash: Option<&HashData>) -> String {
+    let Some(hash) = hash else {
+        return text.to_string();
     };
-    let hash = hash.borrow();
+    let opts = ObjectView::new(hash);
     let mut codes = Vec::<String>::new();
     for (key, code) in [
         ("bold", "1"),
@@ -322,37 +331,76 @@ pub(crate) fn terminal_style(ctx: &mut CallContext, args: &[Object]) -> Object {
         ("underline", "4"),
         ("inverse", "7"),
     ] {
-        if matches!(hash.get(key), Some(Object::Boolean(true))) {
+        if matches!(opts.object(key), Some(Object::Boolean(true))) {
             codes.push(code.to_string());
         }
     }
-    if let Some(fg) = hash_string(&hash, "fg").or_else(|| hash_string(&hash, "color")) {
+    if let Some(fg) = strict_string_opt(&opts, "fg").or_else(|| strict_string_opt(&opts, "color")) {
         if let Some(code) = terminal_color_code(&fg, false) {
             codes.push(code.to_string());
         }
     }
-    if let Some(bg) = hash_string(&hash, "bg") {
+    if let Some(bg) = strict_string_opt(&opts, "bg") {
         if let Some(code) = terminal_color_code(&bg, true) {
             codes.push(code.to_string());
         }
     }
     if codes.is_empty() {
-        str_obj(text)
+        text.to_string()
     } else {
-        str_obj(format!("\x1b[{}m{}\x1b[0m", codes.join(";"), text))
+        format!("\x1b[{}m{}\x1b[0m", codes.join(";"), text)
     }
 }
 
 pub(crate) fn terminal_hyperlink(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "terminal.hyperlink", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "terminal.hyperlink", args);
+    let text = match reader.required_string(0, "text") {
         Ok(text) => text,
         Err(err) => return err,
     };
-    let url = match required_string(ctx, "terminal.hyperlink", args, 1, "url") {
+    let url = match reader.required_string(1, "url") {
         Ok(url) => url,
         Err(err) => return err,
     };
-    str_obj(format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, text))
+    str_obj(terminal_hyperlink_text(&text, &url))
+}
+
+fn terminal_hyperlink_text(text: &str, url: &str) -> String {
+    format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, text)
+}
+
+fn strict_string_opt(opts: &ObjectView<'_>, key: &str) -> Option<String> {
+    match opts.object(key) {
+        Some(Object::String(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hyperlink_wraps_text_with_osc8_sequence() {
+        assert_eq!(
+            terminal_hyperlink_text("Night24", "https://example.com/night24"),
+            "\x1b]8;;https://example.com/night24\x1b\\Night24\x1b]8;;\x1b\\"
+        );
+    }
+
+    #[test]
+    fn style_wraps_text_with_basic_ansi_codes() {
+        let style = ObjectBuilder::new()
+            .set("bold", Object::Boolean(true))
+            .set("fg", str_obj("green"))
+            .into_shared();
+        let style = style.borrow();
+
+        assert_eq!(
+            terminal_style_text("ready", Some(&style)),
+            "\x1b[1;32mready\x1b[0m"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,10 +409,10 @@ pub(crate) fn terminal_hyperlink(ctx: &mut CallContext, args: &[Object]) -> Obje
 
 pub(crate) fn terminal_size_object() -> Object {
     let (cols, rows) = terminal_dimensions();
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("cols", num_obj(cols as f64));
-    hash.borrow_mut().set("rows", num_obj(rows as f64));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("cols", num_obj(cols as f64))
+        .set("rows", num_obj(rows as f64))
+        .build()
 }
 
 pub(crate) fn terminal_cols() -> i32 {

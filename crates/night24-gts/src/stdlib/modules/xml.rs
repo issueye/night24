@@ -1,10 +1,8 @@
-use std::cell::RefCell;
 use std::fs;
 use std::ops::Deref;
-use std::rc::Rc;
 
 use super::super::helpers::*;
-use crate::object::{new_error, str_obj, CallContext, HashData, Object};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn xml_module() -> Object {
     module(vec![
@@ -16,7 +14,8 @@ pub(crate) fn xml_module() -> Object {
 }
 
 pub(crate) fn xml_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "xml.parse", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "xml.parse", args);
+    let text = match reader.required_string(0, "text") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -38,7 +37,8 @@ pub(crate) fn xml_stringify(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn xml_read_file(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "xml.readFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "xml.readFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -52,7 +52,8 @@ pub(crate) fn xml_read_file(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn xml_write_file(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let path = match required_string(ctx, "xml.writeFileSync", args, 0, "path") {
+    let reader = ArgReader::new(ctx, "xml.writeFileSync", args);
+    let path = match reader.required_string(0, "path") {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -151,20 +152,20 @@ pub(crate) fn parse_xml_dom(input: &str) -> Result<XmlNode, String> {
 }
 
 pub(crate) fn xml_node_to_object(node: &XmlNode) -> Object {
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut().set("name", str_obj(node.name.clone()));
     // Attributes sorted by key for determinism.
     let mut attrs = node.attributes.clone();
     attrs.sort_by(|a, b| a.0.cmp(&b.0));
-    let attr_hash = Rc::new(RefCell::new(HashData::default()));
+    let mut attr_builder = ObjectBuilder::new();
     for (k, v) in &attrs {
-        attr_hash.borrow_mut().set(k.clone(), str_obj(v.clone()));
+        attr_builder.insert(k.clone(), str_obj(v.clone()));
     }
-    hash.borrow_mut().set("attributes", Object::Hash(attr_hash));
     let children: Vec<Object> = node.children.iter().map(xml_node_to_object).collect();
-    hash.borrow_mut().set("children", array(children));
-    hash.borrow_mut().set("text", str_obj(node.text.clone()));
-    Object::Hash(hash)
+    ObjectBuilder::new()
+        .set("name", str_obj(node.name.clone()))
+        .set("attributes", attr_builder.build())
+        .set("children", array(children))
+        .set("text", str_obj(node.text.clone()))
+        .build()
 }
 
 pub(crate) fn object_to_xml_node(value: &Object) -> Result<XmlNode, String> {
@@ -245,6 +246,58 @@ pub(crate) fn escape_xml_text(text: &str, out: &mut String) {
             '\'' => out.push_str("&apos;"),
             _ => out.push(c),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn string_field(object: &Object, key: &str) -> String {
+        let Object::Hash(hash) = object else {
+            panic!("expected XML node object");
+        };
+        match hash.borrow().get(key) {
+            Some(Object::String(value)) => value.to_string(),
+            _ => panic!("expected string field {key}"),
+        }
+    }
+
+    #[test]
+    fn xml_node_object_round_trips_to_stringified_xml() {
+        let node =
+            parse_xml_dom(r#"<root b="2" a="1"><child>Night &amp; day</child></root>"#).unwrap();
+        let object = xml_node_to_object(&node);
+
+        assert_eq!(string_field(&object, "name"), "root");
+
+        let round_tripped = object_to_xml_node(&object).unwrap();
+
+        assert_eq!(
+            serialize_xml_node(&round_tripped),
+            r#"<root a="1" b="2"><child>Night &amp; day</child></root>"#
+        );
+    }
+
+    #[test]
+    fn serialize_xml_node_escapes_text_and_attributes() {
+        let object = ObjectBuilder::new()
+            .set("name", str_obj("note"))
+            .set(
+                "attributes",
+                ObjectBuilder::new()
+                    .set("title", str_obj(r#"a "quoted" & tagged value"#))
+                    .build(),
+            )
+            .set("children", array(Vec::new()))
+            .set("text", str_obj("<hello> & 'bye'"))
+            .build();
+        let node = object_to_xml_node(&object).unwrap();
+
+        assert_eq!(
+            serialize_xml_node(&node),
+            r#"<note title="a &quot;quoted&quot; &amp; tagged value">&lt;hello&gt; &amp; &apos;bye&apos;</note>"#
+        );
     }
 }
 

@@ -1,5 +1,6 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { classNames } from '../../utils/format.js';
+import { activeProviderProfile } from '../../utils/settings.js';
 
 export function ProviderSettings({
   providerProfiles,
@@ -21,7 +22,7 @@ export function ProviderSettings({
   onContextThresholdChange,
   onNetworkProxyChange,
 }) {
-  const activeProfile = providerProfiles.find((item) => item.id === providerProfileId) || providerProfiles[0];
+  const activeProfile = activeProviderProfile(providerProfiles, providerProfileId);
 
   return (
     <div className="provider-manager">

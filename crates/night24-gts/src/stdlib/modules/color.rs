@@ -20,11 +20,12 @@ pub(crate) fn color_module() -> Object {
 }
 
 pub(crate) fn color_ansi(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "color.ansi", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "color.ansi", args);
+    let text = match reader.required_string(0, "text") {
         Ok(text) => text,
         Err(err) => return err,
     };
-    let code = match required_number(ctx, "color.ansi", args, 1, "code") {
+    let code = match reader.required_number(1, "code") {
         Ok(code) => code,
         Err(err) => return err,
     };
@@ -32,7 +33,8 @@ pub(crate) fn color_ansi(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn color_strip(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "color.strip", args, 0, "text") {
+    let reader = ArgReader::new(ctx, "color.strip", args);
+    match reader.required_string(0, "text") {
         Ok(text) => str_obj(strip_ansi(&text)),
         Err(err) => err,
     }
@@ -75,7 +77,8 @@ pub(crate) fn color_underline(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn color_named(ctx: &mut CallContext, args: &[Object], name: &str, code: i64) -> Object {
-    match required_string(ctx, name, args, 0, "text") {
+    let reader = ArgReader::new(ctx, name, args);
+    match reader.required_string(0, "text") {
         Ok(text) => ansi_wrap(&text, code),
         Err(err) => err,
     }
@@ -83,6 +86,31 @@ pub(crate) fn color_named(ctx: &mut CallContext, args: &[Object], name: &str, co
 
 pub(crate) fn ansi_wrap(text: &str, code: i64) -> Object {
     str_obj(format!("\x1b[{}m{}\x1b[0m", code, text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_as_string(object: Object) -> String {
+        match object {
+            Object::String(value) => value.to_string(),
+            _ => panic!("expected string"),
+        }
+    }
+
+    #[test]
+    fn ansi_wrap_adds_reset_sequence() {
+        assert_eq!(
+            object_as_string(ansi_wrap("night24", 31)),
+            "\x1b[31mnight24\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn strip_ansi_removes_color_sequences() {
+        assert_eq!(strip_ansi("\x1b[31mnight24\x1b[0m"), "night24");
+    }
 }
 
 // ---------------------------------------------------------------------------

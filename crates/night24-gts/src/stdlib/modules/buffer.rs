@@ -31,7 +31,8 @@ pub(crate) fn buffer_from(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn buffer_alloc(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let size = match required_number(ctx, "buffer.alloc", args, 0, "size") {
+    let reader = ArgReader::new(ctx, "buffer.alloc", args);
+    let size = match reader.required_number(0, "size") {
         Ok(n) => n,
         Err(e) => return e,
     };

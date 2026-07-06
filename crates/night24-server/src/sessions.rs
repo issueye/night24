@@ -91,15 +91,7 @@ pub(crate) async fn create_session(
             .await
             .unwrap_or_else(|| PathBuf::from("."))
     };
-    let session_type = match req.session_type.as_deref() {
-        Some("scheduled") => SessionType::Scheduled,
-        Some("sub_agent") => SessionType::SubAgent,
-        Some("hidden") => SessionType::Hidden,
-        Some("terminal") => SessionType::Terminal,
-        Some("gateway") => SessionType::Gateway,
-        Some("acp") => SessionType::Acp,
-        _ => SessionType::User,
-    };
+    let session_type = parse_session_type(req.session_type.as_deref());
     let session = state
         .session_manager
         .create(name, working_dir, session_type)
@@ -154,13 +146,7 @@ pub(crate) async fn rename_session(
 ) -> Result<Json<Session>, (axum::http::StatusCode, String)> {
     match state.session_manager.rename(&id, req.name).await {
         Ok(session) => Ok(Json(session)),
-        Err(e) => {
-            if e.to_string().contains("not found") {
-                Err((axum::http::StatusCode::NOT_FOUND, e.to_string()))
-            } else {
-                Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-            }
-        }
+        Err(err) => Err(session_mutation_error(err)),
     }
 }
 
@@ -184,13 +170,7 @@ pub(crate) async fn fork_session(
 ) -> Result<Json<Session>, (axum::http::StatusCode, String)> {
     match state.session_manager.fork(&id, req.at_index).await {
         Ok(session) => Ok(Json(session)),
-        Err(e) => {
-            if e.to_string().contains("not found") {
-                Err((axum::http::StatusCode::NOT_FOUND, e.to_string()))
-            } else {
-                Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-            }
-        }
+        Err(err) => Err(session_mutation_error(err)),
     }
 }
 
@@ -230,8 +210,11 @@ pub(crate) async fn compact_session(
         })?;
 
     let mut manager = ContextManager::default();
-    if req.force && session.conversation.len() > 1 {
-        manager.preserve_recent = (session.conversation.len() - 1).min(6).max(1);
+    if req.force {
+        if let Some(preserve_recent) = forced_compaction_preserve_recent(session.conversation.len())
+        {
+            manager.preserve_recent = preserve_recent;
+        }
     }
     let result = if req.force {
         manager.maybe_compact_by_token_threshold(&mut session.conversation, 1)
@@ -262,4 +245,92 @@ pub(crate) async fn compact_session(
         token_estimate,
         conversation: session.conversation,
     }))
+}
+
+fn session_mutation_error(error: impl ToString) -> (axum::http::StatusCode, String) {
+    let message = error.to_string();
+    let status = if message.contains("not found") {
+        axum::http::StatusCode::NOT_FOUND
+    } else {
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    };
+    (status, message)
+}
+
+fn parse_session_type(value: Option<&str>) -> SessionType {
+    match value.map(str::trim) {
+        Some("scheduled") => SessionType::Scheduled,
+        Some("sub_agent") => SessionType::SubAgent,
+        Some("hidden") => SessionType::Hidden,
+        Some("terminal") => SessionType::Terminal,
+        Some("gateway") => SessionType::Gateway,
+        Some("acp") => SessionType::Acp,
+        _ => SessionType::User,
+    }
+}
+
+fn forced_compaction_preserve_recent(conversation_len: usize) -> Option<usize> {
+    if conversation_len > 1 {
+        Some((conversation_len - 1).min(6).max(1))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_mutation_error_maps_not_found_messages() {
+        let (status, message) = session_mutation_error("session not found: abc");
+
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        assert_eq!(message, "session not found: abc");
+    }
+
+    #[test]
+    fn session_mutation_error_keeps_internal_messages() {
+        let (status, message) = session_mutation_error("storage unavailable");
+
+        assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(message, "storage unavailable");
+    }
+
+    #[test]
+    fn parse_session_type_trims_and_defaults_unknown_values() {
+        assert_eq!(
+            format!("{:?}", parse_session_type(Some(" scheduled "))),
+            "Scheduled"
+        );
+        assert_eq!(
+            format!("{:?}", parse_session_type(Some("sub_agent"))),
+            "SubAgent"
+        );
+        assert_eq!(
+            format!("{:?}", parse_session_type(Some(" hidden\t"))),
+            "Hidden"
+        );
+        assert_eq!(
+            format!("{:?}", parse_session_type(Some("terminal"))),
+            "Terminal"
+        );
+        assert_eq!(
+            format!("{:?}", parse_session_type(Some("gateway"))),
+            "Gateway"
+        );
+        assert_eq!(format!("{:?}", parse_session_type(Some("acp"))), "Acp");
+        assert_eq!(format!("{:?}", parse_session_type(Some("unknown"))), "User");
+        assert_eq!(format!("{:?}", parse_session_type(Some("   "))), "User");
+        assert_eq!(format!("{:?}", parse_session_type(None)), "User");
+    }
+
+    #[test]
+    fn forced_compaction_preserve_recent_keeps_expected_bounds() {
+        assert_eq!(forced_compaction_preserve_recent(0), None);
+        assert_eq!(forced_compaction_preserve_recent(1), None);
+        assert_eq!(forced_compaction_preserve_recent(2), Some(1));
+        assert_eq!(forced_compaction_preserve_recent(7), Some(6));
+        assert_eq!(forced_compaction_preserve_recent(20), Some(6));
+    }
 }

@@ -16,7 +16,7 @@ pub mod render;
 use std::rc::Rc;
 
 use crate::object::{new_error, CallContext, HashData, Object};
-use crate::stdlib::helpers::{module, native, required_number, required_string};
+use crate::stdlib::helpers::{module, native, ArgReader, ObjectView};
 
 use node::{
     node_object, AlignItems, BoxProps, FlexDirection, JustifyContent, NodeKind, Style, TuiNode,
@@ -56,7 +56,8 @@ pub(crate) fn tui_module() -> Object {
 
 /// `tui.text(value, opts?)` → text node.
 pub(crate) fn tui_text(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let text = match required_string(ctx, "tui.text", args, 0, "value") {
+    let reader = ArgReader::new(ctx, "tui.text", args);
+    let text = match reader.required_string(0, "value") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -135,16 +136,17 @@ pub(crate) fn tui_input(ctx: &mut CallContext, args: &[Object]) -> Object {
         return new_error(ctx.pos.clone(), "tui.input: options must be an object");
     };
     let h = hash.borrow();
+    let view = ObjectView::new(&h);
     let (style, props, title) = match parse_common_opts(args.first(), "tui.input") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let value = h.get_string("value").unwrap_or_default();
-    let placeholder = h.get_string("placeholder").unwrap_or_default();
-    let prompt = h.get_string("prompt").unwrap_or_else(|| "> ".into());
-    let focused = h.get_bool("focused").unwrap_or(true);
-    let cursor = h
-        .get_number("cursor")
+    let value = view.string("value").unwrap_or_default();
+    let placeholder = view.string("placeholder").unwrap_or_default();
+    let prompt = view.string("prompt").unwrap_or_else(|| "> ".into());
+    let focused = view.bool("focused").unwrap_or(true);
+    let cursor = view
+        .number("cursor")
         .map(|n| n as i32)
         .unwrap_or_else(|| value.chars().count() as i32);
     node_object(TuiNode {
@@ -167,6 +169,7 @@ pub(crate) fn tui_list(ctx: &mut CallContext, args: &[Object]) -> Object {
         return new_error(ctx.pos.clone(), "tui.list: options must be an object");
     };
     let h = hash.borrow();
+    let view = ObjectView::new(&h);
     let (style, props, title) = match parse_common_opts(args.first(), "tui.list") {
         Ok(v) => v,
         Err(e) => return e,
@@ -180,8 +183,8 @@ pub(crate) fn tui_list(ctx: &mut CallContext, args: &[Object]) -> Object {
             .collect(),
         _ => Vec::new(),
     };
-    let selected = h.get_number("selected").map(|n| n as i32).unwrap_or(0);
-    let focused = h.get_bool("focused").unwrap_or(true);
+    let selected = view.number("selected").map(|n| n as i32).unwrap_or(0);
+    let focused = view.bool("focused").unwrap_or(true);
     node_object(TuiNode {
         kind: NodeKind::List {
             items,
@@ -241,13 +244,14 @@ pub(crate) fn tui_progress(ctx: &mut CallContext, args: &[Object]) -> Object {
         return new_error(ctx.pos.clone(), "tui.progress: options must be an object");
     };
     let h = hash.borrow();
+    let view = ObjectView::new(&h);
     let (style, props, title) = match parse_common_opts(args.first(), "tui.progress") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let value = h.get_number("value").unwrap_or(0.0);
-    let total = h.get_number("total").unwrap_or(100.0);
-    let label = h.get_string("label").unwrap_or_default();
+    let value = view.number("value").unwrap_or(0.0);
+    let total = view.number("total").unwrap_or(100.0);
+    let label = view.string("label").unwrap_or_default();
     node_object(TuiNode {
         kind: NodeKind::Progress {
             value,
@@ -266,12 +270,13 @@ pub(crate) fn tui_checkbox(ctx: &mut CallContext, args: &[Object]) -> Object {
         return new_error(ctx.pos.clone(), "tui.checkbox: options must be an object");
     };
     let h = hash.borrow();
+    let view = ObjectView::new(&h);
     let (style, props, title) = match parse_common_opts(args.first(), "tui.checkbox") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let checked = h.get_bool("checked").unwrap_or(false);
-    let label = h.get_string("label").unwrap_or_default();
+    let checked = view.bool("checked").unwrap_or(false);
+    let label = view.string("label").unwrap_or_default();
     node_object(TuiNode {
         kind: NodeKind::Checkbox { checked, label },
         style,
@@ -285,7 +290,8 @@ pub(crate) fn tui_checkbox(ctx: &mut CallContext, args: &[Object]) -> Object {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn tui_key_msg(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let name = match required_string(ctx, "tui.key", args, 0, "name") {
+    let reader = ArgReader::new(ctx, "tui.key", args);
+    let name = match reader.required_string(0, "name") {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -293,11 +299,12 @@ pub(crate) fn tui_key_msg(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn tui_resize_msg(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let cols = match required_number(ctx, "tui.resize", args, 0, "cols") {
+    let reader = ArgReader::new(ctx, "tui.resize", args);
+    let cols = match reader.required_number(0, "cols") {
         Ok(n) => n as i32,
         Err(e) => return e,
     };
-    let rows = match required_number(ctx, "tui.resize", args, 1, "rows") {
+    let rows = match reader.required_number(1, "rows") {
         Ok(n) => n as i32,
         Err(e) => return e,
     };
@@ -342,29 +349,30 @@ fn parse_common_opts(
         return Ok((Style::default(), BoxProps::default(), String::new()));
     };
     let h = hash.borrow();
+    let view = ObjectView::new(&h);
 
     let style = Style {
-        fg: h.get_string("color").or_else(|| h.get_string("fg")),
-        bg: h.get_string("bg"),
-        bold: h.get_bool("bold").unwrap_or(false),
-        dim: h.get_bool("dim").unwrap_or(false),
-        underline: h.get_bool("underline").unwrap_or(false),
-        inverse: h.get_bool("inverse").unwrap_or(false),
+        fg: view.string("color").or_else(|| view.string("fg")),
+        bg: view.string("bg"),
+        bold: view.bool("bold").unwrap_or(false),
+        dim: view.bool("dim").unwrap_or(false),
+        underline: view.bool("underline").unwrap_or(false),
+        inverse: view.bool("inverse").unwrap_or(false),
     };
 
     let props = BoxProps {
-        direction: parse_direction(h.get_string("flexDirection").as_deref()).unwrap_or_default(),
-        width: h.get_number("width").map(|n| n as i32),
-        height: h.get_number("height").map(|n| n as i32),
-        grow: h.get_number("grow").unwrap_or(0.0),
-        padding: h.get_number("padding").map(|n| n as i32).unwrap_or(0),
-        margin: h.get_number("margin").map(|n| n as i32).unwrap_or(0),
-        border: h.get_bool("border").unwrap_or(false),
-        align: parse_align(h.get_string("alignItems").as_deref()).unwrap_or_default(),
-        justify: parse_justify(h.get_string("justifyContent").as_deref()).unwrap_or_default(),
+        direction: parse_direction(view.string("flexDirection").as_deref()).unwrap_or_default(),
+        width: view.number("width").map(|n| n as i32),
+        height: view.number("height").map(|n| n as i32),
+        grow: view.number("grow").unwrap_or(0.0),
+        padding: view.number("padding").map(|n| n as i32).unwrap_or(0),
+        margin: view.number("margin").map(|n| n as i32).unwrap_or(0),
+        border: view.bool("border").unwrap_or(false),
+        align: parse_align(view.string("alignItems").as_deref()).unwrap_or_default(),
+        justify: parse_justify(view.string("justifyContent").as_deref()).unwrap_or_default(),
     };
 
-    let title = h.get_string("title").unwrap_or_default();
+    let title = view.string("title").unwrap_or_default();
     Ok((style, props, title))
 }
 
@@ -419,7 +427,8 @@ fn parse_direction_opt(opts: Option<&Object>) -> Option<FlexDirection> {
     let Some(Object::Hash(hash)) = opts else {
         return None;
     };
-    parse_direction(hash.borrow().get_string("flexDirection").as_deref())
+    let h = hash.borrow();
+    parse_direction(ObjectView::new(&h).string("flexDirection").as_deref())
 }
 
 fn parse_align(s: Option<&str>) -> Option<AlignItems> {
@@ -479,35 +488,6 @@ fn number_array(h: &HashData, key: &str) -> Vec<i32> {
             })
             .collect(),
         _ => Vec::new(),
-    }
-}
-
-// Convenience extension until HashData grows native getters used above.
-trait HashGet {
-    fn get_string(&self, key: &str) -> Option<String>;
-    fn get_bool(&self, key: &str) -> Option<bool>;
-    fn get_number(&self, key: &str) -> Option<f64>;
-}
-impl HashGet for HashData {
-    fn get_string(&self, key: &str) -> Option<String> {
-        match self.get(key) {
-            Some(Object::String(s)) => Some(s.to_string()),
-            Some(Object::Null | Object::Undefined) | None => None,
-            Some(v) => Some(crate::stdlib::helpers::value_to_string(v)),
-        }
-    }
-    fn get_bool(&self, key: &str) -> Option<bool> {
-        match self.get(key) {
-            Some(Object::Boolean(b)) => Some(*b),
-            Some(Object::Null | Object::Undefined) | None => None,
-            Some(v) => Some(v.is_truthy()),
-        }
-    }
-    fn get_number(&self, key: &str) -> Option<f64> {
-        match self.get(key) {
-            Some(Object::Number(n)) => Some(*n),
-            _ => None,
-        }
     }
 }
 

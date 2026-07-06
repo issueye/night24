@@ -40,7 +40,8 @@ pub(crate) fn time_module() -> Object {
 }
 
 pub(crate) fn time_unix(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let seconds = match required_number(ctx, "time.unix", args, 0, "seconds") {
+    let reader = ArgReader::new(ctx, "time.unix", args);
+    let seconds = match reader.required_number(0, "seconds") {
         Ok(seconds) => seconds,
         Err(err) => return err,
     };
@@ -53,14 +54,16 @@ pub(crate) fn time_unix(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn time_unix_ms(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_number(ctx, "time.unixMs", args, 0, "milliseconds") {
+    let reader = ArgReader::new(ctx, "time.unixMs", args);
+    match reader.required_number(0, "milliseconds") {
         Ok(ms) => Object::Date(ms as i64),
         Err(err) => err,
     }
 }
 
 pub(crate) fn time_parse(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let value = match required_string(ctx, "time.parse", args, 0, "value") {
+    let reader = ArgReader::new(ctx, "time.parse", args);
+    let value = match reader.required_string(0, "value") {
         Ok(value) => value,
         Err(err) => return err,
     };
@@ -113,7 +116,8 @@ pub(crate) fn time_until(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn time_parse_duration(ctx: &mut CallContext, args: &[Object]) -> Object {
-    match required_string(ctx, "time.parseDuration", args, 0, "duration") {
+    let reader = ArgReader::new(ctx, "time.parseDuration", args);
+    match reader.required_string(0, "duration") {
         Ok(value) => match parse_duration_ms(&value) {
             Some(ms) => duration_object(ms),
             None => new_error(
@@ -133,7 +137,8 @@ pub(crate) fn time_duration(ctx: &mut CallContext, args: &[Object]) -> Object {
 }
 
 pub(crate) fn time_sleep(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let ms = match required_number(ctx, "time.sleep", args, 0, "milliseconds") {
+    let reader = ArgReader::new(ctx, "time.sleep", args);
+    let ms = match reader.required_number(0, "milliseconds") {
         Ok(ms) => ms.max(0.0) as u64,
         Err(err) => return err,
     };
