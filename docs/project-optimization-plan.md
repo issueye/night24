@@ -165,6 +165,7 @@
 - 已完成：补充子代理取消工具回归测试，覆盖 `developer__subagent_cancel` 事件顺序、池状态变为 cancelled 和 finish payload。
 - 已完成：`subagents.rs` 抽出 `count_status`，收敛子代理池 snapshot 状态统计逻辑，并补充 sync alias 解析与 queued 不计入终态统计的边界测试。
 - 已完成：修复 `permission.resolve` 在 run_id 不匹配时误删 pending permission 的问题；现在仅在 run_id 校验通过后移除请求，并补充错误 run_id 后仍可正确批准的回归测试。
+- 已完成：敏感输出二次确认现在也触发 `permission_required` hook，补齐审计脚本对敏感输出审批的可观测性，并补充 hook 输出不泄露原始敏感值的回归测试。
 - 下一步：继续围绕子代理/Skill/Hook 可观测性和服务端稳定性做小步补强；避免重新扩大 GTS 深拆范围。
 
 ### Phase 5：GTS 引擎模块化
@@ -465,6 +466,7 @@
 - `crates/night24-agent-core/src/lib.rs`：子代理/skill 特殊工具接入统一权限确认，`Confirm` 会发出 `permission_required` 并等待决策。
 - `crates/night24-agent-core/src/tools.rs`：新增 `ensure_tool_permission`，统一普通工具、子代理工具、skill 工具的权限确认入口。
 - `crates/night24-agent-core/src/lib.rs`：`permission.resolve` 仅在 run_id 匹配时消费 pending permission，避免错误请求导致真实权限确认丢失。
+- `crates/night24-agent-core/src/tools.rs`：敏感输出权限确认复用 `permission_required` hook 流程，Hook 参数使用脱敏预览。
 - `crates/night24-agent-core/src/hooks.rs`：GTS hook source/file 与 `execute(args)` 共用同一个 deadline。
 - `crates/night24-agent-core/src/tests.rs`：补充 GTS hook deadline 回归测试，覆盖超时后 worker 继续处理后续 hook。
 - `crates/night24-core/src/provider/tool_router.rs`：echo provider 增加 `tool:subagent_cancel:<id>` 测试/调试路由。

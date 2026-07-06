@@ -1284,6 +1284,23 @@ async fn sensitive_tool_output_requires_user_decision_outside_full_access() {
     )
     .await
     .unwrap();
+    let hook_dir = temp_dir.join(".night24");
+    tokio::fs::create_dir_all(&hook_dir).await.unwrap();
+    tokio::fs::write(
+        hook_dir.join("hooks.json"),
+        r#"{
+            "hooks": [
+                {
+                    "event": "permission_required",
+                    "name": "permission-audit",
+                    "engine": "gts",
+                    "inline_script": "function execute(args) { return { outputs: [{ stream: \"stdout\", text: \"permission-hook tool=\" + args.tool_name + \" source=\" + args.arguments.source_tool }] }; }"
+                }
+            ]
+        }"#,
+    )
+    .await
+    .unwrap();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut core = AgentCore::with_output(tx);
@@ -1322,6 +1339,16 @@ async fn sensitive_tool_output_requires_user_decision_outside_full_access() {
     let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
     assert_eq!(accepted["result"]["accepted"], true);
 
+    let hook_output = next_event_of_type(&mut rx, "run_output").await;
+    assert_eq!(
+        hook_output["params"]["payload"]["source"],
+        "hook:permission_required:permission-audit"
+    );
+    assert_eq!(
+        hook_output["params"]["payload"]["text"],
+        "permission-hook tool=developer__sensitive_output source=developer__read_file"
+    );
+    assert!(!hook_output.to_string().contains("sk-test1234567890abcdef"));
     let permission = next_event_of_type(&mut rx, "permission_required").await;
     assert_eq!(
         permission["params"]["payload"]["tool_name"],

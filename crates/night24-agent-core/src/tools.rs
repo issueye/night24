@@ -185,6 +185,7 @@ pub(super) async fn execute_tool_with_events(
             resolve_sensitive_output(
                 context,
                 security,
+                working_dir,
                 tool_call_id,
                 tool_name,
                 &arguments,
@@ -293,6 +294,7 @@ pub(super) async fn ensure_tool_permission(
 async fn resolve_sensitive_output(
     context: &RunContext,
     security: &SecurityInspector,
+    working_dir: &Path,
     tool_call_id: &str,
     tool_name: &str,
     arguments: &serde_json::Value,
@@ -315,6 +317,15 @@ async fn resolve_sensitive_output(
         )),
         PermissionLevel::Confirm => {
             let permission_id = format!("perm-{}", uuid::Uuid::new_v4());
+            let sensitive_tool_call_id = format!("{tool_call_id}:sensitive_output");
+            let sensitive_tool_name = "developer__sensitive_output";
+            let sensitive_summary = "工具输出可能包含敏感凭证。批准返回原文，拒绝返回屏蔽版。";
+            let sensitive_arguments = serde_json::json!({
+                "source_tool": tool_name,
+                "source_arguments": arguments,
+                "findings": inspection.findings.clone(),
+                "redacted_preview": preview(&inspection.sanitized),
+            });
             let (tx, rx) = oneshot::channel();
             context
                 .permissions
@@ -328,18 +339,32 @@ async fn resolve_sensitive_output(
                     },
                 );
 
+            context
+                .run_hooks(HookContext {
+                    event: HookEvent::PermissionRequired,
+                    run_id: &context.run_id,
+                    working_dir,
+                    provider: None,
+                    model: None,
+                    message_count: None,
+                    tool_count: None,
+                    tool_call_id: Some(&sensitive_tool_call_id),
+                    tool_name: Some(sensitive_tool_name),
+                    summary: Some(sensitive_summary),
+                    arguments: Some(&sensitive_arguments),
+                    result_preview: None,
+                    error: None,
+                    duration_ms: None,
+                    finish_status: None,
+                })
+                .await;
             context.send(AgentEventKind::PermissionRequired {
                 permission_id,
-                tool_call_id: format!("{tool_call_id}:sensitive_output"),
-                tool_name: "developer__sensitive_output".to_string(),
+                tool_call_id: sensitive_tool_call_id,
+                tool_name: sensitive_tool_name.to_string(),
                 risk: RiskLevel::High,
-                summary: "工具输出可能包含敏感凭证。批准返回原文，拒绝返回屏蔽版。".to_string(),
-                arguments: serde_json::json!({
-                    "source_tool": tool_name,
-                    "source_arguments": arguments,
-                    "findings": inspection.findings.clone(),
-                    "redacted_preview": preview(&inspection.sanitized),
-                }),
+                summary: sensitive_summary.to_string(),
+                arguments: sensitive_arguments,
                 timeout_ms: 300_000,
             });
 
