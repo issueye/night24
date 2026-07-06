@@ -354,7 +354,7 @@
 - 已完成：为 hook 配置增加 `allowed_modules`，默认 trusted allow-all，显式配置时接入 GTS VM module allowlist。
 - 已完成：server hooks API 和桌面端 Hook 设置面板保留并编辑 `allowed_modules`。
 - 已完成：server hooks API 增加事件、engine、执行入口、timeout、instruction limit 基础校验。
-- 已完成：server hooks API 抽出 `SUPPORTED_HOOK_ENGINES` / `is_supported_hook_engine`，集中维护 hook engine 支持列表，并补充省略、空白、裁剪后支持值和不支持 engine 的校验测试。
+- 已完成：server hooks API 抽出 `SUPPORTED_HOOK_ENGINES` / `is_supported_hook_engine`，集中维护 hook engine 支持列表；当前只允许省略、空白或 `gts`，并补充旧 `goscript` 别名拒绝测试。
 - 已完成：GTS hook worker 改为 source/file 与 `execute(args)` 共用同一个 hook deadline，避免分阶段重复获得完整 timeout 预算。
 - 已完成：补充 GTS hook deadline 回归测试，覆盖前一个 hook 超时后单 worker 能继续执行后续 hook。
 - 已完成：明确 hook top-level 执行与 `execute(args)` 的生命周期语义。
@@ -414,6 +414,7 @@
 - `crates/night24-agent-core/src/hooks.rs`：新增 hook `allowed_modules` 配置并接入 GTS VM 模块 allowlist。
 - `crates/night24-agent-core/src/tests.rs`：新增 GTS hook malformed outputs、top-level/execute 生命周期、allowed_modules 拒绝危险模块测试。
 - `crates/night24-server/src/hooks.rs`：hooks API 保留 `allowed_modules` 配置字段。
+- `crates/night24-server/src/hooks.rs`、`crates/night24-agent-core/src/hooks.rs`：Hook engine 收紧为只支持 `gts`，移除 `goscript` 兼容别名并补充拒绝测试。
 - `crates/night24-server/src/hooks.rs`：新增 hook 配置基础校验与测试。
 - `tauri-app/src/components/settings/HookSettings.jsx`：Hook 设置面板支持编辑模块白名单。
 - `crates/night24-gts/src/evaluator/builtins/json.rs`：拆出 JSON 内置实现。

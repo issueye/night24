@@ -10,7 +10,7 @@ use crate::{json_error, AppState};
 
 const HOOKS_DIR: &str = ".night24";
 const HOOKS_FILE: &str = "hooks.json";
-const SUPPORTED_HOOK_ENGINES: &[&str] = &["gts", "goscript"];
+const SUPPORTED_HOOK_ENGINES: &[&str] = &["gts"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub(crate) struct HookConfig {
@@ -280,14 +280,8 @@ mod tests {
     }
 
     #[test]
-    fn accepts_omitted_empty_and_trimmed_supported_hook_engines() {
-        for engine in [
-            None,
-            Some(""),
-            Some("  "),
-            Some(" gts "),
-            Some(" goscript "),
-        ] {
+    fn accepts_omitted_empty_and_trimmed_gts_hook_engines() {
+        for engine in [None, Some(""), Some("  "), Some(" gts ")] {
             let config = HookConfig {
                 hooks: vec![HookDefinition {
                     event: "before_tool".to_string(),
@@ -308,23 +302,25 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_hook_engine() {
-        let config = HookConfig {
-            hooks: vec![HookDefinition {
-                event: "run_started".to_string(),
-                name: None,
-                engine: Some(" node ".to_string()),
-                script: Some("hooks/audit.gs".to_string()),
-                inline_script: None,
-                enabled: true,
-                timeout_ms: Some(5_000),
-                instruction_limit: Some(1_000_000),
-                allowed_modules: None,
-            }],
-        };
+        for engine in [" node ", " goscript "] {
+            let config = HookConfig {
+                hooks: vec![HookDefinition {
+                    event: "run_started".to_string(),
+                    name: None,
+                    engine: Some(engine.to_string()),
+                    script: Some("hooks/audit.gs".to_string()),
+                    inline_script: None,
+                    enabled: true,
+                    timeout_ms: Some(5_000),
+                    instruction_limit: Some(1_000_000),
+                    allowed_modules: None,
+                }],
+            };
 
-        let err = validate_hook_config(&config).unwrap_err();
-        assert!(err.1["error"].as_str().unwrap().contains("engine"));
-        assert!(err.1["error"].as_str().unwrap().contains("node"));
+            let err = validate_hook_config(&config).unwrap_err();
+            assert!(err.1["error"].as_str().unwrap().contains("engine"));
+            assert!(err.1["error"].as_str().unwrap().contains(engine.trim()));
+        }
     }
 
     #[test]

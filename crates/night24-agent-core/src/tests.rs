@@ -1396,6 +1396,24 @@ fn hook_config_accepts_gts_script_hooks() {
 }
 
 #[test]
+fn hook_config_rejects_legacy_goscript_engine_alias() {
+    let err = HookRunner::from_config_str(
+        r#"{
+            "hooks": [
+                {
+                    "event": "run_started",
+                    "engine": "goscript",
+                    "inline_script": "function execute(args) { return { outputs: [] }; }"
+                }
+            ]
+        }"#,
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("goscript"));
+}
+
+#[test]
 fn hook_runner_loads_workspace_default_config() {
     let temp_dir =
         std::env::temp_dir().join(format!("night24-hooks-default-{}", uuid::Uuid::new_v4()));
