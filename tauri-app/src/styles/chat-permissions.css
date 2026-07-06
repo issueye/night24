@@ -13,8 +13,8 @@
   padding: 10px;
   color: var(--text);
   background: var(--amber-soft);
-  border: 1px solid #f2daa6;
-  border-radius: 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-lg);
 }
 
 .permission-chat-head {
@@ -27,21 +27,21 @@
 .permission-chat-head strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .permission-chat-head small {
   color: var(--amber);
-  font-size: 11px;
+  font-size: var(--fs-sm);
   text-transform: uppercase;
 }
 
 .permission-chat-card p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .permission-chat-card pre {
@@ -50,11 +50,11 @@
   padding: 8px;
   overflow: auto;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--overlay-bg);
   border: 1px solid rgba(183, 121, 31, 0.18);
-  border-radius: 8px;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   white-space: pre-wrap;
 }
 
@@ -70,12 +70,12 @@
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
 .permission-chat-actions button:last-child {
-  color: #ffffff;
+  color: var(--on-blue);
   background: var(--blue);
   border-color: var(--blue);
 }

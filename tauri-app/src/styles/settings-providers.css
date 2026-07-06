@@ -16,7 +16,7 @@
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .provider-list-head {
@@ -29,7 +29,7 @@
 }
 
 .provider-list-head strong {
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .provider-list-scroll {
@@ -52,7 +52,7 @@
   padding: 6px 8px;
   color: var(--muted);
   background: transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -72,12 +72,12 @@
 }
 
 .provider-profile-row strong {
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .provider-profile-row span {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .provider-profile-row.muted {

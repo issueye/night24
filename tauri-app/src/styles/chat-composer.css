@@ -15,7 +15,7 @@
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   outline: none;
 }
 
@@ -27,7 +27,7 @@
 
 .composer-actions span {
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .scroll-bottom-button {
@@ -40,10 +40,10 @@
   height: 34px;
   place-items: center;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--overlay-bg);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  box-shadow: 0 12px 32px rgba(23, 32, 51, 0.18);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
   cursor: pointer;
   transform: translateX(-50%);
 }
@@ -65,7 +65,7 @@
 .composer-model > span {
   flex: 0 0 auto;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .composer-model select,
@@ -73,12 +73,12 @@
   height: 26px;
   padding: 0 24px 0 9px;
   color: var(--muted);
-  background: #f7f7f5;
-  border: 1px solid #e8e6e1;
-  border-radius: 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
   outline: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-base);
   appearance: none;
 }
 
@@ -113,9 +113,9 @@
   margin-left: auto;
   color: var(--green);
   background: var(--green-soft);
-  border: 1px solid #bbf7d0;
-  border-radius: 999px;
-  font-size: 11px;
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
   font-weight: 700;
   line-height: 1;
 }
@@ -123,13 +123,13 @@
 .composer-threshold.warning {
   color: var(--amber);
   background: var(--amber-soft);
-  border-color: #fde68a;
+  border-color: var(--warning-border);
 }
 
 .composer-threshold.danger {
   color: var(--red);
   background: var(--red-soft);
-  border-color: #fecaca;
+  border-color: var(--danger-border);
 }
 
 .composer-compact-button {
@@ -139,16 +139,16 @@
   height: 26px;
   place-items: center;
   color: var(--muted);
-  background: #f7f7f5;
-  border: 1px solid #e8e6e1;
-  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
   cursor: pointer;
 }
 
 .composer-compact-button:hover {
   color: var(--blue);
   background: var(--blue-soft);
-  border-color: #c9d8ff;
+  border-color: var(--ring-border);
 }
 
 .composer-compact-button:disabled {
@@ -158,13 +158,13 @@
 
 .composer-model select:focus,
 .composer-mode select:focus {
-  border-color: #9bb8ff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--ring-border);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .composer textarea:focus {
-  border-color: #9bb8ff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--ring-border);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .primary-button,
@@ -177,18 +177,18 @@
 }
 
 .primary-button {
-  color: #ffffff;
+  color: var(--on-blue);
   background: var(--blue);
 }
 
 .primary-button:disabled {
   color: var(--subtle);
-  background: #e8ecf3;
+  background: var(--btn-disabled-bg);
   cursor: not-allowed;
 }
 
 .danger-button {
-  color: #ffffff;
+  color: var(--on-blue);
   background: var(--red);
 }
 

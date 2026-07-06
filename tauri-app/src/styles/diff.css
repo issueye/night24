@@ -1,6 +1,7 @@
 .diff-panel {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 10px;
   min-height: 0;
   overflow: hidden;
 }
@@ -18,7 +19,7 @@
 .diff-summary,
 .changed-file small {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .diff-toolbar strong,
@@ -31,18 +32,18 @@
 .diff-toolbar strong {
   margin-top: 2px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
 .diff-error {
   margin: 10px 12px 0;
   padding: 8px 10px;
-  color: #991b1b;
-  background: #fff7f7;
-  border: 1px solid #fecaca;
-  border-radius: 10px;
-  font-size: 12px;
+  color: var(--red-strong);
+  background: var(--red-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-base);
 }
 
 .diff-summary {
@@ -70,18 +71,18 @@
   gap: 8px;
   min-height: 26px;
   padding: 0 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .changed-file:hover {
-  background: #f4f4f2;
+  background: var(--surface-soft);
 }
 
 .changed-file span {
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -91,10 +92,10 @@
   margin: 0;
   padding: 10px 0;
   overflow: auto;
-  color: #374151;
-  background: #ffffff;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
+  color: var(--mono-text);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   line-height: 1.55;
   white-space: pre;
 }
@@ -106,20 +107,20 @@
 
 .diff-line.add {
   color: #166534;
-  background: #f0fdf4;
+  background: var(--green-soft);
 }
 
 .diff-line.remove {
-  color: #991b1b;
-  background: #fff1f2;
+  color: var(--red-strong);
+  background: var(--red-soft);
 }
 
 .diff-line.hunk {
-  color: #1d4ed8;
-  background: #eff6ff;
+  color: var(--blue-hover);
+  background: var(--blue-soft);
 }
 
 .diff-line.meta {
-  color: #6b7280;
-  background: #f7f7f5;
+  color: var(--muted);
+  background: var(--surface-soft);
 }

@@ -9,13 +9,13 @@
   gap: 6px;
   padding: 8px;
   background: var(--amber-soft);
-  border: 1px solid #f2daa6;
-  border-radius: 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
 }
 
 .permission-card span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .permission-card pre {
@@ -23,9 +23,9 @@
   margin: 0;
   padding: 8px;
   overflow: auto;
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: 6px;
-  font-size: 11px;
+  background: var(--overlay-bg);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
   white-space: pre-wrap;
 }
 
@@ -41,12 +41,12 @@
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
 .permission-card button:last-child {
-  color: #ffffff;
+  color: var(--on-blue);
   background: var(--blue);
   border-color: var(--blue);
 }

@@ -11,7 +11,7 @@
 .conversation-head span,
 .core-note {
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .conversation-head strong {
@@ -50,9 +50,9 @@
   height: 16px;
   place-items: center;
   padding: 0 4px;
-  color: #ffffff;
+  color: var(--on-blue);
   background: var(--red);
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
   line-height: 1;
 }

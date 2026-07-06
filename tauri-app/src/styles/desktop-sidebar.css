@@ -1,5 +1,8 @@
-.left-panel {
-  grid-template-rows: auto minmax(160px, 1fr) auto auto;
+/* Desktop 侧栏覆盖:贴边、扁平、灰色 hover。
+   去除与 sidebar.css 重复的 grid-template-rows 声明,
+   仅保留真正覆盖的 background/border/box-shadow。 */
+
+.app-shell .left-panel {
   background: var(--sidebar-bg);
   border: 0;
   border-right: 1px solid var(--line);
@@ -7,14 +10,14 @@
   box-shadow: none;
 }
 
-.primary-nav {
+.app-shell .primary-nav {
   display: grid;
   gap: 2px;
   padding: 12px 10px 10px;
   border-bottom: 1px solid transparent;
 }
 
-.nav-row {
+.app-shell .nav-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -22,100 +25,100 @@
   padding: 0 8px;
   color: var(--text);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
 }
 
-.nav-row:hover,
-.nav-row.active {
-  background: #ececea;
+.app-shell .nav-row:hover,
+.app-shell .nav-row.active {
+  background: var(--surface-tint);
 }
 
-.nav-row.muted {
+.app-shell .nav-row.muted {
   color: var(--muted);
 }
 
-.project-block,
-.tree-block,
-.sessions-block,
-.permissions {
+.app-shell .project-block,
+.app-shell .tree-block,
+.app-shell .sessions-block,
+.app-shell .permissions {
   padding: 8px 10px;
   border-bottom-color: var(--line);
 }
 
-.menu-section-head {
+.app-shell .menu-section-head {
   color: var(--muted);
   font-weight: 500;
 }
 
-.project-current {
+.app-shell .project-current {
   padding: 8px 10px;
-  background: #ffffff;
+  background: var(--surface);
   border-color: var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
-.recent-list button,
-.session-row,
-.project-row,
-.project-session-row,
-.tree-row {
-  border-radius: 6px;
+.app-shell .recent-list button,
+.app-shell .session-row,
+.app-shell .project-row,
+.app-shell .project-session-row,
+.app-shell .tree-row {
+  border-radius: var(--radius-sm);
 }
 
-.recent-list button,
-.project-session-row,
-.tree-row {
+.app-shell .recent-list button,
+.app-shell .project-session-row,
+.app-shell .tree-row {
   color: var(--muted);
 }
 
-.session-row {
+.app-shell .session-row {
   min-height: 32px;
   padding: 0 8px;
 }
 
-.session-row:hover,
-.session-row.active,
-.project-row:hover,
-.project-row.active,
-.project-session-row:hover,
-.project-session-row.active,
-.tree-row:hover,
-.tree-row.selected,
-.recent-list button:hover,
-.recent-list button.selected {
+.app-shell .session-row:hover,
+.app-shell .session-row.active,
+.app-shell .project-row:hover,
+.app-shell .project-row.active,
+.app-shell .project-session-row:hover,
+.app-shell .project-session-row.active,
+.app-shell .tree-row:hover,
+.app-shell .tree-row.selected,
+.app-shell .recent-list button:hover,
+.app-shell .recent-list button.selected {
   color: var(--text);
-  background: #ececea;
+  background: var(--surface-tint);
   border-color: transparent;
 }
 
-.project-session-tree {
+.app-shell .project-session-tree {
   padding-bottom: 8px;
 }
 
-.project-row {
+.app-shell .project-row {
   min-height: 31px;
   padding: 0 8px;
 }
 
-.project-session-list {
+.app-shell .project-session-list {
   margin-left: 25px;
 }
 
-.project-session-row {
+.app-shell .project-session-row {
   min-height: 30px;
 }
 
-.project-session-list::before,
-.project-session-row::before {
-  background: #d7d7d2;
+.app-shell .project-session-list::before,
+.app-shell .project-session-row::before {
+  background: var(--line-strong);
 }
 
-.project-session-row.running .session-running-icon {
+.app-shell .project-session-row.running .session-running-icon {
   color: var(--text);
 }
 
-.sessions-block.compact {
+.app-shell .sessions-block.compact {
   border-bottom: 0;
 }

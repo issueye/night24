@@ -12,10 +12,10 @@
   max-width: min(720px, 100%);
   overflow: hidden;
   color: var(--text);
-  background: #fbfcff;
+  background: var(--code-bg);
   border: 1px solid var(--line);
-  border-radius: 9px;
-  box-shadow: 0 2px 8px rgba(23, 32, 51, 0.04);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .tool-call-block summary {
@@ -40,7 +40,7 @@
   place-items: center;
   color: var(--blue);
   background: var(--blue-soft);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
 }
 
 .tool-call-main {
@@ -58,19 +58,19 @@
 
 .tool-call-main strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
 .tool-call-main small {
   margin-top: 2px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .tool-call-chevron {
   color: var(--subtle);
-  transition: transform 160ms ease;
+  transition: transform var(--transition);
 }
 
 .tool-call-block[open] .tool-call-chevron {
@@ -87,16 +87,16 @@
   gap: 5px;
   margin-bottom: 6px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .tool-call-detail pre {
   max-height: 280px;
   overflow: auto;
-  color: #2f3948;
-  background: #ffffff;
+  color: var(--mono-text);
+  background: var(--surface);
   border-color: var(--line);
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }

@@ -34,7 +34,7 @@
 .subagent-detail-head span {
   margin-top: 3px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .subagent-status {
@@ -46,8 +46,8 @@
   padding: 0 7px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
 }
 
 .subagent-status.failed,
@@ -72,19 +72,19 @@
   padding: 6px 8px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .subagent-meta span,
 .subagent-section-head {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .subagent-meta strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--fs-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -100,10 +100,10 @@
   margin: 0;
   padding: 8px;
   color: var(--text);
-  background: #fbfcff;
+  background: var(--code-bg);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-base);
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -111,7 +111,7 @@
 .subagent-result {
   max-height: 180px;
   overflow: auto;
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .subagent-messages {
@@ -124,14 +124,14 @@
   gap: 4px;
   max-width: 92%;
   padding: 7px 8px;
-  background: #f8fbff;
+  background: var(--code-bg);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .subagent-message.child_to_parent {
   justify-self: end;
-  background: #f0fdf4;
+  background: var(--green-soft);
 }
 
 .subagent-message > div {
@@ -140,13 +140,13 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .subagent-message p {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-base);
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -156,15 +156,15 @@
   color: var(--subtle);
   background: var(--surface-soft);
   border: 1px dashed var(--line);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-base);
 }
 
 .subagent-debug {
   display: grid;
   gap: 5px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .subagent-debug summary {
@@ -177,7 +177,7 @@
   overflow: hidden;
   padding: 5px 6px;
   background: var(--surface-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -187,5 +187,5 @@
   overflow: hidden;
   background: linear-gradient(90deg, var(--surface) 0%, var(--surface-soft) 50%, var(--surface) 100%);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }

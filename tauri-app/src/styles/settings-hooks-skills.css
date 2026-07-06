@@ -6,28 +6,28 @@
 .hook-status {
   min-height: 28px;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: var(--fs-base);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .hook-status.error {
   color: var(--red);
-  background: #fff7f7;
-  border-color: #fecaca;
+  background: var(--red-soft);
+  border-color: var(--danger-border);
 }
 
 .hook-status.success {
   color: var(--green);
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+  background: var(--green-soft);
+  border-color: var(--success-border);
 }
 
 .hook-status.warning {
   white-space: pre-wrap;
   color: var(--amber);
   background: var(--amber-soft);
-  border-color: #fde68a;
+  border-color: var(--warning-border);
 }
 
 .hook-empty {
@@ -39,7 +39,7 @@
   color: var(--muted);
   text-align: center;
   border: 1px dashed var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .hook-empty.inline {
@@ -54,13 +54,13 @@
 
 .hook-empty strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .hook-empty span {
   max-width: 260px;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .danger-outline-button {
@@ -74,8 +74,8 @@
   align-self: end;
   color: var(--red);
   background: var(--surface);
-  border: 1px solid #fecaca;
-  border-radius: 8px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 

@@ -1,5 +1,7 @@
+/* Desktop 响应式:窄屏收紧侧栏宽度。 */
+
 @media (max-width: 1180px) {
-  .workspace-grid {
+  .app-shell .workspace-grid {
     grid-template-columns: 230px minmax(0, 1fr);
   }
 }

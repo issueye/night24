@@ -1,12 +1,14 @@
-.statusbar {
+/* Desktop 状态栏覆盖:事件按钮风格。 */
+
+.app-shell .statusbar {
   display: grid;
   grid-template-columns: 140px minmax(0, 1fr) auto;
   height: 26px;
-  background: #fbfbfa;
+  background: var(--surface-soft);
   border-top-color: var(--line);
 }
 
-.statusbar-event-button {
+.app-shell .statusbar-event-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -15,28 +17,28 @@
   padding: 0 8px;
   color: var(--muted);
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
-.statusbar-event-button:hover,
-.statusbar-event-button.active {
-  background: #ececea;
+.app-shell .statusbar-event-button:hover,
+.app-shell .statusbar-event-button.active {
+  background: var(--surface-tint);
 }
 
-.statusbar-event-button.error {
+.app-shell .statusbar-event-button.error {
   color: var(--red);
 }
 
-.statusbar-event-button.warning {
+.app-shell .statusbar-event-button.warning {
   color: var(--amber);
 }
 
-.statusbar-event-button.success {
+.app-shell .statusbar-event-button.success {
   color: var(--green);
 }
 
-.statusbar-event-button span {
+.app-shell .statusbar-event-button span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

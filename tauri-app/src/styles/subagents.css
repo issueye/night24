@@ -28,16 +28,16 @@
   padding: 6px 8px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .subagent-stat span {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .subagent-stat strong {
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 .subagent-stat.queued strong,
@@ -73,9 +73,9 @@
   padding: 6px 8px;
   color: var(--red);
   background: var(--red-soft);
-  border: 1px solid #fecaca;
-  border-radius: 4px;
-  font-size: 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-base);
 }
 
 .subagent-layout {
@@ -84,5 +84,5 @@
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }

@@ -1,156 +1,161 @@
-.center-panel {
+/* Desktop 对话区覆盖:浮岛式 composer、居中对话流、贴边面板。
+   .primary-button/.danger-button 的圆形化精确限定在 .composer 内,
+   避免误伤 settings/subagents 等面板里的同名按钮。 */
+
+.app-shell .center-panel {
   grid-template-rows: 48px minmax(0, 1fr) auto;
-  background: #ffffff;
+  background: var(--surface);
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
 
-.conversation-head {
+.app-shell .conversation-head {
   padding: 0 22px 0 38px;
-  background: #ffffff;
-  border-bottom-color: #f0efeb;
+  background: var(--surface);
+  border-bottom-color: var(--line);
 }
 
-.conversation-head > div:first-child {
+.app-shell .conversation-head > div:first-child {
   min-width: 0;
 }
 
-.conversation-head > div:first-child span {
+.app-shell .conversation-head > div:first-child span {
   display: none;
 }
 
-.conversation-head strong {
+.app-shell .conversation-head strong {
   margin: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--fs-lg);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.core-note {
+.app-shell .core-note {
   margin-left: auto;
   color: var(--green);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
-.context-actions {
+.app-shell .context-actions {
   gap: 4px;
 }
 
-.conversation-area {
+.app-shell .conversation-area {
   width: min(940px, calc(100% - 52px));
   margin: 0 auto;
   background: transparent;
 }
 
-.conversation-timeline {
-  border-right-color: #f0efeb;
+.app-shell .conversation-timeline {
+  border-right-color: var(--line);
 }
 
-.timeline-point > span {
-  box-shadow: 0 0 0 3px #ffffff;
+.app-shell .timeline-point > span {
+  box-shadow: 0 0 0 3px var(--bg);
 }
 
-.timeline-point:hover > span,
-.timeline-point:focus-visible > span {
-  box-shadow: 0 0 0 4px rgba(55, 125, 255, 0.12), 0 0 0 3px #ffffff;
+.app-shell .timeline-point:hover > span,
+.app-shell .timeline-point:focus-visible > span {
+  box-shadow: 0 0 0 4px var(--ring), 0 0 0 3px var(--bg);
 }
 
-.messages {
+.app-shell .messages {
   width: min(760px, calc(100% - 92px));
   margin: 0 auto;
   padding: 34px 0 24px;
   background: transparent;
 }
 
-.welcome-panel,
-.placeholder,
-.empty-block {
-  background: #fafaf9;
+.app-shell .welcome-panel,
+.app-shell .placeholder,
+.app-shell .empty-block {
+  background: var(--surface-soft);
   border-color: var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 
-.message {
+.app-shell .message {
   max-width: min(720px, 88%);
 }
 
-.message-body pre {
-  border-color: #ededeb;
-  border-radius: 14px;
+.app-shell .message-body pre {
+  border-color: var(--line);
+  border-radius: var(--radius-lg);
   box-shadow: none;
 }
 
-.message.user .message-body pre {
-  color: #ffffff;
+.app-shell .message.user .message-body pre {
+  color: var(--on-blue);
   background: #4b5563;
   border-color: #4b5563;
 }
 
-.message.error .avatar {
-  color: #b91c1c;
-  background: #fee2e2;
+.app-shell .message.error .avatar {
+  color: var(--red-strong);
+  background: var(--red-soft);
 }
 
-.message.error .message-body pre {
-  color: #991b1b;
-  background: #fff7f7;
-  border-color: #fecaca;
+.app-shell .message.error .message-body pre {
+  color: var(--red-strong);
+  background: var(--red-soft);
+  border-color: var(--danger-border);
 }
 
-.composer {
+.app-shell .composer {
   width: min(738px, calc(100% - 92px));
   margin: 12px auto 16px;
   padding: 12px;
-  background: #ffffff;
-  border: 1px solid #e8e6e1;
-  border-radius: 20px;
-  box-shadow: 0 16px 44px rgba(30, 30, 30, 0.12);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
 }
 
-.composer textarea {
+.app-shell .composer textarea {
   padding: 0;
   background: transparent;
   border: 0;
   border-radius: 0;
 }
 
-.composer textarea:focus {
+.app-shell .composer textarea:focus {
   box-shadow: none;
 }
 
-.composer-actions {
+.app-shell .composer-actions {
   min-height: 30px;
 }
 
-.primary-button,
-.danger-button {
+/* 仅 composer 内的主/危险按钮圆形化为图标按钮 */
+.app-shell .composer .primary-button,
+.app-shell .composer .danger-button {
   width: 32px;
   min-width: 32px;
   height: 32px;
   gap: 0;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   overflow: hidden;
   color: transparent;
   font-size: 0;
 }
 
-.primary-button svg,
-.danger-button svg {
-  color: #ffffff;
+.app-shell .composer .primary-button svg,
+.app-shell .composer .danger-button svg {
+  color: var(--on-blue);
 }
 
-.primary-button:disabled svg {
+.app-shell .composer .primary-button:disabled svg {
   color: var(--subtle);
 }
 
 @media (max-width: 1180px) {
-  .messages,
-  .composer {
+  .app-shell .messages,
+  .app-shell .composer {
     width: min(700px, calc(100% - 56px));
   }
 }

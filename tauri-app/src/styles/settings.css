@@ -10,8 +10,8 @@
   padding: 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 18px 48px rgba(23, 32, 51, 0.18);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-overlay);
 }
 
 .settings-strip label {
@@ -21,7 +21,7 @@
 
 .settings-strip span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .settings-strip input,
@@ -32,14 +32,14 @@
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   outline: none;
 }
 
 .settings-strip input:focus,
 .settings-strip select:focus {
-  border-color: #9bb8ff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--ring-border);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .settings-modal-backdrop {
@@ -56,16 +56,16 @@
 .settings-modal {
   display: grid;
   grid-template-rows: 54px minmax(0, 1fr);
-  width: 920px;
-  height: 560px;
-  max-width: calc(100vw - 56px);
-  max-height: calc(100vh - 56px);
+  width: 80vw;
+  height: 80vh;
+  max-width: 80vw;
+  max-height: 80vh;
   overflow: hidden;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 24px 70px rgba(17, 24, 39, 0.28);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-overlay);
 }
 
 .settings-modal-head {
@@ -83,13 +83,13 @@
 }
 
 .settings-modal-head strong {
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 .settings-modal-head span {
   margin-top: 2px;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .settings-modal-body {
@@ -116,7 +116,7 @@
   padding: 0 10px;
   color: var(--muted);
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   text-align: left;
 }
@@ -154,7 +154,7 @@
 
 .settings-form span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .settings-form input,
@@ -165,7 +165,7 @@
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   outline: none;
 }
 
@@ -178,22 +178,22 @@
   min-height: 168px;
   padding: 10px;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 
 .settings-form input:focus,
 .settings-form select:focus,
 .settings-form textarea:focus {
-  border-color: #9bb8ff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--ring-border);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 @media (max-width: 760px) {
   .settings-modal {
-    width: calc(100vw - 32px);
-    height: 560px;
+    width: 80vw;
+    height: 80vh;
   }
 
   .settings-modal-body {

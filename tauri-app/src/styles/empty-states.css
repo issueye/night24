@@ -9,6 +9,6 @@
   color: var(--muted);
   background: var(--surface-soft);
   border: 1px dashed var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   text-align: center;
 }

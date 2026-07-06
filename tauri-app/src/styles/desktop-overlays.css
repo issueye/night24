@@ -1,48 +1,50 @@
+/* Desktop 浮层覆盖(settings-strip / context-float 收紧)。 */
+
 @media (max-width: 1180px) {
-  .settings-strip {
+  .app-shell .settings-strip {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
     width: min(700px, calc(100vw - 290px));
   }
 
-  .context-float {
+  .app-shell .context-float {
     width: min(520px, calc(100vw - 300px));
     min-width: 380px;
   }
 }
 
-.settings-strip {
+.app-shell .settings-strip {
   top: 48px;
-  border-radius: 4px;
-  box-shadow: var(--shadow);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-md);
 }
 
-.context-float {
+.app-shell .context-float {
   top: 68px;
   right: auto;
   bottom: auto;
   width: min(300px, calc(100vw - 300px));
   min-width: 300px;
   grid-template-rows: 42px 38px minmax(0, 1fr);
-  background: rgba(255, 255, 255, 0.94);
-  border-color: #eceae4;
-  border-radius: 8px;
-  box-shadow: var(--shadow);
+  background: var(--overlay-bg);
+  border-color: var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
 }
 
-.float-head {
+.app-shell .float-head {
   padding: 0 10px 0 18px;
 }
 
-.tabs button {
-  font-size: 12px;
+.app-shell .tabs button {
+  font-size: var(--fs-base);
 }
 
-.file-preview pre {
-  background: #ffffff;
+.app-shell .file-preview pre {
+  background: var(--surface);
 }
 
 @media (max-width: 1180px) {
-  .context-float {
+  .app-shell .context-float {
     width: min(300px, calc(100vw - 260px));
     min-width: 280px;
   }

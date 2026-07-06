@@ -1,29 +1,86 @@
 :root {
   font-family: "Aptos", "Segoe UI", "Microsoft YaHei", sans-serif;
-  color: #172033;
-  background: #f6f7fb;
+  color: #242424;
+  background: #ffffff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --bg: #f6f7fb;
+
+  /* ===== 基础面/文字/线条 ===== */
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-soft: #f9fafc;
-  --surface-tint: #eef4ff;
-  --line: #e1e5ec;
-  --line-strong: #cfd6e1;
-  --text: #172033;
-  --muted: #657083;
-  --subtle: #8a94a6;
+  --surface-soft: #f5f5f3;
+  --surface-tint: #eeeeec;
+  --sidebar-bg: #f7f7f5;
+  --code-bg: #fbfcff;
+
+  --line: #e7e5e0;
+  --line-strong: #d8d5ce;
+
+  --text: #242424;
+  --muted: #676762;
+  --subtle: #9a9994;
+
+  /* ===== 主色 / 蓝色族 ===== */
   --blue: #2563eb;
   --blue-hover: #1d4ed8;
-  --blue-soft: #e9f0ff;
+  --blue-soft: #eef2ff;
+  --on-blue: #ffffff;
+
+  /* ===== 语义色族 ===== */
   --green: #16a34a;
-  --green-soft: #e8f7ee;
+  --green-soft: #edf8f1;
   --amber: #b7791f;
   --amber-soft: #fff6df;
   --red: #dc2626;
   --red-soft: #fff0f0;
-  --shadow: 0 10px 28px rgba(23, 32, 51, 0.08);
+  --red-strong: #991b1b;
+
+  /* 软态边框 */
+  --success-border: #bee8cb;
+  --warning-border: #f2daa6;
+  --danger-border: #fecaca;
+
+  /* ===== 聚焦态 ===== */
+  --ring: rgba(37, 99, 235, 0.12);
+  --ring-border: #c9d8ff;
+
+  /* ===== 字体 ===== */
+  --font-mono: "Cascadia Code", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  --mono-text: #1f2937;
+
+  /* ===== 字号档位 ===== */
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-base: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+  --fs-xl: 16px;
+  --fs-2xl: 20px;
+
+  /* ===== 圆角档位 ===== */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ===== 阴影档位 ===== */
+  --shadow-sm: 0 2px 8px rgba(23, 32, 51, 0.05);
+  --shadow-md: 0 8px 24px rgba(23, 32, 51, 0.08);
+  --shadow-lg: 0 18px 50px rgba(30, 30, 30, 0.12);
+  --shadow-overlay: 0 18px 50px rgba(17, 24, 39, 0.28);
+
+  /* ===== 浮层底 ===== */
+  --overlay-bg: rgba(255, 255, 255, 0.96);
+
+  /* ===== 其它 ===== */
+  --btn-disabled-bg: #e8ecf3;
+  --transition: 160ms ease;
+
+  /* 兼容别名:旧 --shadow 引用统一指向 --shadow-md */
+  --shadow: var(--shadow-md);
 }
 
 * {

@@ -40,8 +40,8 @@
   height: 9px;
   background: var(--surface);
   border: 2px solid var(--line-strong);
-  border-radius: 999px;
-  box-shadow: 0 0 0 3px #fbfcff;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 3px var(--bg);
 }
 
 .timeline-point.user > span {
@@ -67,7 +67,7 @@
 .timeline-point:hover > span,
 .timeline-point:focus-visible > span {
   border-color: var(--blue);
-  box-shadow: 0 0 0 4px rgba(55, 125, 255, 0.12), 0 0 0 3px #fbfcff;
+  box-shadow: 0 0 0 4px var(--ring), 0 0 0 3px var(--bg);
 }
 
 .timeline-point:focus-visible {
@@ -78,7 +78,7 @@
   width: 34px;
   overflow: hidden;
   color: var(--subtle);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   line-height: 1;
   text-align: center;
   text-overflow: ellipsis;

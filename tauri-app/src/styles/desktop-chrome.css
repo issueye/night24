@@ -1,61 +1,65 @@
+/* Desktop shell 覆盖:扁平、灰白、IDE 风格。
+   通过 .app-shell 作用域提升特异性,稳定压过基础层,
+   不再依赖 styles.css 的 import 顺序。 */
+
 .app-shell {
   grid-template-rows: 40px minmax(0, 1fr) 26px;
   background: var(--bg);
 }
 
-.topbar {
+.app-shell .topbar {
   gap: 8px;
   padding: 0 10px;
-  background: #fbfbfa;
+  background: var(--surface-soft);
   border-bottom-color: var(--line);
 }
 
-.brand {
+.app-shell .brand {
   min-width: 210px;
 }
 
-.brand-mark {
+.app-shell .brand-mark {
   width: 26px;
   height: 26px;
-  color: #4b5563;
+  color: var(--muted);
   background: transparent;
   border-color: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
-.brand span {
+.app-shell .brand span {
   display: none;
 }
 
-.status-pill {
+.app-shell .status-pill {
   height: 26px;
   min-width: auto;
   padding: 0 10px;
-  background: #f2f2ef;
+  background: var(--surface-soft);
   border-color: var(--line);
 }
 
-.toolbar-button {
+.app-shell .toolbar-button {
   height: 28px;
-  color: #1f2937;
-  background: #f2f2ef;
+  color: var(--text);
+  background: var(--surface-soft);
   border: 1px solid var(--line);
 }
 
-.toolbar-button:hover {
-  background: #e9e9e5;
+.app-shell .toolbar-button:hover {
+  background: var(--surface-tint);
 }
 
-.icon-button,
-.mini-button {
+.app-shell .icon-button,
+.app-shell .mini-button {
   background: transparent;
   border-color: transparent;
 }
 
-.icon-button:hover,
-.icon-button.active,
-.mini-button:hover {
+.app-shell .icon-button:hover,
+.app-shell .icon-button.active,
+.app-shell .mini-button:hover {
   color: var(--text);
-  background: #ececea;
+  background: var(--surface-tint);
   border-color: transparent;
 }

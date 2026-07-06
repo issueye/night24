@@ -45,7 +45,7 @@
   min-height: 24px;
   margin-bottom: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -61,16 +61,16 @@
   margin-top: 8px;
   margin-bottom: 5px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .project-current {
   display: grid;
   gap: 2px;
   padding: 8px;
-  background: #f8fbff;
-  border: 1px solid #dce6fb;
-  border-radius: 6px;
+  background: var(--code-bg);
+  border: 1px solid var(--ring-border);
+  border-radius: var(--radius-sm);
 }
 
 .project-current strong,
@@ -82,7 +82,7 @@
 
 .project-current span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .recent-list {
@@ -96,7 +96,7 @@
   padding: 0 6px 0 20px;
   color: var(--muted);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,7 +132,7 @@
   color: var(--text);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -162,7 +162,7 @@
 .project-session-row.active {
   color: var(--text);
   background: var(--blue-soft);
-  border-color: #d5e2ff;
+  border-color: var(--ring-border);
 }
 
 .project-session-list {
@@ -192,7 +192,7 @@
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .project-session-row::before {
@@ -233,7 +233,7 @@
   width: 20px;
   height: 24px;
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   opacity: 0;
   cursor: pointer;
 }
@@ -245,14 +245,14 @@
 
 .session-delete:hover {
   color: var(--red);
-  background: rgba(255, 77, 79, 0.08);
+  background: var(--red-soft);
 }
 
 .empty-block.inline {
   min-height: 26px;
   padding-left: 10px;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .sessions-block.compact {
@@ -266,7 +266,7 @@
   justify-content: space-between;
   min-height: 28px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .sidebar-fold span {
@@ -296,7 +296,7 @@
   padding: 0 8px 0 calc(8px + var(--tree-depth, 0) * 14px);
   color: var(--muted);
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   text-align: left;
 }
@@ -335,7 +335,7 @@
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -344,7 +344,7 @@
 .session-row.active {
   color: var(--text);
   background: var(--blue-soft);
-  border-color: #d5e2ff;
+  border-color: var(--ring-border);
 }
 
 .session-row span {

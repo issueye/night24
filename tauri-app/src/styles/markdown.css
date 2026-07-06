@@ -6,8 +6,8 @@
   overflow-wrap: anywhere;
   color: var(--text);
   background: var(--surface);
-  border: 1px solid #ededeb;
-  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   line-height: 1.65;
 }
 
@@ -18,9 +18,9 @@
 }
 
 .message.error .markdown-body {
-  color: #991b1b;
-  background: #fff7f7;
-  border-color: #fecaca;
+  color: var(--red-strong);
+  background: var(--red-soft);
+  border-color: var(--danger-border);
 }
 
 .markdown-body > :first-child {
@@ -50,15 +50,15 @@
 }
 
 .markdown-body h1 {
-  font-size: 20px;
+  font-size: var(--fs-2xl);
 }
 
 .markdown-body h2 {
-  font-size: 17px;
+  font-size: var(--fs-xl);
 }
 
 .markdown-body h3 {
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 .markdown-body ul,
@@ -105,11 +105,11 @@
 .markdown-body .inline-code {
   display: inline;
   padding: 1px 5px;
-  color: #374151;
-  background: #f1f1ee;
-  border: 1px solid #e5e3dd;
-  border-radius: 5px;
-  font-family: "Cascadia Code", Consolas, monospace;
+  color: var(--mono-text);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
   font-size: 0.92em;
   white-space: break-spaces;
 }
@@ -125,12 +125,12 @@
   margin: 0 0 10px;
   padding: 12px;
   overflow: auto;
-  color: #1f2937;
-  background: #f7f7f5;
-  border: 1px solid #e8e6e1;
-  border-radius: 10px;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 12px;
+  color: var(--mono-text);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
   line-height: 1.55;
   white-space: pre;
 }
@@ -153,8 +153,8 @@
   max-width: 100%;
   margin: 0 0 10px;
   overflow: auto;
-  border: 1px solid #e8e6e1;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
 }
 
 .markdown-body table {
@@ -163,7 +163,7 @@
   max-width: none;
   border-collapse: collapse;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-base);
   table-layout: auto;
 }
 
@@ -172,7 +172,7 @@
   min-width: 86px;
   max-width: 260px;
   padding: 8px 10px;
-  border-bottom: 1px solid #eceae4;
+  border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
@@ -180,7 +180,7 @@
 }
 
 .markdown-body th {
-  background: #f7f7f5;
+  background: var(--surface-soft);
   font-weight: 650;
 }
 

@@ -1,4 +1,6 @@
-.workspace-grid {
+/* Desktop workspace 覆盖:去卡片间距,贴边布局。 */
+
+.app-shell .workspace-grid {
   grid-template-columns: 242px minmax(0, 1fr);
   gap: 0;
   padding: 0;

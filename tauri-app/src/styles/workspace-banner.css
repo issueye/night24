@@ -4,14 +4,14 @@
   gap: 9px;
   min-height: 32px;
   padding: 0 12px;
-  color: #8f1d1d;
+  color: var(--red-strong);
   background: var(--red-soft);
-  border-bottom: 1px solid #ffd0d0;
+  border-bottom: 1px solid var(--danger-border);
 }
 
 .banner button {
   margin-left: auto;
-  color: #8f1d1d;
+  color: var(--red-strong);
   background: transparent;
   cursor: pointer;
 }

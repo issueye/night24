@@ -1,4 +1,6 @@
-.events-float {
+/* Desktop 事件浮窗覆盖。 */
+
+.app-shell .events-float {
   position: fixed;
   right: 20px;
   bottom: 38px;
@@ -8,13 +10,13 @@
   width: min(420px, calc(100vw - 300px));
   max-height: min(480px, calc(100vh - 120px));
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #eceae4;
-  border-radius: 18px;
-  box-shadow: var(--shadow);
+  background: var(--overlay-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-md);
 }
 
-.event-list {
+.app-shell .event-list {
   display: grid;
   align-content: start;
   gap: 4px;
@@ -23,34 +25,34 @@
   overflow: auto;
 }
 
-.event-row {
+.app-shell .event-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
   padding: 8px;
   color: var(--muted);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 
-.event-row:hover {
-  background: #f4f4f2;
+.app-shell .event-row:hover {
+  background: var(--surface-soft);
 }
 
-.event-row.success {
+.app-shell .event-row.success {
   color: var(--green);
 }
 
-.event-row.warning {
+.app-shell .event-row.warning {
   color: var(--amber);
 }
 
-.event-row.error {
+.app-shell .event-row.error {
   color: var(--red);
 }
 
-.event-row strong,
-.event-row span {
+.app-shell .event-row strong,
+.app-shell .event-row span {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -58,13 +60,13 @@
   white-space: nowrap;
 }
 
-.event-row strong {
+.app-shell .event-row strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
-.event-row span,
-.event-row time {
+.app-shell .event-row span,
+.app-shell .event-row time {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }

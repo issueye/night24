@@ -31,7 +31,7 @@
   height: 30px;
   place-items: center;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .brand-mark img {
@@ -46,12 +46,12 @@
 }
 
 .brand strong {
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 
 .brand span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .status-pill {
@@ -65,20 +65,20 @@
   color: var(--muted);
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
 }
 
 .status-pill.connected {
   color: var(--green);
   background: var(--green-soft);
-  border-color: #bee8cb;
+  border-color: var(--success-border);
 }
 
 .status-pill.failed {
   color: var(--red);
   background: var(--red-soft);
-  border-color: #ffd1d1;
+  border-color: var(--danger-border);
 }
 
 .topbar-actions {
@@ -97,15 +97,15 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+  transition: background var(--transition), border-color var(--transition), color var(--transition), box-shadow var(--transition);
 }
 
 .toolbar-button {
   height: 30px;
   padding: 0 10px;
-  color: #ffffff;
+  color: var(--on-blue);
   background: var(--blue);
 }
 
@@ -140,17 +140,17 @@
 .mini-button:hover {
   color: var(--blue);
   background: var(--blue-soft);
-  border-color: #c9d8ff;
+  border-color: var(--ring-border);
 }
 
 .icon-button.compact {
   width: 28px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
 }
 
 .mini-button {
   height: 26px;
   padding: 0 9px;
-  font-size: 12px;
+  font-size: var(--fs-base);
 }

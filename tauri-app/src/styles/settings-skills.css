@@ -30,7 +30,7 @@
   padding: 0 8px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .skill-filter input,
@@ -47,7 +47,7 @@
   padding: 0 8px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .skill-row.success strong {
@@ -84,16 +84,16 @@
   padding: 8px 10px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .skill-summary span {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .skill-summary strong {
-  font-size: 16px;
+  font-size: var(--fs-xl);
 }
 
 .skill-inspector {
@@ -130,13 +130,13 @@
 }
 
 .skill-inspector-head strong {
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 .skill-inspector-head span {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .skill-head-actions {
@@ -153,20 +153,20 @@
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-base);
 }
 
 .skill-status.success {
   color: var(--green);
   background: var(--green-soft);
-  border-color: #bbf7d0;
+  border-color: var(--success-border);
 }
 
 .skill-status.error {
   color: var(--red);
   background: var(--red-soft);
-  border-color: #fecaca;
+  border-color: var(--danger-border);
 }
 
 .skill-status.muted {
@@ -193,7 +193,7 @@
 
 .skill-meta-grid span {
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--fs-sm);
 }
 
 .skill-meta-grid input {
@@ -203,7 +203,7 @@
   color: var(--muted);
   background: var(--surface-soft);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   outline: none;
 }
 
@@ -217,9 +217,9 @@
   padding: 4px 7px;
   color: var(--red);
   background: var(--red-soft);
-  border: 1px solid #fecaca;
-  border-radius: 999px;
-  font-size: 11px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
 }
 
 .skill-body-head {
@@ -228,7 +228,7 @@
   justify-content: space-between;
   gap: 10px;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .skill-body-head span {
@@ -244,11 +244,11 @@
   padding: 12px;
   overflow: auto;
   color: var(--text);
-  background: #fbfcff;
+  background: var(--code-bg);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
   line-height: 1.55;
   white-space: pre-wrap;
 }

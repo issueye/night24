@@ -12,10 +12,10 @@
   min-width: 420px;
   min-height: 300px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--overlay-bg);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 22px 60px rgba(23, 32, 51, 0.2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   backdrop-filter: blur(10px);
 }
 
@@ -46,7 +46,7 @@
 
 .float-head strong {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 
 .tabs {
@@ -110,7 +110,7 @@
 .context-section-head strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--fs-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -145,7 +145,7 @@
 .file-head span {
   margin-left: auto;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .file-preview pre {
@@ -153,20 +153,15 @@
   margin: 0;
   padding: 14px;
   overflow: auto;
-  color: #283244;
-  background: #fbfcff;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 12px;
+  color: var(--mono-text);
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
   line-height: 1.55;
 }
 
-.diff-panel {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  gap: 10px;
-  min-height: 0;
-  overflow: hidden;
-}
+/* .diff-panel 的定义统一由 diff.css 提供(5 行 grid),此处不再重复,
+   避免与 diff.css 的同名规则冲突。 */
 
 .diff-summary {
   display: grid;
@@ -177,7 +172,7 @@
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .diff-summary strong {
@@ -189,7 +184,7 @@
 
 .diff-summary span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .status-files {
@@ -205,15 +200,15 @@
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
-  background: #fbfcff;
+  background: var(--code-bg);
   border: 1px solid var(--line);
-  border-radius: 7px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-base);
 }
 
 .status-file code {
   color: var(--muted);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .status-file span {
@@ -228,12 +223,12 @@
   margin: 0;
   padding: 12px;
   overflow: auto;
-  color: #263142;
-  background: #fbfcff;
+  color: var(--mono-text);
+  background: var(--code-bg);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   line-height: 1.5;
   white-space: pre;
 }

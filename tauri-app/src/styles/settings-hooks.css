@@ -19,7 +19,7 @@
 .hook-list-empty {
   padding: 10px 8px;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .hook-editor {
@@ -43,7 +43,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--fs-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

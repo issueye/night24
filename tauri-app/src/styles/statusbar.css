@@ -8,7 +8,7 @@
   color: var(--muted);
   background: var(--surface);
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--fs-base);
 }
 
 .statusbar-state,
@@ -91,10 +91,4 @@
 
 .spin {
   animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
