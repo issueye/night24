@@ -1,5 +1,5 @@
 import { CheckCircle2, Copy, FileText, RefreshCw, Search, Sparkles, XCircle } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeError } from '../../utils/events.js';
 import { classNames } from '../../utils/format.js';
 import { SettingsListDetail } from './SettingsListDetail.jsx';
@@ -27,6 +27,7 @@ function invocationText(skill) {
 
 export function SkillSettings({ apiJson, workspace }) {
   const [skills, setSkills] = useState([]);
+  const [skillListVersion, setSkillListVersion] = useState(0);
   const [warnings, setWarnings] = useState([]);
   const [selectedName, setSelectedName] = useState('');
   const [loadedSkill, setLoadedSkill] = useState(null);
@@ -36,6 +37,8 @@ export function SkillSettings({ apiJson, workspace }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const skillListRequestRef = useRef(0);
+  const skillDetailRequestRef = useRef(0);
 
   const filteredSkills = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -60,50 +63,65 @@ export function SkillSettings({ apiJson, workspace }) {
   }, [skills]);
 
   async function loadSkills() {
+    const requestId = skillListRequestRef.current + 1;
+    skillListRequestRef.current = requestId;
+    skillDetailRequestRef.current += 1;
     if (!workspace) {
       setSkills([]);
       setWarnings([]);
       setSelectedName('');
       setLoadedSkill(null);
+      setDetailLoading(false);
       setError('');
       return;
     }
     setLoading(true);
+    setLoadedSkill(null);
+    setDetailLoading(false);
     setError('');
     setCopied('');
     try {
       const data = await apiJson('/workspace/skills');
+      if (skillListRequestRef.current !== requestId) return;
       const registry = data?.registry || {};
       const nextSkills = Array.isArray(registry.skills) ? registry.skills : [];
       setSkills(nextSkills);
       setWarnings(Array.isArray(registry.warnings) ? registry.warnings : []);
       setSelectedName((current) => nextSkills.find((skill) => skill.name === current)?.name || nextSkills[0]?.name || '');
+      setSkillListVersion((version) => version + 1);
     } catch (err) {
+      if (skillListRequestRef.current !== requestId) return;
       setError(normalizeError(err));
       setSkills([]);
       setWarnings([]);
       setSelectedName('');
       setLoadedSkill(null);
     } finally {
-      setLoading(false);
+      if (skillListRequestRef.current === requestId) setLoading(false);
     }
   }
 
   async function loadSkillDetail(skill) {
+    const requestId = skillDetailRequestRef.current + 1;
+    skillDetailRequestRef.current = requestId;
     if (!workspace || !skill?.name || !skill.enabled || !skill.eligible) {
       setLoadedSkill(null);
+      setDetailLoading(false);
       return;
     }
+    setLoadedSkill(null);
     setDetailLoading(true);
     setError('');
     try {
       const data = await apiJson(`/workspace/skills/${encodeURIComponent(skill.name)}`);
+      if (skillDetailRequestRef.current !== requestId) return;
       setLoadedSkill(data?.skill || null);
     } catch (err) {
+      if (skillDetailRequestRef.current !== requestId) return;
       setLoadedSkill(null);
       setError(normalizeError(err));
     } finally {
-      setDetailLoading(false);
+      if (skillDetailRequestRef.current === requestId) setDetailLoading(false);
     }
   }
 
@@ -115,7 +133,7 @@ export function SkillSettings({ apiJson, workspace }) {
   useEffect(() => {
     loadSkillDetail(selectedSkill);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSkill?.name, selectedSkill?.eligible, selectedSkill?.enabled, workspace?.root_path]);
+  }, [selectedSkill?.name, selectedSkill?.eligible, selectedSkill?.enabled, skillListVersion, workspace?.root_path]);
 
   async function copyInvocation() {
     const text = invocationText(selectedSkill);

@@ -13,7 +13,7 @@
 - `tauri-app/src/App.jsx`：已通过 hook / utility 拆分降至约 419 行，当前主要保留发送任务、顶层页面布局和 hook 接线。
 - `tauri-app/src/styles/workspace.css`：仅保留工作区基础 grid；左侧栏、时间线、header、message、panel、banner 和空态样式已拆至专用 CSS 文件。
 - `tauri-app/src/styles/desktop-shell.css`：已清空并移除；桌面壳变量、chrome、workspace、sidebar、status、conversation、overlay、event 和 responsive 规则已迁移到对应专用 CSS 文件。
-- `tauri-app/src/components/settings/SkillSettings.jsx` 与 `HookSettings.jsx`：已抽共享列表详情壳；样式已按 provider / hook-skill 分离，单组件仍保留各自请求、状态和表单细节。
+- `tauri-app/src/components/settings/SkillSettings.jsx` 与 `HookSettings.jsx`：已抽共享列表详情壳；样式已按 provider / hook-skill 分离；列表/详情加载和保存流程已补请求代际保护，避免旧请求覆盖当前界面。
 
 ### Server 与 Agent Core
 
@@ -68,6 +68,7 @@
 
 - 已完成：将 `SubAgentPanel.jsx` 拆为 `SubAgentStats`、`SubAgentList`、`SubAgentDetail`。
 - 已完成：从 `HookSettings.jsx` 和 `SkillSettings.jsx` 抽通用列表详情壳组件 `SettingsListDetail`。
+- 已完成：为 `SkillSettings.jsx` 的技能列表/详情加载和 `HookSettings.jsx` 的钩子加载/保存补请求代际保护，快速刷新或切换工作区时旧请求不再回写当前状态。
 - 已完成：新增 `docs/desktop-css-visual-checklist.md`，建立 CSS 功能迁移前的全局布局、聊天流、设置弹窗、右侧面板和子代理面板视觉检查基线。
 - 已完成：抽出 `tauri-app/src/styles/base.css`，承接 `:root` 设计变量、全局 box sizing、页面根节点尺寸和基础表单字体 reset。
 - 已完成：抽出 `tauri-app/src/styles/layout.css`，承接应用外框、顶部栏、品牌区、状态 pill 和共享按钮基础样式。

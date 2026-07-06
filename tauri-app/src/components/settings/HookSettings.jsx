@@ -1,5 +1,5 @@
 import { Plus, RefreshCw, Save, Trash2, Workflow } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeError } from '../../utils/events.js';
 import { classNames } from '../../utils/format.js';
 import { HOOK_EVENTS, createHook, hooksToConfig, normalizeHook } from '../../utils/hooks.js';
@@ -13,6 +13,8 @@ export function HookSettings({ apiJson, workspace }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedAt, setSavedAt] = useState('');
+  const hookLoadRequestRef = useRef(0);
+  const hookSaveRequestRef = useRef(0);
 
   const activeHook = useMemo(
     () => hooks.find((hook) => hook.id === activeId) || hooks[0] || null,
@@ -20,26 +22,34 @@ export function HookSettings({ apiJson, workspace }) {
   );
 
   async function loadHooks() {
+    const requestId = hookLoadRequestRef.current + 1;
+    hookLoadRequestRef.current = requestId;
+    hookSaveRequestRef.current += 1;
     if (!workspace) {
       setHooks([]);
       setActiveId(null);
       setConfigPath('');
+      setLoading(false);
+      setSaving(false);
       setError('');
       return;
     }
     setLoading(true);
+    setSaving(false);
     setError('');
     setSavedAt('');
     try {
       const data = await apiJson('/workspace/hooks');
+      if (hookLoadRequestRef.current !== requestId) return;
       const nextHooks = (data?.config?.hooks || []).map(normalizeHook);
       setHooks(nextHooks);
       setActiveId((current) => nextHooks.find((hook) => hook.id === current)?.id || nextHooks[0]?.id || null);
       setConfigPath(data?.path || '');
     } catch (err) {
+      if (hookLoadRequestRef.current !== requestId) return;
       setError(normalizeError(err));
     } finally {
-      setLoading(false);
+      if (hookLoadRequestRef.current === requestId) setLoading(false);
     }
   }
 
@@ -70,6 +80,9 @@ export function HookSettings({ apiJson, workspace }) {
   }
 
   async function saveHooks() {
+    if (!workspace) return;
+    const requestId = hookSaveRequestRef.current + 1;
+    hookSaveRequestRef.current = requestId;
     setSaving(true);
     setError('');
     try {
@@ -77,15 +90,17 @@ export function HookSettings({ apiJson, workspace }) {
         method: 'PUT',
         body: JSON.stringify(hooksToConfig(hooks)),
       });
+      if (hookSaveRequestRef.current !== requestId) return;
       const nextHooks = (data?.config?.hooks || []).map(normalizeHook);
       setHooks(nextHooks);
       setActiveId((current) => nextHooks.find((hook) => hook.id === current)?.id || nextHooks[0]?.id || null);
       setConfigPath(data?.path || '');
       setSavedAt(new Date().toLocaleTimeString());
     } catch (err) {
+      if (hookSaveRequestRef.current !== requestId) return;
       setError(normalizeError(err));
     } finally {
-      setSaving(false);
+      if (hookSaveRequestRef.current === requestId) setSaving(false);
     }
   }
 
