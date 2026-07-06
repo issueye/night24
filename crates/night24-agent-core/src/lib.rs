@@ -394,31 +394,12 @@ impl AgentCore {
             Err(err) => return vec![self.error_response(id, err)],
         };
 
-        let permission = self
-            .permissions
-            .lock()
-            .ok()
-            .and_then(|mut permissions| permissions.remove(&params.permission_id));
-
-        let Some(permission) = permission else {
-            return vec![self.error_response(
-                id,
-                JsonRpcError::new(
-                    night24_protocol::PERMISSION_REQUEST_NOT_FOUND,
-                    "permission request not found",
-                ),
-            )];
-        };
-
-        if permission.run_id != params.run_id {
-            return vec![self.error_response(
-                id,
-                JsonRpcError::new(
-                    night24_protocol::PERMISSION_REQUEST_NOT_FOUND,
-                    "permission request does not belong to run",
-                ),
-            )];
-        }
+        let permission =
+            match take_permission_for_run(&self.permissions, &params.permission_id, &params.run_id)
+            {
+                Ok(permission) => permission,
+                Err(err) => return vec![self.error_response(id, err)],
+            };
 
         let _ = permission.sender.send(params.decision);
         vec![self.success_response(id, AcceptedResult { accepted: true })]
@@ -848,6 +829,31 @@ async fn run_provider_turn(
             .collect(),
         has_tool_requests,
     })
+}
+
+fn take_permission_for_run(
+    permissions: &Arc<Mutex<HashMap<String, PermissionHandle>>>,
+    permission_id: &str,
+    run_id: &str,
+) -> Result<PermissionHandle, JsonRpcError> {
+    let mut permissions = permissions
+        .lock()
+        .map_err(|_| JsonRpcError::internal_error("permission state lock poisoned"))?;
+    let Some(permission) = permissions.get(permission_id) else {
+        return Err(JsonRpcError::new(
+            night24_protocol::PERMISSION_REQUEST_NOT_FOUND,
+            "permission request not found",
+        ));
+    };
+    if permission.run_id != run_id {
+        return Err(JsonRpcError::new(
+            night24_protocol::PERMISSION_REQUEST_NOT_FOUND,
+            "permission request does not belong to run",
+        ));
+    }
+    permissions
+        .remove(permission_id)
+        .ok_or_else(|| JsonRpcError::internal_error("permission request disappeared"))
 }
 
 fn emit_provider_message(

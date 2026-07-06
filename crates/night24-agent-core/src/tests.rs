@@ -688,6 +688,90 @@ async fn strict_tool_call_waits_for_permission_and_continues_after_approve() {
 }
 
 #[tokio::test]
+async fn wrong_run_permission_resolution_does_not_consume_request() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut core = AgentCore::with_output(tx);
+    initialize_core(&mut core).await;
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-permission-owned",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:datetime:" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 1,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "strict"
+            }
+        }
+    });
+
+    let accepted = core.handle_line(&request.to_string()).await;
+    let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+    assert_eq!(accepted["result"]["accepted"], true);
+
+    let permission = next_event_of_type(&mut rx, "permission_required").await;
+    let permission_id = permission["params"]["payload"]["permission_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let wrong_resolve = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-permission-wrong-run",
+        "method": "permission.resolve",
+        "params": {
+            "run_id": "run-other",
+            "permission_id": permission_id.clone(),
+            "decision": "approve"
+        }
+    });
+    let wrong_resolved = core.handle_line(&wrong_resolve.to_string()).await;
+    let wrong_resolved: serde_json::Value = serde_json::from_str(&wrong_resolved[0]).unwrap();
+    assert_eq!(
+        wrong_resolved["error"]["message"],
+        "permission request does not belong to run"
+    );
+
+    let resolve = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-permission",
+        "method": "permission.resolve",
+        "params": {
+            "run_id": "run-permission-owned",
+            "permission_id": permission_id,
+            "decision": "approve"
+        }
+    });
+    let resolved = core.handle_line(&resolve.to_string()).await;
+    let resolved: serde_json::Value = serde_json::from_str(&resolved[0]).unwrap();
+    assert_eq!(resolved["result"]["accepted"], true);
+
+    let tool_started = next_event_of_type(&mut rx, "tool_started").await;
+    assert_eq!(
+        tool_started["params"]["payload"]["tool_name"],
+        "developer__datetime"
+    );
+    let finish = next_event_of_type(&mut rx, "finish").await;
+    assert_eq!(finish["params"]["payload"]["status"], "completed");
+}
+
+#[tokio::test]
 async fn denied_tool_permission_fails_without_starting_tool() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut core = AgentCore::with_output(tx);
