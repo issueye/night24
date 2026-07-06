@@ -11,7 +11,7 @@
 ### 桌面端
 
 - `tauri-app/src/App.jsx`：已通过 hook / utility 拆分降至约 419 行，当前主要保留发送任务、顶层页面布局和 hook 接线。
-- `tauri-app/src/styles/workspace.css`：承接工作区基础布局；左侧栏和时间线样式已拆至 `sidebar.css` / `timeline.css`，后续继续审计剩余 workspace 布局块。
+- `tauri-app/src/styles/workspace.css`：仅保留工作区基础 grid；左侧栏、时间线、header、message、panel、banner 和空态样式已拆至专用 CSS 文件。
 - `tauri-app/src/styles/desktop-shell.css`：已清空并移除；桌面壳变量、chrome、workspace、sidebar、status、conversation、overlay、event 和 responsive 规则已迁移到对应专用 CSS 文件。
 - `tauri-app/src/components/settings/SkillSettings.jsx` 与 `HookSettings.jsx`：已抽共享列表详情壳；样式已按 provider / hook-skill 分离，单组件仍保留各自请求、状态和表单细节。
 
@@ -64,7 +64,7 @@
 
 ### Phase 2：设置与右侧面板组件拆分
 
-状态：部分完成。组件拆分已完成；CSS 功能迁移已开始；迁移前最小视觉检查清单已建立。
+状态：当前批次已完成。组件拆分、CSS 功能迁移、视觉检查清单和 desktop shell 收尾审计均已完成。
 
 - 已完成：将 `SubAgentPanel.jsx` 拆为 `SubAgentStats`、`SubAgentList`、`SubAgentDetail`。
 - 已完成：从 `HookSettings.jsx` 和 `SkillSettings.jsx` 抽通用列表详情壳组件 `SettingsListDetail`。
@@ -161,11 +161,11 @@
 - 已完成：补充 skill 工具严格权限拒绝回归测试，覆盖拒绝后不触发 `tool_started`、不读取技能正文、finish tool_response 记录拒绝原因。
 - 已完成：补充子代理取消工具回归测试，覆盖 `developer__subagent_cancel` 事件顺序、池状态变为 cancelled 和 finish payload。
 - 已完成：`subagents.rs` 抽出 `count_status`，收敛子代理池 snapshot 状态统计逻辑，并补充 sync alias 解析与 queued 不计入终态统计的边界测试。
-- 下一步：继续 GTS stdlib helper 收敛，或建立桌面端 CSS 迁移前的最小视觉检查清单。
+- 下一步：继续围绕子代理/Skill/Hook 可观测性和服务端稳定性做小步补强；避免重新扩大 GTS 深拆范围。
 
 ### Phase 5：GTS 引擎模块化
 
-- 状态：已开始。
+- 状态：本轮已收尾。后续只处理明确缺陷、验证失败或阻塞 Hook/Skill/子代理链路的问题。
 - 已完成：从 `evaluator/builtins.rs` 拆出 `builtins/json.rs`，承接 `JSON.stringify` / `JSON.parse` 与 JSON helper。
 - 已完成：从 `evaluator/builtins.rs` 拆出 `builtins/date.rs`，承接 Date 实例方法实现。
 - 已完成：从 `evaluator/builtins.rs` 拆出 `builtins/primitive.rs`，承接 Number / Boolean 全局对象与 Number 方法实现。
@@ -345,7 +345,7 @@
 
 ### Phase 6：Hook/Script Engine 稳定化
 
-- 状态：已开始。
+- 状态：当前批次已完成。后续保留阻塞 I/O 取消、worker pool 等较大设计项，单独规划后再实施。
 - 已完成：结构化 hook 输出异常改为显式 stderr warning，避免未知 stream、非字符串 text 等情况静默转 stdout。
 - 已完成：补充结构化输出异常语义测试。
 - 已完成：补充 top-level 先执行、再调用 `execute(args)` 的生命周期测试。
@@ -356,8 +356,8 @@
 - 已完成：server hooks API 抽出 `SUPPORTED_HOOK_ENGINES` / `is_supported_hook_engine`，集中维护 hook engine 支持列表，并补充省略、空白、裁剪后支持值和不支持 engine 的校验测试。
 - 已完成：GTS hook worker 改为 source/file 与 `execute(args)` 共用同一个 hook deadline，避免分阶段重复获得完整 timeout 预算。
 - 已完成：补充 GTS hook deadline 回归测试，覆盖前一个 hook 超时后单 worker 能继续执行后续 hook。
-- 明确 hook top-level 执行与 `execute(args)` 的生命周期语义。
-- 为阻塞 stdlib 增加取消 token；评估 per-run worker 或 worker pool。
+- 已完成：明确 hook top-level 执行与 `execute(args)` 的生命周期语义。
+- 后续建议：为阻塞 stdlib 增加取消 token；评估 per-run worker 或 worker pool，作为单独设计项处理。
 
 ## 高风险区域
 
