@@ -1,10 +1,11 @@
-import { Palette, Server, Sparkles, Workflow, X } from 'lucide-react';
+import { Palette, Server, Sparkles, Workflow } from 'lucide-react';
 import { useState } from 'react';
 import { classNames } from '../utils/format.js';
 import { BaseSettings } from './settings/BaseSettings.jsx';
 import { HookSettings } from './settings/HookSettings.jsx';
 import { ProviderSettings } from './settings/ProviderSettings.jsx';
 import { SkillSettings } from './settings/SkillSettings.jsx';
+import { Button, Modal } from './ui/index.js';
 
 export function SettingsStrip({
   open,
@@ -42,34 +43,22 @@ export function SettingsStrip({
   if (!open) return null;
 
   return (
-    <div className="settings-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="settings-modal" role="dialog" aria-modal="true" aria-label="设置" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="settings-modal-head">
-          <div>
-            <strong>设置</strong>
-            <span>供应商与界面偏好</span>
-          </div>
-          <button className="icon-button compact" onClick={onClose} title="关闭设置" type="button"><X size={14} /></button>
-        </header>
-
-        <div className="settings-modal-body">
+    <Modal
+      ariaLabel="设置"
+      bodyClassName="settings-modal-body"
+      className="settings-modal"
+      headClassName="settings-modal-head"
+      onBackdropMouseDown={onClose}
+      onClose={onClose}
+      open={open}
+      subtitle="供应商与界面偏好"
+      title="设置"
+    >
           <nav className="settings-nav" aria-label="设置分类">
-            <button className={classNames(tab === 'provider' && 'active')} onClick={() => setTab('provider')} type="button">
-              <Server size={15} />
-              <span>供应商</span>
-            </button>
-            <button className={classNames(tab === 'base' && 'active')} onClick={() => setTab('base')} type="button">
-              <Palette size={15} />
-              <span>基本设置</span>
-            </button>
-            <button className={classNames(tab === 'hooks' && 'active')} onClick={() => setTab('hooks')} type="button">
-              <Workflow size={15} />
-              <span>钩子</span>
-            </button>
-            <button className={classNames(tab === 'skills' && 'active')} onClick={() => setTab('skills')} type="button">
-              <Sparkles size={15} />
-              <span>技能</span>
-            </button>
+            <Button className={classNames(tab === 'provider' && 'active')} icon={<Server size={15} />} onClick={() => setTab('provider')} variant="ghost">供应商</Button>
+            <Button className={classNames(tab === 'base' && 'active')} icon={<Palette size={15} />} onClick={() => setTab('base')} variant="ghost">基本设置</Button>
+            <Button className={classNames(tab === 'hooks' && 'active')} icon={<Workflow size={15} />} onClick={() => setTab('hooks')} variant="ghost">钩子</Button>
+            <Button className={classNames(tab === 'skills' && 'active')} icon={<Sparkles size={15} />} onClick={() => setTab('skills')} variant="ghost">技能</Button>
           </nav>
 
           <div className="settings-content">
@@ -123,8 +112,6 @@ export function SettingsStrip({
               />
             )}
           </div>
-        </div>
-      </section>
-    </div>
+    </Modal>
   );
 }

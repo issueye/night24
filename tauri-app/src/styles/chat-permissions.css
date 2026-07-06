@@ -2,7 +2,7 @@
   max-width: min(720px, 92%);
 }
 
-.permission-message .avatar {
+.permission-message .ui-avatar {
   color: var(--amber);
   background: var(--amber-soft);
 }
@@ -62,20 +62,4 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.permission-chat-actions button {
-  height: 30px;
-  padding: 0 12px;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-}
-
-.permission-chat-actions button:last-child {
-  color: var(--on-blue);
-  background: var(--blue);
-  border-color: var(--blue);
 }

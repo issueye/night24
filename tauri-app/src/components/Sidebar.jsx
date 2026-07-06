@@ -1,20 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  CalendarClock,
   ChevronDown,
   ChevronRight,
   Folder,
   FolderOpen,
   Loader2,
-  MessageSquare,
   MessageSquarePlus,
-  Plug,
-  Search,
   Settings2,
   Trash2,
 } from 'lucide-react';
 import { classNames, formatRelativeShort } from '../utils/format.js';
 import { sameWorkspacePath } from '../utils/settings.js';
+import { Button, IconButton } from './ui/index.js';
 
 export function Sidebar({
   workspace,
@@ -116,16 +113,13 @@ export function Sidebar({
   return (
     <aside className="left-panel menu-sidebar">
       <nav className="primary-nav" aria-label="主导航">
-        <button className="nav-row" onClick={onCreateSession} type="button"><MessageSquarePlus size={15} />新对话</button>
-        <button className="nav-row muted" type="button"><Search size={15} />搜索</button>
-        <button className="nav-row muted" type="button"><CalendarClock size={15} />已安排</button>
-        <button className="nav-row muted" type="button"><Plug size={15} />插件</button>
+        <Button className="nav-row" icon={<MessageSquarePlus size={15} />} onClick={onCreateSession} variant="ghost">新对话</Button>
       </nav>
 
       <section className="menu-section project-block">
         <div className="menu-section-head">
           <span>项目</span>
-          <button className="mini-button" onClick={() => onOpenWorkspace()} type="button">打开</button>
+          <Button className="mini-button" onClick={() => onOpenWorkspace()} size="sm" variant="soft">打开</Button>
         </div>
         {projects.length === 0 ? (
           <div className="empty-block">尚未打开项目</div>
@@ -139,16 +133,16 @@ export function Sidebar({
               const ExpandIcon = isExpanded ? ChevronDown : ChevronRight;
               return (
                 <div className={classNames('project-tree-group', isExpanded && 'expanded')} key={item.root_path}>
-                  <button
+                  <Button
                     className={classNames('project-row', isCurrentProject && 'active')}
                     onClick={() => openProject(item, isCurrentProject)}
                     title={item.root_path}
-                    type="button"
+                    variant="ghost"
                   >
                     <ExpandIcon className="project-expand-icon" size={13} />
                     <ProjectIcon size={14} />
                     <span>{item.name || item.root_path}</span>
-                  </button>
+                  </Button>
                   {isExpanded && (
                     <div className="project-session-list">
                       {projectSessions.length === 0 ? (
@@ -166,11 +160,11 @@ export function Sidebar({
                             )}
                             key={session.id}
                           >
-                            <button
+                            <Button
                               className="project-session-main"
                               onClick={() => selectProjectSession(item, isCurrentProject, session.id)}
                               title={session.name || session.id}
-                              type="button"
+                              variant="ghost"
                             >
                               <span>{session.name || session.id}</span>
                               {isSessionRunning ? (
@@ -178,15 +172,15 @@ export function Sidebar({
                               ) : (
                                 <small>{formatRelativeShort(session.updated_at)}</small>
                               )}
-                            </button>
-                            <button
+                            </Button>
+                            <IconButton
                               className="session-delete"
                               onClick={(event) => onDeleteSession(session.id, event)}
-                              title="删除会话"
-                              type="button"
+                              label="删除会话"
+                              size="sm"
                             >
                               <Trash2 size={13} />
-                            </button>
+                            </IconButton>
                           </div>
                         );
                       })}
@@ -199,18 +193,10 @@ export function Sidebar({
         )}
       </section>
 
-      <section className="menu-section sessions-block compact">
-        <div className="sidebar-fold">
-          <span><MessageSquare size={14} />对话</span>
-          <ChevronRight size={14} />
-        </div>
-      </section>
-
       <footer className="menu-footer">
-        <button className={classNames('nav-row settings-row', settingsOpen && 'active')} onClick={onToggleSettings} type="button">
-          <Settings2 size={15} />
+        <Button className={classNames('nav-row settings-row', settingsOpen && 'active')} icon={<Settings2 size={15} />} onClick={onToggleSettings} variant="ghost">
           设置
-        </button>
+        </Button>
       </footer>
     </aside>
   );

@@ -1,10 +1,11 @@
 import { ShieldAlert } from 'lucide-react';
 import { safeText } from '../utils/format.js';
+import { Avatar, Button } from './ui/index.js';
 
 export function PermissionRequestCard({ permission, onResolve }) {
   return (
     <article className="message assistant permission-message">
-      <div className="avatar"><ShieldAlert size={15} /></div>
+      <Avatar tone="warning"><ShieldAlert size={15} /></Avatar>
       <div className="message-body">
         <span>Permission</span>
         <section className="permission-chat-card">
@@ -15,8 +16,8 @@ export function PermissionRequestCard({ permission, onResolve }) {
           <p>{permission.summary}</p>
           <pre>{safeText(permission.arguments)}</pre>
           <div className="permission-chat-actions">
-            <button onClick={() => onResolve(permission, 'deny')} type="button">拒绝</button>
-            <button onClick={() => onResolve(permission, 'approve')} type="button">批准</button>
+            <Button onClick={() => onResolve(permission, 'deny')} variant="soft">拒绝</Button>
+            <Button onClick={() => onResolve(permission, 'approve')} tone="primary">批准</Button>
           </div>
         </section>
       </div>

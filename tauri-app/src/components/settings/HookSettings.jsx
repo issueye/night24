@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeError } from '../../utils/events.js';
 import { classNames } from '../../utils/format.js';
 import { HOOK_EVENTS, createHook, hooksToConfig, normalizeHook } from '../../utils/hooks.js';
+import { Button, IconButton, Select, Switch, TextField } from '../ui/index.js';
 import { SettingsListDetail } from './SettingsListDetail.jsx';
 
 export function HookSettings({ apiJson, workspace }) {
@@ -124,27 +125,27 @@ export function HookSettings({ apiJson, workspace }) {
       listTitle="钩子"
       listActions={(
         <div className="hook-list-actions">
-          <button className="icon-button compact" disabled={loading} onClick={loadHooks} title="重新加载" type="button">
+          <IconButton className="icon-button compact" disabled={loading} label="重新加载" onClick={loadHooks} size="sm">
             <RefreshCw size={14} />
-          </button>
-          <button className="icon-button compact" onClick={addHook} title="新增钩子" type="button">
+          </IconButton>
+          <IconButton className="icon-button compact" label="新增钩子" onClick={addHook} size="sm">
             <Plus size={14} />
-          </button>
+          </IconButton>
         </div>
       )}
       listChildren={(
         <>
           {hooks.length === 0 && <div className="hook-list-empty">暂无钩子</div>}
           {hooks.map((hook) => (
-            <button
+            <Button
               className={classNames('provider-profile-row', hook.id === activeHook?.id && 'active', !hook.enabled && 'muted')}
               key={hook.id}
               onClick={() => setActiveId(hook.id)}
-              type="button"
+              variant="ghost"
             >
               <strong>{hook.name || hook.event}</strong>
               <span>{hook.event} · {hook.enabled ? '启用' : '停用'}</span>
-            </button>
+            </Button>
           ))}
         </>
       )}
@@ -153,14 +154,12 @@ export function HookSettings({ apiJson, workspace }) {
         <div className="hook-toolbar">
           <span>{loading ? '加载中' : configPath || '.night24/hooks.json'}</span>
           <div>
-            <button className="danger-outline-button compact-action" disabled={!activeHook} onClick={deleteHook} type="button">
-              <Trash2 size={14} />
+            <Button className="danger-outline-button compact-action" disabled={!activeHook} icon={<Trash2 size={14} />} onClick={deleteHook} size="sm" tone="danger" variant="soft">
               删除
-            </button>
-            <button className="toolbar-button compact-action" disabled={saving || loading} onClick={saveHooks} type="button">
-              <Save size={14} />
+            </Button>
+            <Button className="toolbar-button compact-action" disabled={saving || loading} icon={<Save size={14} />} onClick={saveHooks} size="sm">
               {saving ? '保存中' : '保存'}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -169,77 +168,43 @@ export function HookSettings({ apiJson, workspace }) {
 
         {activeHook ? (
           <div className="settings-form hook-form">
-            <label>
-              <span>名称</span>
-              <input value={activeHook.name} onChange={(event) => updateActive({ name: event.target.value })} />
-            </label>
-            <label>
-              <span>事件</span>
-              <select value={activeHook.event} onChange={(event) => updateActive({ event: event.target.value })}>
-                {HOOK_EVENTS.map((event) => (
-                  <option key={event} value={event}>{event}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>脚本路径</span>
-              <input
-                value={activeHook.script}
-                onChange={(event) => updateActive({ script: event.target.value })}
-                placeholder="hooks/before_tool.gs"
-              />
-            </label>
-            <label>
-              <span>超时 ms</span>
-              <input
-                inputMode="numeric"
-                value={activeHook.timeout_ms}
-                onChange={(event) => updateActive({ timeout_ms: event.target.value })}
-              />
-            </label>
-            <label>
-              <span>指令限制</span>
-              <input
-                inputMode="numeric"
-                value={activeHook.instruction_limit}
-                onChange={(event) => updateActive({ instruction_limit: event.target.value })}
-              />
-            </label>
-            <label className="hook-toggle">
+            <TextField label="名称" onChange={(event) => updateActive({ name: event.target.value })} value={activeHook.name} />
+            <Select
+              label="事件"
+              onChange={(value) => updateActive({ event: value })}
+              options={HOOK_EVENTS.map((event) => ({ label: event, value: event }))}
+              value={activeHook.event}
+            />
+            <TextField label="脚本路径" onChange={(event) => updateActive({ script: event.target.value })} placeholder="hooks/before_tool.gs" value={activeHook.script} />
+            <TextField inputMode="numeric" label="超时 ms" onChange={(event) => updateActive({ timeout_ms: event.target.value })} value={activeHook.timeout_ms} />
+            <TextField inputMode="numeric" label="指令限制" onChange={(event) => updateActive({ instruction_limit: event.target.value })} value={activeHook.instruction_limit} />
+            <div className="hook-toggle">
               <span>启用</span>
-              <input
-                checked={Boolean(activeHook.enabled)}
-                onChange={(event) => updateActive({ enabled: event.target.checked })}
-                type="checkbox"
-              />
-            </label>
-            <label className="hook-toggle">
+              <Switch checked={Boolean(activeHook.enabled)} onChange={(checked) => updateActive({ enabled: checked })} />
+            </div>
+            <div className="hook-toggle">
               <span>模块白名单</span>
-              <input
-                checked={Boolean(activeHook.allowed_modules_enabled)}
-                onChange={(event) => updateActive({ allowed_modules_enabled: event.target.checked })}
-                type="checkbox"
-              />
-            </label>
-            <label className="hook-code-field">
-              <span>允许模块</span>
-              <textarea
-                disabled={!activeHook.allowed_modules_enabled}
-                spellCheck="false"
-                value={activeHook.allowed_modules_text}
-                onChange={(event) => updateActive({ allowed_modules_text: event.target.value })}
-                placeholder={'fs\n@std/exec'}
-              />
-            </label>
-            <label className="hook-code-field">
-              <span>内联脚本</span>
-              <textarea
-                spellCheck="false"
-                value={activeHook.inline_script}
-                onChange={(event) => updateActive({ inline_script: event.target.value })}
-                placeholder={'function execute(args) {\n  return { outputs: [{ stream: "stdout", text: args.event }] };\n}'}
-              />
-            </label>
+              <Switch checked={Boolean(activeHook.allowed_modules_enabled)} onChange={(checked) => updateActive({ allowed_modules_enabled: checked })} />
+            </div>
+            <TextField
+              as="textarea"
+              className="hook-code-field"
+              disabled={!activeHook.allowed_modules_enabled}
+              label="允许模块"
+              onChange={(event) => updateActive({ allowed_modules_text: event.target.value })}
+              placeholder={'fs\n@std/exec'}
+              spellCheck="false"
+              value={activeHook.allowed_modules_text}
+            />
+            <TextField
+              as="textarea"
+              className="hook-code-field"
+              label="内联脚本"
+              onChange={(event) => updateActive({ inline_script: event.target.value })}
+              placeholder={'function execute(args) {\n  return { outputs: [{ stream: "stdout", text: args.event }] };\n}'}
+              spellCheck="false"
+              value={activeHook.inline_script}
+            />
           </div>
         ) : (
           <div className="hook-empty inline">

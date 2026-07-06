@@ -1,10 +1,5 @@
-import { Loader2, Minimize2, Play, Square } from 'lucide-react';
-
-const ACCESS_LABELS = {
-  strict: '确认访问',
-  permissive: '宽松访问',
-  allow_all: '完全访问',
-};
+import { Play, Square } from 'lucide-react';
+import { Button, ChatInput, IconButton, Popover, ProgressRing, Select } from '../ui/index.js';
 
 export function ChatComposer({
   taskText,
@@ -15,79 +10,88 @@ export function ChatComposer({
   providerProfileId,
   accessMode,
   contextUsage,
-  contextCompacting,
-  canCompactContext,
   onTaskTextChange,
   onProviderProfileChange,
   onAccessModeChange,
-  onCompactContext,
   onSendTask,
   onCancelRun,
 }) {
-  const thresholdTone = contextUsage?.reached ? 'danger' : contextUsage?.warning ? 'warning' : 'normal';
+  const thresholdTone = contextUsage?.reached ? 'danger' : contextUsage?.warning ? 'warning' : 'neutral';
   const thresholdTitle = contextUsage?.threshold
     ? `上下文估算 ${contextUsage.estimatedTokens} / ${contextUsage.threshold} tokens`
     : '未设置上下文摘要阈值';
+  const usedText = formatTokenCount(contextUsage?.estimatedTokens || 0);
+  const thresholdText = contextUsage?.threshold ? formatTokenCount(contextUsage.threshold) : '--';
+  const contextPercent = contextUsage?.percent ?? 0;
+  const providerOptions = providerProfiles.map((item) => ({
+    label: `${item.name || item.provider} · ${item.model || 'default'}`,
+    value: item.id,
+  }));
+  const accessOptions = [
+    { label: '确认访问', value: 'strict' },
+    { label: '宽松访问', value: 'permissive' },
+    { label: '完全访问', value: 'allow_all' },
+  ];
 
   return (
     <div className="composer">
-      <textarea
+      <ChatInput
         value={taskText}
-        onChange={(event) => onTaskTextChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            if (canSend) onSendTask();
-          }
+        onChange={onTaskTextChange}
+        onSubmit={() => {
+          if (canSend) onSendTask();
         }}
         placeholder={isRunning ? '正在执行当前任务...' : workspace ? '给 Night24 发消息...' : '请先打开项目'}
         disabled={isRunning}
       />
       <div className="composer-actions">
-        <label className="composer-model" title="切换本次及后续任务使用的模型">
-          <span>模型</span>
-          <select
-            value={providerProfileId}
-            onChange={(event) => onProviderProfileChange(event.target.value)}
-            disabled={isRunning}
-          >
-            {providerProfiles.map((item) => (
-              <option key={item.id} value={item.id}>
-                {(item.name || item.provider)} · {item.model || 'default'}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="composer-mode" title="选择本次及后续任务的工具访问模式">
-          <select
-            value={accessMode}
-            onChange={(event) => onAccessModeChange(event.target.value)}
-            disabled={isRunning}
-          >
-            <option value="strict">确认访问</option>
-            <option value="permissive">宽松访问</option>
-            <option value="allow_all">完全访问</option>
-          </select>
-          <small>{ACCESS_LABELS[accessMode] || '确认访问'}</small>
-        </label>
-        <div className={`composer-threshold ${thresholdTone}`} title={thresholdTitle}>
-          <span>{contextUsage?.percent ?? 0}%</span>
-        </div>
-        <button
-          className="composer-compact-button"
-          disabled={!canCompactContext || contextCompacting}
-          onClick={onCompactContext}
-          title="压缩摘要当前会话上下文"
-          type="button"
+        <Select
+          className="composer-model"
+          disabled={isRunning}
+          label="模型"
+          onChange={onProviderProfileChange}
+          options={providerOptions}
+          value={providerProfileId}
+        />
+        <Select
+          className="composer-mode"
+          disabled={isRunning}
+          onChange={onAccessModeChange}
+          options={accessOptions}
+          value={accessMode}
+        />
+        <Popover
+          className="composer-context"
+          content={(
+            <span className="composer-context-popover-body">
+              <span>Context window:</span>
+              <strong>{contextPercent}% full</strong>
+              <small>{usedText} / {thresholdText} tokens used</small>
+            </span>
+          )}
         >
-          {contextCompacting ? <Loader2 className="spin" size={14} /> : <Minimize2 size={14} />}
-        </button>
+          <IconButton className={`composer-context-ring ${thresholdTone}`} label={thresholdTitle}>
+            <ProgressRing percent={contextPercent} tone={thresholdTone} />
+          </IconButton>
+        </Popover>
         {isRunning ? (
-          <button className="danger-button" onClick={onCancelRun} type="button"><Square size={15} />取消</button>
+          <Button className="danger-button" icon={<Square size={15} />} onClick={onCancelRun} tone="danger">
+            取消
+          </Button>
         ) : (
-          <button className="primary-button" disabled={!canSend} onClick={onSendTask} type="button"><Play size={15} />发送</button>
+          <Button className="primary-button" disabled={!canSend} icon={<Play size={15} />} onClick={onSendTask} tone="primary">
+            发送
+          </Button>
         )}
       </div>
     </div>
   );
+}
+
+function formatTokenCount(value) {
+  const tokens = Number(value || 0);
+  if (tokens >= 1000) {
+    return `${Math.round(tokens / 1000)}k`;
+  }
+  return String(tokens);
 }

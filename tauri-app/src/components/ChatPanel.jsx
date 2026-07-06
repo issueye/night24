@@ -5,6 +5,7 @@ import { ChatComposer } from './chat/ChatComposer.jsx';
 import { ConversationTimeline } from './chat/ConversationTimeline.jsx';
 import { MessageBubble } from './MessageBubble.jsx';
 import { PermissionRequestCard } from './PermissionRequestCard.jsx';
+import { IconButton } from './ui/index.js';
 
 export function ChatPanel({
   title,
@@ -19,14 +20,11 @@ export function ChatPanel({
   providerProfileId,
   accessMode,
   contextUsage,
-  contextCompacting,
-  canCompactContext,
   activeContext,
   pendingPermissions,
   onTaskTextChange,
   onProviderProfileChange,
   onAccessModeChange,
-  onCompactContext,
   onResolvePermission,
   onSendTask,
   onCancelRun,
@@ -86,10 +84,10 @@ export function ChatPanel({
           {serverDetail}
         </div>
         <div className="context-actions">
-          <button className={classNames('icon-button compact', activeContext === 'files' && 'active')} onClick={() => onOpenContext('files')} title="文件浮窗" type="button"><FileCode2 size={14} /></button>
-          <button className={classNames('icon-button compact', activeContext === 'diff' && 'active')} onClick={() => onOpenContext('diff')} title="变更浮窗" type="button"><GitCompare size={14} /></button>
-          <button className={classNames('icon-button compact', activeContext === 'preview' && 'active')} onClick={() => onOpenContext('preview')} title="预览浮窗" type="button"><Code2 size={14} /></button>
-          <button className={classNames('icon-button compact', activeContext === 'agents' && 'active')} onClick={() => onOpenContext('agents')} title="子代理浮窗" type="button"><Bot size={14} /></button>
+          <IconButton className={classNames('icon-button compact', activeContext === 'files' && 'active')} label="文件浮窗" onClick={() => onOpenContext('files')} size="sm"><FileCode2 size={14} /></IconButton>
+          <IconButton className={classNames('icon-button compact', activeContext === 'diff' && 'active')} label="变更浮窗" onClick={() => onOpenContext('diff')} size="sm"><GitCompare size={14} /></IconButton>
+          <IconButton className={classNames('icon-button compact', activeContext === 'preview' && 'active')} label="预览浮窗" onClick={() => onOpenContext('preview')} size="sm"><Code2 size={14} /></IconButton>
+          <IconButton className={classNames('icon-button compact', activeContext === 'agents' && 'active')} label="子代理浮窗" onClick={() => onOpenContext('agents')} size="sm"><Bot size={14} /></IconButton>
         </div>
       </div>
 
@@ -128,9 +126,9 @@ export function ChatPanel({
         </div>
       </div>
       {showScrollBottom && (
-        <button className="scroll-bottom-button" onClick={scrollToBottom} type="button" title="回到底部">
+        <IconButton className="scroll-bottom-button" label="回到底部" onClick={scrollToBottom}>
           <ArrowDown size={16} />
-        </button>
+        </IconButton>
       )}
 
       <ChatComposer
@@ -142,12 +140,9 @@ export function ChatPanel({
         providerProfileId={providerProfileId}
         accessMode={accessMode}
         contextUsage={contextUsage}
-        contextCompacting={contextCompacting}
-        canCompactContext={canCompactContext}
         onTaskTextChange={onTaskTextChange}
         onProviderProfileChange={onProviderProfileChange}
         onAccessModeChange={onAccessModeChange}
-        onCompactContext={onCompactContext}
         onSendTask={onSendTask}
         onCancelRun={onCancelRun}
       />

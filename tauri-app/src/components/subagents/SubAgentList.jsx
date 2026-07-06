@@ -1,5 +1,6 @@
 import { MessageSquareText } from 'lucide-react';
 import { classNames, formatTime } from '../../utils/format.js';
+import { Button } from '../ui/index.js';
 import { compactSubAgentText, subAgentStatusMeta } from './status.js';
 
 export function SubAgentList({
@@ -15,11 +16,11 @@ export function SubAgentList({
       ) : agents.map((agent) => {
         const meta = subAgentStatusMeta(agent.status);
         return (
-          <button
+          <Button
             className={classNames('subagent-row', agent.id === selectedId && 'active', meta.tone)}
             key={agent.id}
             onClick={() => onSelect(agent.id)}
-            type="button"
+            variant="ghost"
           >
             <div>
               <span className={classNames('subagent-dot', meta.tone)} />
@@ -31,7 +32,7 @@ export function SubAgentList({
               <span>{formatTime(agent.updated_at)}</span>
               <span><MessageSquareText size={12} />{agent.message_count || 0}</span>
             </footer>
-          </button>
+          </Button>
         );
       })}
     </div>

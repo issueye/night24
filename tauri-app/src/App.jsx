@@ -562,8 +562,6 @@ export default function App() {
   );
   const {
     cancelRun,
-    compactContext,
-    contextCompacting,
     resolvePermission,
   } = useRunControls({
     apiJson,
@@ -663,14 +661,11 @@ export default function App() {
           providerProfileId={providerProfileId}
           accessMode={accessMode}
           contextUsage={contextUsage}
-          contextCompacting={contextCompacting}
-          canCompactContext={Boolean(currentSessionId && currentContext.messages.length > 1 && !visibleSessionRunning)}
           activeContext={contextOpen ? rightTab : null}
           pendingPermissions={currentContext.pendingPermissions}
           onTaskTextChange={(value) => setSessionDraft(currentContextId, value)}
           onProviderProfileChange={selectProviderProfile}
           onAccessModeChange={setAccessMode}
-          onCompactContext={compactContext}
           onResolvePermission={resolvePermission}
           onSendTask={sendTask}
           onCancelRun={() => cancelRun({ sessionId: currentSessionId, runId: currentSessionRun?.runId })}

@@ -1,6 +1,7 @@
 import { FileDiff, GitBranch, Loader2, RefreshCw } from 'lucide-react';
 import { classNames } from '../utils/format.js';
 import { Placeholder } from './Placeholder.jsx';
+import { IconButton } from './ui/index.js';
 
 export function DiffPanel({ diff, status, loading, error, onRefresh }) {
   const files = Array.isArray(status?.files) ? status.files : [];
@@ -17,9 +18,9 @@ export function DiffPanel({ diff, status, loading, error, onRefresh }) {
             {status?.branch || 'no branch'}
           </strong>
         </div>
-        <button className="icon-button compact" disabled={loading} onClick={onRefresh} title="刷新变更" type="button">
+        <IconButton className="icon-button compact" disabled={loading} label="刷新变更" onClick={onRefresh} size="sm">
           {loading ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
-        </button>
+        </IconButton>
       </div>
 
       {error ? <div className="diff-error">{error}</div> : null}

@@ -1,5 +1,6 @@
-import { Activity, AlertTriangle, CheckCircle2, Circle, Radio, TimerReset, X } from 'lucide-react';
+import { Activity, Radio, TimerReset, X } from 'lucide-react';
 import { classNames, formatTime } from '../utils/format.js';
+import { Button, IconButton, Timeline } from './ui/index.js';
 
 export function TimelinePanel({ timeline, activeRun, open, onToggle, onClose }) {
   const latest = timeline[0];
@@ -21,21 +22,16 @@ export function TimelinePanel({ timeline, activeRun, open, onToggle, onClose }) 
         <aside className="events-float">
           <div className="float-head">
             <strong>事件</strong>
-            <button className="icon-button compact" onClick={onClose} title="关闭事件" type="button"><X size={14} /></button>
+            <IconButton className="icon-button compact" label="关闭事件" onClick={onClose}><X size={14} /></IconButton>
           </div>
           <div className="event-list">
-            {timeline.length === 0 ? (
-              <div className="empty-block">暂无执行事件</div>
-            ) : timeline.map((item) => (
-              <div className={classNames('event-row', item.tone)} key={item.id}>
-                {item.tone === 'success' ? <CheckCircle2 size={14} /> : item.tone === 'warning' || item.tone === 'error' ? <AlertTriangle size={14} /> : <Circle size={10} />}
-                <div>
-                  <strong>{item.title}</strong>
-                  <span>{item.detail}</span>
-                </div>
-                <time>{formatTime(item.createdAt)}</time>
-              </div>
-            ))}
+            <Timeline
+              empty="暂无执行事件"
+              items={timeline.map((item) => ({
+                ...item,
+                time: formatTime(item.createdAt),
+              }))}
+            />
           </div>
         </aside>
       )}
@@ -46,10 +42,9 @@ export function TimelinePanel({ timeline, activeRun, open, onToggle, onClose }) 
           <span>{runLabel}</span>
         </div>
 
-        <button className={classNames('statusbar-event-button', open && 'active', latest?.tone)} onClick={onToggle} type="button">
-          <Activity size={13} />
-          <span>{latest ? latest.title : '无事件'}</span>
-        </button>
+        <Button className={classNames('statusbar-event-button', open && 'active', latest?.tone)} icon={<Activity size={13} />} onClick={onToggle} variant="ghost">
+          {latest ? latest.title : '无事件'}
+        </Button>
 
         <div className="statusbar-meta">
           <span>{timeline.length} 条事件</span>

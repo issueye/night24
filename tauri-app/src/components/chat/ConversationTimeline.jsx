@@ -1,4 +1,5 @@
 import { classNames } from '../../utils/format.js';
+import { Button } from '../ui/index.js';
 
 function formatTimelineTime(value) {
   if (!value) return '';
@@ -32,16 +33,16 @@ export function ConversationTimeline({ messages, onJump }) {
     <aside className="conversation-timeline" aria-label="对话时间轴">
       <div className="timeline-rail" />
       {timelineItems.map((item, index) => (
-        <button
+        <Button
           className={classNames('timeline-point', item.role, item.tone, index === timelineItems.length - 1 && 'active')}
           key={item.id}
           onClick={() => onJump(item.targetId)}
           title={`${item.label}${item.time ? ` · ${item.time}` : ''}`}
-          type="button"
+          variant="ghost"
         >
           <span />
           <small>{item.time}</small>
-        </button>
+        </Button>
       ))}
     </aside>
   );

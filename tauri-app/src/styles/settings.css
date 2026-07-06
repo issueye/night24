@@ -97,6 +97,7 @@
   grid-template-columns: 176px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  padding: 0;
 }
 
 .settings-nav {
@@ -150,6 +151,20 @@
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.settings-form .ui-select {
+  display: grid;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-form .ui-select-trigger {
+  width: 100%;
+  max-width: none;
+  height: var(--ui-control-height-lg);
+  background: var(--surface);
 }
 
 .settings-form span {

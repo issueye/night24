@@ -79,6 +79,19 @@
   --btn-disabled-bg: #e8ecf3;
   --transition: 160ms ease;
 
+  /* ===== 组件尺寸默认值，由 .app-shell.font-* 覆盖 ===== */
+  --ui-control-height: 30px;
+  --ui-control-height-sm: 26px;
+  --ui-control-height-lg: 34px;
+  --ui-icon-size: 30px;
+  --ui-icon-size-sm: 26px;
+  --ui-icon-size-lg: 34px;
+  --ui-field-padding-x: 10px;
+  --ui-font-size: var(--fs-base);
+  --ui-gap: 7px;
+  --ui-row-height: 30px;
+  --ui-textarea-min: 96px;
+
   /* 兼容别名:旧 --shadow 引用统一指向 --shadow-md */
   --shadow: var(--shadow-md);
 }

@@ -1,13 +1,46 @@
 .app-shell.font-compact {
   font-size: 13px;
+  --ui-control-height: 28px;
+  --ui-control-height-sm: 24px;
+  --ui-control-height-lg: 32px;
+  --ui-icon-size: 28px;
+  --ui-icon-size-sm: 24px;
+  --ui-icon-size-lg: 32px;
+  --ui-field-padding-x: 9px;
+  --ui-font-size: var(--fs-base);
+  --ui-gap: 6px;
+  --ui-row-height: 28px;
+  --ui-textarea-min: 88px;
 }
 
 .app-shell.font-normal {
   font-size: 14px;
+  --ui-control-height: 30px;
+  --ui-control-height-sm: 26px;
+  --ui-control-height-lg: 34px;
+  --ui-icon-size: 30px;
+  --ui-icon-size-sm: 26px;
+  --ui-icon-size-lg: 34px;
+  --ui-field-padding-x: 10px;
+  --ui-font-size: var(--fs-base);
+  --ui-gap: 7px;
+  --ui-row-height: 30px;
+  --ui-textarea-min: 96px;
 }
 
 .app-shell.font-large {
   font-size: 15px;
+  --ui-control-height: 34px;
+  --ui-control-height-sm: 30px;
+  --ui-control-height-lg: 38px;
+  --ui-icon-size: 34px;
+  --ui-icon-size-sm: 30px;
+  --ui-icon-size-lg: 38px;
+  --ui-field-padding-x: 12px;
+  --ui-font-size: var(--fs-md);
+  --ui-gap: 8px;
+  --ui-row-height: 34px;
+  --ui-textarea-min: 110px;
 }
 
 .app-shell.theme-warm {

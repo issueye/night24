@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { classNames } from '../../utils/format.js';
+import { IconButton } from '../ui/index.js';
 import { deriveSubAgentStats } from './status.js';
 
 function Stat({ label, value, tone }) {
@@ -27,9 +28,9 @@ export function SubAgentStats({
         <Stat label="失败" value={stats.failed} tone="failed" />
         <Stat label="取消" value={stats.cancelled} tone="cancelled" />
       </div>
-      <button className="icon-button compact" disabled={loading} onClick={onRefresh} title="刷新子代理" type="button">
+      <IconButton className="icon-button compact" disabled={loading} label="刷新子代理" onClick={onRefresh} size="sm">
         <RefreshCw className={loading ? 'spin' : ''} size={13} />
-      </button>
+      </IconButton>
     </div>
   );
 }

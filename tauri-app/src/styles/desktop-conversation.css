@@ -94,7 +94,7 @@
   border-color: #4b5563;
 }
 
-.app-shell .message.error .avatar {
+.app-shell .message.error .ui-avatar {
   color: var(--red-strong);
   background: var(--red-soft);
 }

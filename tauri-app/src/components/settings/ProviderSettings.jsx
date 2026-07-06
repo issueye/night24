@@ -1,6 +1,7 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { classNames } from '../../utils/format.js';
 import { activeProviderProfile } from '../../utils/settings.js';
+import { Button, IconButton, Select, TextField } from '../ui/index.js';
 
 export function ProviderSettings({
   providerProfiles,
@@ -29,76 +30,63 @@ export function ProviderSettings({
       <aside className="provider-list" aria-label="供应商配置">
         <div className="provider-list-head">
           <strong>供应商配置</strong>
-          <button className="icon-button compact" onClick={onProviderProfileCreate} title="新增供应商" type="button"><Plus size={14} /></button>
+          <IconButton className="icon-button compact" label="新增供应商" onClick={onProviderProfileCreate} size="sm"><Plus size={14} /></IconButton>
         </div>
         <div className="provider-list-scroll">
           {providerProfiles.map((item) => (
-            <button
+            <Button
               className={classNames('provider-profile-row', item.id === providerProfileId && 'active')}
               key={item.id}
               onClick={() => onProviderProfileChange(item.id)}
-              type="button"
+              variant="ghost"
             >
               <strong>{item.name || item.provider}</strong>
               <span>{item.provider} · {item.model || 'default'}</span>
-            </button>
+            </Button>
           ))}
         </div>
       </aside>
 
       <div className="settings-form provider-form">
-        <label>
-          <span>名称</span>
-          <input
-            value={activeProfile?.name || ''}
-            onChange={(event) => activeProfile && onProviderProfileUpdate(activeProfile.id, { name: event.target.value })}
-            placeholder="例如 OpenAI 工作模型"
-          />
-        </label>
-        <label>
-          <span>Provider</span>
-          <select value={provider} onChange={(event) => onProviderChange(event.target.value)}>
-            <option value="echo">echo</option>
-            <option value="openai">openai</option>
-            <option value="anthropic">anthropic</option>
-            <option value="ollama">ollama</option>
-            <option value="stepfun">stepfun</option>
-          </select>
-        </label>
-        <label>
-          <span>Model</span>
-          <input value={model} onChange={(event) => onModelChange(event.target.value)} placeholder="echo-v1" />
-        </label>
-        <label>
-          <span>Base URL</span>
-          <input value={baseUrl} onChange={(event) => onBaseUrlChange(event.target.value)} placeholder="optional" />
-        </label>
-        <label>
-          <span>Provider Key</span>
-          <input type="password" value={providerKey} onChange={(event) => onProviderKeyChange(event.target.value)} placeholder="saved locally" />
-        </label>
-        <label>
-          <span>摘要阈值 Token</span>
-          <input
-            inputMode="numeric"
-            value={contextThreshold}
-            onChange={(event) => onContextThresholdChange(event.target.value)}
-            placeholder="24000"
-          />
-        </label>
-        <label>
-          <span>Network Proxy</span>
-          <input value={networkProxy} onChange={(event) => onNetworkProxyChange(event.target.value)} placeholder="http://127.0.0.1:7890 or direct" />
-        </label>
-        <button
+        <TextField
+          label="名称"
+          onChange={(event) => activeProfile && onProviderProfileUpdate(activeProfile.id, { name: event.target.value })}
+          placeholder="例如 OpenAI 工作模型"
+          value={activeProfile?.name || ''}
+        />
+        <Select
+          label="Provider"
+          onChange={onProviderChange}
+          options={[
+            { label: 'echo', value: 'echo' },
+            { label: 'openai', value: 'openai' },
+            { label: 'anthropic', value: 'anthropic' },
+            { label: 'ollama', value: 'ollama' },
+            { label: 'stepfun', value: 'stepfun' },
+          ]}
+          value={provider}
+        />
+        <TextField label="Model" onChange={(event) => onModelChange(event.target.value)} placeholder="echo-v1" value={model} />
+        <TextField label="Base URL" onChange={(event) => onBaseUrlChange(event.target.value)} placeholder="optional" value={baseUrl} />
+        <TextField label="Provider Key" onChange={(event) => onProviderKeyChange(event.target.value)} placeholder="saved locally" type="password" value={providerKey} />
+        <TextField
+          inputMode="numeric"
+          label="摘要阈值 Token"
+          onChange={(event) => onContextThresholdChange(event.target.value)}
+          placeholder="24000"
+          value={contextThreshold}
+        />
+        <TextField label="Network Proxy" onChange={(event) => onNetworkProxyChange(event.target.value)} placeholder="http://127.0.0.1:7890 or direct" value={networkProxy} />
+        <Button
           className="danger-outline-button"
           disabled={providerProfiles.length <= 1 || !activeProfile}
+          icon={<Trash2 size={14} />}
           onClick={() => activeProfile && onProviderProfileDelete(activeProfile.id)}
-          type="button"
+          tone="danger"
+          variant="soft"
         >
-          <Trash2 size={14} />
           删除当前供应商
-        </button>
+        </Button>
       </div>
     </div>
   );

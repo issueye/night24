@@ -2,6 +2,7 @@ import { CheckCircle2, Copy, FileText, RefreshCw, Search, Sparkles, XCircle } fr
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeError } from '../../utils/events.js';
 import { classNames } from '../../utils/format.js';
+import { Button, IconButton, Select, Tag, TextField } from '../ui/index.js';
 import { SettingsListDetail } from './SettingsListDetail.jsx';
 
 const SOURCE_LABELS = {
@@ -166,22 +167,23 @@ export function SkillSettings({ apiJson, workspace }) {
       listLabel="技能列表"
       listTitle="技能"
       listActions={(
-        <button className="icon-button compact" disabled={loading} onClick={loadSkills} title="重新加载" type="button">
+        <IconButton className="icon-button compact" disabled={loading} label="重新加载" onClick={loadSkills} size="sm">
           <RefreshCw size={14} />
-        </button>
+        </IconButton>
       )}
       listExtra={(
         <div className="skill-filter">
-          <label>
-            <Search size={13} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索技能" />
-          </label>
-          <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} aria-label="技能来源">
-            <option value="all">全部来源</option>
-            <option value="workspace">工作区</option>
-            <option value="project_agent">项目</option>
-            <option value="user">用户</option>
-          </select>
+          <TextField className="skill-search-field" icon={<Search size={13} />} onChange={(event) => setQuery(event.target.value)} placeholder="搜索技能" value={query} />
+          <Select
+            onChange={setSourceFilter}
+            options={[
+              { label: '全部来源', value: 'all' },
+              { label: '工作区', value: 'workspace' },
+              { label: '项目', value: 'project_agent' },
+              { label: '用户', value: 'user' },
+            ]}
+            value={sourceFilter}
+          />
         </div>
       )}
       listChildren={(
@@ -190,15 +192,15 @@ export function SkillSettings({ apiJson, workspace }) {
           {filteredSkills.map((skill) => {
             const itemStatus = availability(skill);
             return (
-              <button
+              <Button
                 className={classNames('provider-profile-row skill-row', skill.name === selectedSkill?.name && 'active', itemStatus.tone)}
                 key={`${skill.source}-${skill.name}`}
                 onClick={() => setSelectedName(skill.name)}
-                type="button"
+                variant="ghost"
               >
                 <strong>{skill.name}</strong>
                 <span>{sourceLabel(skill.source)} · {itemStatus.label}</span>
-              </button>
+              </Button>
             );
           })}
         </>
@@ -235,48 +237,28 @@ export function SkillSettings({ apiJson, workspace }) {
                 <span>{selectedSkill.description || '无描述'}</span>
               </div>
               <div className="skill-head-actions">
-                <span className={classNames('skill-status', status.tone)}>
-                  {status.tone === 'success' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                <Tag className="skill-status" icon={status.tone === 'success' ? <CheckCircle2 size={13} /> : <XCircle size={13} />} tone={status.tone === 'error' ? 'danger' : status.tone}>
                   {status.label}
-                </span>
-                <button className="toolbar-button compact-action" onClick={copyInvocation} type="button">
-                  <Copy size={14} />
+                </Tag>
+                <Button className="toolbar-button compact-action" icon={<Copy size={14} />} onClick={copyInvocation} size="sm">
                   {copied ? '已复制' : '复制调用'}
-                </button>
+                </Button>
               </div>
             </header>
 
             <div className="skill-meta-grid">
-              <label>
-                <span>来源</span>
-                <input readOnly value={sourceLabel(selectedSkill.source)} />
-              </label>
-              <label>
-                <span>调用名</span>
-                <input readOnly value={invocationText(selectedSkill)} />
-              </label>
-              <label>
-                <span>用户调用</span>
-                <input readOnly value={selectedSkill.user_invocable ? '允许' : '关闭'} />
-              </label>
-              <label>
-                <span>模型调用</span>
-                <input readOnly value={selectedSkill.model_invocable ? '允许' : '关闭'} />
-              </label>
-              <label className="wide">
-                <span>目录</span>
-                <input readOnly value={selectedSkill.base_dir || ''} />
-              </label>
-              <label className="wide">
-                <span>SKILL.md</span>
-                <input readOnly value={selectedSkill.path || ''} />
-              </label>
+              <TextField label="来源" readOnly value={sourceLabel(selectedSkill.source)} />
+              <TextField label="调用名" readOnly value={invocationText(selectedSkill)} />
+              <TextField label="用户调用" readOnly value={selectedSkill.user_invocable ? '允许' : '关闭'} />
+              <TextField label="模型调用" readOnly value={selectedSkill.model_invocable ? '允许' : '关闭'} />
+              <TextField className="wide" label="目录" readOnly value={selectedSkill.base_dir || ''} />
+              <TextField className="wide" label="SKILL.md" readOnly value={selectedSkill.path || ''} />
             </div>
 
             {selectedSkill.missing?.length > 0 && (
               <div className="skill-missing">
                 {selectedSkill.missing.map((item) => (
-                  <span key={item}>{item}</span>
+                  <Tag key={item} size="sm" tone="danger">{item}</Tag>
                 ))}
               </div>
             )}

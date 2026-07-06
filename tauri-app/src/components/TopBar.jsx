@@ -1,6 +1,7 @@
 import { AlertTriangle, FolderOpen, Loader2, RotateCcw, Wifi, WifiOff } from 'lucide-react';
 import night24Mark from '../assets/night24-mark.svg';
 import { classNames } from '../utils/format.js';
+import { Button, IconButton } from './ui/index.js';
 
 export function TopBar({
   serverStatus,
@@ -19,19 +20,22 @@ export function TopBar({
         </div>
       </div>
 
-      <button className={classNames('status-pill', serverStatus.state)} onClick={onRetryServer} type="button">
-        {serverStatus.state === 'connected' ? <Wifi size={16} /> : serverStatus.state === 'checking' ? <Loader2 className="spin" size={16} /> : <WifiOff size={16} />}
-        <span>{serverStatus.state === 'connected' ? '已连接' : serverStatus.state === 'checking' ? '连接中' : '未连接'}</span>
-      </button>
+      <Button
+        className={classNames('status-pill', serverStatus.state)}
+        icon={serverStatus.state === 'connected' ? <Wifi size={16} /> : serverStatus.state === 'checking' ? <Loader2 className="spin" size={16} /> : <WifiOff size={16} />}
+        onClick={onRetryServer}
+        variant="ghost"
+      >
+        {serverStatus.state === 'connected' ? '已连接' : serverStatus.state === 'checking' ? '连接中' : '未连接'}
+      </Button>
 
       <div className="topbar-actions">
-        <button className="icon-button" disabled={coreRestarting} onClick={onRestartCore} title="重启 Core" type="button">
+        <IconButton className="icon-button" disabled={coreRestarting} label="重启 Core" onClick={onRestartCore}>
           {coreRestarting ? <Loader2 className="spin" size={16} /> : <RotateCcw size={16} />}
-        </button>
-        <button className="toolbar-button" onClick={onOpenWorkspace} type="button">
-          <FolderOpen size={16} />
+        </IconButton>
+        <Button className="toolbar-button" icon={<FolderOpen size={16} />} onClick={onOpenWorkspace}>
           打开项目
-        </button>
+        </Button>
       </div>
     </header>
   );
@@ -43,7 +47,7 @@ export function ErrorBanner({ banner, onClose }) {
     <div className={classNames('banner', banner.tone)}>
       <AlertTriangle size={16} />
       <span>{banner.message}</span>
-      <button onClick={onClose} type="button">关闭</button>
+      <Button onClick={onClose} size="sm" variant="soft">关闭</Button>
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { classNames } from '../utils/format.js';
 
-export function MarkdownMessage({ text }) {
+export function MarkdownMessage({ className, size = 'md', text }) {
   return (
-    <div className="markdown-body">
+    <div className={classNames('markdown-body', `markdown-body-${size}`, className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

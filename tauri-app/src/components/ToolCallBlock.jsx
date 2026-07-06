@@ -1,5 +1,5 @@
 import { CheckCircle2, ChevronDown, ClipboardList, Wrench } from 'lucide-react';
-import { safeText } from '../utils/format.js';
+import { classNames, safeText } from '../utils/format.js';
 
 function compactPreview(value) {
   const text = safeText(value).replace(/\s+/g, ' ').trim();
@@ -19,13 +19,13 @@ function toolDetail(block) {
   return block.arguments ?? block.params ?? block.input ?? block;
 }
 
-export function ToolCallBlock({ block }) {
+export function ToolCallBlock({ block, className, size = 'md' }) {
   const isResponse = block?.type === 'tool_response';
   const detail = toolDetail(block);
   const title = toolTitle(block);
 
   return (
-    <details className="tool-call-block">
+    <details className={classNames('tool-call-block', `tool-call-block-${size}`, className)}>
       <summary>
         <span className="tool-call-icon">
           {isResponse ? <CheckCircle2 size={14} /> : <Wrench size={14} />}

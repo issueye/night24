@@ -58,8 +58,9 @@
   grid-column: 1 / -1;
 }
 
-.hook-toggle input {
-  width: 18px;
-  height: 18px;
-  padding: 0;
+.hook-toggle {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
 }

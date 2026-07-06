@@ -20,34 +20,14 @@
   border-bottom: 1px solid var(--line);
 }
 
-.skill-filter label {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 5px;
+.skill-filter .ui-field,
+.skill-filter .ui-select {
   min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  background: var(--surface-soft);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
 }
 
-.skill-filter input,
-.skill-filter select {
-  min-width: 0;
-  height: 30px;
-  color: var(--text);
-  background: transparent;
-  border: 0;
-  outline: none;
-}
-
-.skill-filter select {
-  padding: 0 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+.skill-filter .ui-select-trigger {
+  width: 100%;
+  max-width: none;
 }
 
 .skill-row.success strong {
@@ -147,31 +127,7 @@
 }
 
 .skill-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-base);
-}
-
-.skill-status.success {
-  color: var(--green);
-  background: var(--green-soft);
-  border-color: var(--success-border);
-}
-
-.skill-status.error {
-  color: var(--red);
-  background: var(--red-soft);
-  border-color: var(--danger-border);
-}
-
-.skill-status.muted {
-  color: var(--subtle);
-  background: var(--surface-soft);
+  flex: 0 0 auto;
 }
 
 .skill-meta-grid {

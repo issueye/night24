@@ -35,6 +35,19 @@
   border-radius: var(--radius-md);
 }
 
+.app-shell .event-list .ui-timeline {
+  gap: 4px;
+}
+
+.app-shell .event-list .ui-timeline-item {
+  padding: 8px;
+  border-radius: var(--radius-md);
+}
+
+.app-shell .event-list .ui-timeline-item:hover {
+  background: var(--surface-soft);
+}
+
 .app-shell .event-row:hover {
   background: var(--surface-soft);
 }

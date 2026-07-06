@@ -5,6 +5,7 @@ import { FilePreview } from './FilePreview.jsx';
 import { FileTree } from './FileTree.jsx';
 import { Placeholder } from './Placeholder.jsx';
 import { SubAgentPanel } from './SubAgentPanel.jsx';
+import { Button, IconButton } from './ui/index.js';
 
 function defaultPanelRect() {
   const width = Math.min(520, Math.max(320, window.innerWidth - 320));
@@ -120,14 +121,14 @@ export function ContextPanel({
       <div className="float-head draggable" onPointerDown={(event) => startDrag(event, 'move')}>
         <span className="drag-indicator"><Grip size={13} /></span>
         <strong>辅助面板</strong>
-        <button className="icon-button compact" onClick={onClose} title="关闭浮窗" type="button"><X size={14} /></button>
+        <IconButton className="icon-button compact" label="关闭浮窗" onClick={onClose} size="sm"><X size={14} /></IconButton>
       </div>
 
       <div className="tabs">
-        <button className={activeTab === 'files' ? 'active' : ''} onClick={() => onTabChange('files')} type="button"><FileCode2 size={14} />Files</button>
-        <button className={activeTab === 'diff' ? 'active' : ''} onClick={() => onTabChange('diff')} type="button"><GitCompare size={14} />Diff</button>
-        <button className={activeTab === 'preview' ? 'active' : ''} onClick={() => onTabChange('preview')} type="button"><Code2 size={14} />Preview</button>
-        <button className={activeTab === 'agents' ? 'active' : ''} onClick={() => onTabChange('agents')} type="button"><Bot size={14} />Agents</button>
+        <Button className={activeTab === 'files' ? 'active' : ''} icon={<FileCode2 size={14} />} onClick={() => onTabChange('files')} variant="ghost">Files</Button>
+        <Button className={activeTab === 'diff' ? 'active' : ''} icon={<GitCompare size={14} />} onClick={() => onTabChange('diff')} variant="ghost">Diff</Button>
+        <Button className={activeTab === 'preview' ? 'active' : ''} icon={<Code2 size={14} />} onClick={() => onTabChange('preview')} variant="ghost">Preview</Button>
+        <Button className={activeTab === 'agents' ? 'active' : ''} icon={<Bot size={14} />} onClick={() => onTabChange('agents')} variant="ghost">Agents</Button>
       </div>
 
       {activeTab === 'files' && (
@@ -135,7 +136,7 @@ export function ContextPanel({
           <div className="context-tree">
             <div className="context-section-head">
               <strong>项目目录</strong>
-              <button className="icon-button compact" onClick={onRefreshWorkspace} title="刷新目录" type="button"><RefreshCw size={13} /></button>
+              <IconButton className="icon-button compact" label="刷新目录" onClick={onRefreshWorkspace} size="sm"><RefreshCw size={13} /></IconButton>
             </div>
             <div className="tree-scroll">
               <FileTree tree={tree} selectedPath={selectedPath} onOpenFile={onOpenFile} />
@@ -154,11 +155,12 @@ export function ContextPanel({
           onRefresh={onRefreshSubAgents}
         />
       )}
-      <button
+      <Button
         className="panel-resize-handle"
+        aria-label="拖动调整大小"
         onPointerDown={(event) => startDrag(event, 'resize')}
         title="拖动调整大小"
-        type="button"
+        variant="ghost"
       />
     </aside>
   );
