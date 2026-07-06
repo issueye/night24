@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isLiveSubAgentStatus } from '../components/subagents/status.js';
 import { normalizeError } from '../utils/events.js';
 
 export function useSubAgents({ apiJson, active, running }) {
@@ -51,7 +52,7 @@ export function useSubAgents({ apiJson, active, running }) {
 
   const hasLiveSubAgents = useMemo(() => {
     const agents = Array.isArray(pool?.subagents) ? pool.subagents : [];
-    return agents.some((agent) => agent.status === 'queued' || agent.status === 'running');
+    return agents.some((agent) => isLiveSubAgentStatus(agent.status));
   }, [pool]);
 
   useEffect(() => {

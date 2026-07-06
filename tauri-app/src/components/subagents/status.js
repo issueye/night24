@@ -8,8 +8,14 @@ const STATUS_META = {
   cancelled: { label: '已取消', tone: 'cancelled', icon: Ban },
 };
 
+const LIVE_STATUSES = new Set(['queued', 'running']);
+
 export function subAgentStatusMeta(status) {
   return STATUS_META[status] || { label: status || '未知', tone: 'unknown', icon: Circle };
+}
+
+export function isLiveSubAgentStatus(status) {
+  return LIVE_STATUSES.has(status);
 }
 
 export function compactSubAgentText(value, max = 120) {

@@ -83,6 +83,8 @@ export function HookSettings({ apiJson, workspace }) {
     if (!workspace) return;
     const requestId = hookSaveRequestRef.current + 1;
     hookSaveRequestRef.current = requestId;
+    hookLoadRequestRef.current += 1;
+    setLoading(false);
     setSaving(true);
     setError('');
     try {

@@ -13,7 +13,7 @@
 - `tauri-app/src/App.jsx`：已通过 hook / utility 拆分降至约 419 行，当前主要保留发送任务、顶层页面布局和 hook 接线。
 - `tauri-app/src/styles/workspace.css`：仅保留工作区基础 grid；左侧栏、时间线、header、message、panel、banner 和空态样式已拆至专用 CSS 文件。
 - `tauri-app/src/styles/desktop-shell.css`：已清空并移除；桌面壳变量、chrome、workspace、sidebar、status、conversation、overlay、event 和 responsive 规则已迁移到对应专用 CSS 文件。
-- `tauri-app/src/components/settings/SkillSettings.jsx` 与 `HookSettings.jsx`：已抽共享列表详情壳；样式已按 provider / hook-skill 分离；列表/详情加载和保存流程已补请求代际保护，避免旧请求覆盖当前界面。
+- `tauri-app/src/components/settings/SkillSettings.jsx` 与 `HookSettings.jsx`：已抽共享列表详情壳；样式已按 provider / hook-skill 分离；列表/详情加载和保存流程已补请求代际保护，避免旧请求覆盖当前界面或保存后被旧加载回滚。
 
 ### Server 与 Agent Core
 
@@ -68,7 +68,7 @@
 
 - 已完成：将 `SubAgentPanel.jsx` 拆为 `SubAgentStats`、`SubAgentList`、`SubAgentDetail`。
 - 已完成：从 `HookSettings.jsx` 和 `SkillSettings.jsx` 抽通用列表详情壳组件 `SettingsListDetail`。
-- 已完成：为 `SkillSettings.jsx` 的技能列表/详情加载和 `HookSettings.jsx` 的钩子加载/保存补请求代际保护，快速刷新或切换工作区时旧请求不再回写当前状态。
+- 已完成：为 `SkillSettings.jsx` 的技能列表/详情加载和 `HookSettings.jsx` 的钩子加载/保存补请求代际保护，快速刷新、保存或切换工作区时旧请求不再回写当前状态。
 - 已完成：新增 `docs/desktop-css-visual-checklist.md`，建立 CSS 功能迁移前的全局布局、聊天流、设置弹窗、右侧面板和子代理面板视觉检查基线。
 - 已完成：抽出 `tauri-app/src/styles/base.css`，承接 `:root` 设计变量、全局 box sizing、页面根节点尺寸和基础表单字体 reset。
 - 已完成：抽出 `tauri-app/src/styles/layout.css`，承接应用外框、顶部栏、品牌区、状态 pill 和共享按钮基础样式。
@@ -485,7 +485,7 @@
 - `tauri-app/src/styles/subagents-list.css`、`subagents-detail.css`：从 `subagents.css` 抽出子代理列表和详情区域样式。
 - `tauri-app/src/components/subagents/status.js`：抽出子代理状态展示元数据和摘要文本 helper，列表/详情复用同一状态映射；统计栏补充 cancelled 计数展示。
 - `crates/night24-agent-core/src/subagents.rs`、`tauri-app/src/components/subagents/SubAgentStats.jsx`：子代理池 snapshot 增加 queued 计数，桌面端统计栏补充排队中状态展示。
-- `tauri-app/src/components/subagents/status.js`：新增子代理统计兜底派生 helper；当后端聚合字段缺失时从 `subagents` 列表计算各状态数量。
+- `tauri-app/src/components/subagents/status.js`：新增子代理统计兜底派生 helper；当后端聚合字段缺失时从 `subagents` 列表计算各状态数量；子代理轮询复用共享 live status helper，避免状态语义分散。
 - `crates/night24-server/src/reply.rs`：抽出 `sse_stream_response`，统一 reply SSE 标准响应 headers。
 - `crates/night24-server/src/reply.rs`：抽出 `json_error_response`，统一 reply session 准备阶段 JSON 错误响应。
 - `crates/night24-server/src/core_client.rs`：抽出终止事件识别 helper，并补充 finish/error 分类测试。
