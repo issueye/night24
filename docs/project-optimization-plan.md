@@ -325,6 +325,17 @@
 - 已完成：继续收敛 `bytecode/interp.rs` store name operand 分支，抽出 `store_name_from_operand` / `store_typed_name_from_operand`，集中普通/类型声明存名的 name/type operand 读取和 stack/env helper 调用。
 - 已完成：继续收敛 `bytecode/interp.rs` 常量 operand 分支，抽出 `push_const_from_operand`，让主 opcode arm 不再直接读取 operand，只保留分发和 helper 调用。
 - 已完成：继续收敛 `bytecode/interp.rs` 闭包 operand 分支，将 `push_closure_from_operand` 下沉到 `interp_helpers`，集中函数原型读取、upvalue 捕获和闭包压栈路径。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/operands.rs`，承接 byte/u16/u32/string/name/type/const operand 解码和截断 bytecode VMError 构造，避免 helper 文件继续膨胀。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/modules.rs`，承接 import/export、export * 和动态 import resolved promise 包装 helper，保持 VM 主循环调用入口不变。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/control.rs`，承接 jump/conditional jump、throw 封装、catch unwind 和 match error helper，保持 try/catch/finally 保护线语义不变。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/bindings.rs`，承接 local/upvalue/name/global 访问、typed binding 校验和类型匹配 helper，保留 `interp::value_matches_type_annotation` 转发边界。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/collections.rs`，承接 array/object 创建、property/index get/set、iterator 和 len helper，保持主循环 opcode 调用入口不变。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/calls.rs`，承接 packed args、spread、call/call spread、construct 和 callable/constructor 分派语义，保持 `Call` / `New` opcode 行为不变。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/closures.rs`，承接 open upvalue 关闭/捕获、class 构建、function proto operand 和 closure object 构造 helper。
+- 已完成：从 `bytecode/interp_helpers.rs` 拆出 `interp_helpers/stack.rs`、`async_ops.rs` 与 `access.rs`，分别承接基础栈操作、await/promise 处理和 super method operand 读取，`interp_helpers.rs` 收敛为 helper 门面文件。
+- 已完成：从 `bytecode/compiler_control.rs` 拆出 `bytecode/compiler_iterators.rs`，承接 `for-in` / `for-of` 迭代语句发码、临时迭代变量和 break/continue patch 逻辑，普通控制流文件只保留 if/while/for/labeled 分发。
+- 已完成：从 `bytecode/compiler_declarations.rs` 拆出 `bytecode/compiler_decl_store.rs`，承接声明存储 operand 选择和类型/普通声明写入发码，统一 `var` / `let` / `const` 的 store 边界。
+- 已完成：从 `bytecode/compiler_declarations.rs` 拆出 `bytecode/compiler_destructuring.rs`，承接数组/对象解构声明、默认值替换和 rest 绑定发码，声明主文件只保留普通声明分发。
 - 下一步：继续拆 compiler 中剩余复合 expression emitter，或拆 interpreter 中剩余小型栈操作 helper；每步继续核对 `try/finally` 保护线没有语义回退。
 - 中期建议：将 `evaluator::expressions` 中被 bytecode 复用的语义迁移到 `semantics` 或 `runtime_ops`，再处理更大的 interpreter/compiler 主循环拆分。
 - Phase 5 固定验证：每个 compiler/interpreter 拆分批次必须运行 `cargo fmt --check`、`cargo test -p night24-gts`、`npm run build`（`tauri-app` 目录）、`git diff --check`；文档-only 批次至少运行 `git diff --check`。

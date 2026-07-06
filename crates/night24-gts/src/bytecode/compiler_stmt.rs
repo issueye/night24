@@ -6,12 +6,11 @@ use super::compiler_abrupt::{
     compile_break_continue, compile_return_stmt, FinallyFrame, LoopFrame,
 };
 use super::compiler_classes::compile_class_decl;
-use super::compiler_control::{
-    compile_for, compile_for_in, compile_for_of, compile_if, compile_labeled, compile_while,
-};
+use super::compiler_control::{compile_for, compile_if, compile_labeled, compile_while};
 use super::compiler_declarations::{compile_const_stmt, compile_let_stmt, compile_var_stmt};
 use super::compiler_expr::compile_expr;
 use super::compiler_functions::compile_func_decl;
+use super::compiler_iterators::{compile_for_in, compile_for_of};
 use super::compiler_modules::{compile_export, compile_import};
 use super::compiler_try::compile_try;
 use super::opcode::Opcode;
