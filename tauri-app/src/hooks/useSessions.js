@@ -44,7 +44,7 @@ export function useSessions({
   }, [apiJson, workspace?.root_path]);
 
   const createSession = useCallback(async () => {
-    onBeforeSessionChange?.({ abortActive: true });
+    onBeforeSessionChange?.({ abortActive: true, preserveRun: true });
     try {
       await createSessionRecord();
     } catch (error) {
@@ -53,13 +53,16 @@ export function useSessions({
   }, [createSessionRecord, onBeforeSessionChange, showError]);
 
   const selectSession = useCallback(async (id) => {
-    onBeforeSessionChange?.({ abortActive: true });
+    onBeforeSessionChange?.({ abortActive: true, preserveRun: true });
     try {
       const history = await apiJson(`/sessions/${id}/history`);
+      const visibleMessages = Array.isArray(history) ? history.filter(isVisibleChatMessage) : [];
       setCurrentSessionId(id);
-      setMessages(Array.isArray(history) ? history.filter(isVisibleChatMessage) : []);
+      setMessages(visibleMessages);
+      return visibleMessages;
     } catch (error) {
       showError(`加载会话失败：${normalizeError(error)}`);
+      return null;
     }
   }, [apiJson, onBeforeSessionChange, showError]);
 
@@ -71,7 +74,7 @@ export function useSessions({
       setSessions((items) => items.filter((item) => item.id !== id));
       if (currentSessionId === id) {
         setCurrentSessionId(null);
-        onBeforeSessionChange?.({ abortActive: true });
+        onBeforeSessionChange?.({ abortActive: true, preserveRun: false });
       }
     } catch (error) {
       showError(`删除会话失败：${normalizeError(error)}`);

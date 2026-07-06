@@ -23,6 +23,7 @@ mod auth;
 mod core_client;
 mod hooks;
 mod reply;
+mod run_events;
 mod sessions;
 mod state;
 mod workspace;
@@ -36,7 +37,8 @@ use api_types::{
 use auth::require_api_key;
 use core_client::{AgentCoreClient, CoreRuntimeStatus};
 use hooks::{get_workspace_hooks, put_workspace_hooks};
-use reply::reply_core;
+use reply::{reply_core, stream_run_events};
+use run_events::RunEventStore;
 use sessions::{
     compact_session, create_session, delete_session, fork_session, get_session_history,
     list_sessions, rename_session,
@@ -61,14 +63,14 @@ fn session_database_url() -> String {
 }
 
 fn default_session_database_url() -> String {
-    let path = non_empty_env("NIGHT24_DATA_DIR")
-        .map(|value| PathBuf::from(value).join("night24.db"))
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join("night24.db")
-        });
+    let path = data_dir().join("night24.db");
     sqlite_file_url(path)
+}
+
+fn data_dir() -> PathBuf {
+    non_empty_env("NIGHT24_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 fn non_empty_env(key: &str) -> Option<String> {
@@ -116,6 +118,7 @@ fn sqlite_file_url(path: PathBuf) -> String {
     paths(
         healthz,
         reply::reply,
+        reply::stream_run_events,
         sessions::list_sessions,
         sessions::get_session_history,
         sessions::create_session,
@@ -177,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let provider_registry = build_provider_registry();
     let permission_manager = build_permission_manager();
+    let run_events = Arc::new(RunEventStore::new(data_dir().join("run-events")));
     let core_client = match AgentCoreClient::spawn().await {
         Ok(client) => {
             info!("agent-core initialized");
@@ -194,12 +198,14 @@ async fn main() -> anyhow::Result<()> {
         permission_manager: Arc::new(permission_manager),
         workspace_state: Arc::new(tokio::sync::RwLock::new(WorkspaceState::new())),
         core_client: Arc::new(tokio::sync::RwLock::new(core_client)),
+        run_events,
     };
 
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/reply", post(reply_core))
+        .route("/runs/{run_id}/events", get(stream_run_events))
         .route("/agent/cancel", post(agent_cancel))
         .route("/agent/core/restart", post(restart_agent_core))
         .route("/agent/subagents", get(get_agent_subagents))

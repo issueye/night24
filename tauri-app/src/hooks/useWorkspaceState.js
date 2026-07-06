@@ -142,7 +142,7 @@ export function useWorkspaceState({
       });
       if (!isCurrentOpenRequest()) return;
       loadWorkspaceRequestRef.current += 1;
-      clearConversationView({ abortActive: true });
+      clearConversationView({ abortActive: true, preserveRun: true });
       onWorkspaceOpened?.();
       diffGenerationRef.current += 1;
       diffRequestRef.current = null;
@@ -150,7 +150,6 @@ export function useWorkspaceState({
       setWorkspace(opened);
       rememberWorkspace(opened);
       setRightTab('files');
-      setContextOpen(true);
       setSelectedFile(null);
       setWorkspaceStatus(null);
       setWorkspaceDiff(null);

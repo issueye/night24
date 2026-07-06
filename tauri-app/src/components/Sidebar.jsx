@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Bot, Clock3, MessageSquare, MessageSquarePlus, Settings2, Trash2 } from 'lucide-react';
 import { classNames, formatTime } from '../utils/format.js';
 
@@ -13,6 +14,12 @@ export function Sidebar({
   onDeleteSession,
   onToggleSettings,
 }) {
+  const [selectedRecentPath, setSelectedRecentPath] = useState('');
+
+  useEffect(() => {
+    setSelectedRecentPath('');
+  }, [workspace?.root_path]);
+
   return (
     <aside className="left-panel menu-sidebar">
       <nav className="primary-nav" aria-label="主导航">
@@ -22,7 +29,7 @@ export function Sidebar({
       <section className="menu-section project-block">
         <div className="menu-section-head">
           <span>项目</span>
-          <button className="mini-button" onClick={() => onOpenWorkspace()} type="button">打开</button>
+          <button className="mini-button" onClick={() => onOpenWorkspace(selectedRecentPath || undefined)} type="button">打开</button>
         </div>
         {workspace ? (
           <div className="project-current">
@@ -37,7 +44,13 @@ export function Sidebar({
             <div className="menu-label"><Clock3 size={12} />最近</div>
             <div className="recent-list">
               {recentWorkspaces.slice(0, 4).map((item) => (
-                <button key={item.root_path} onClick={() => onOpenWorkspace(item.root_path)} type="button">
+                <button
+                  className={classNames(selectedRecentPath === item.root_path && 'selected')}
+                  key={item.root_path}
+                  onClick={() => setSelectedRecentPath(item.root_path)}
+                  title={item.root_path}
+                  type="button"
+                >
                   {item.name}
                 </button>
               ))}

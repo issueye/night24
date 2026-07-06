@@ -16,7 +16,7 @@ import { useServerStatus } from './hooks/useServerStatus.js';
 import { useSubAgents } from './hooks/useSubAgents.js';
 import { useTimeline } from './hooks/useTimeline.js';
 import { useWorkspaceState } from './hooks/useWorkspaceState.js';
-import { classNames } from './utils/format.js';
+import { classNames, isVisibleChatMessage } from './utils/format.js';
 import { estimateContextUsage } from './utils/context.js';
 import { normalizeError } from './utils/events.js';
 import { buildReplyRequestBody } from './utils/reply.js';
@@ -29,6 +29,13 @@ import {
   readSetting,
   sameWorkspacePath,
 } from './utils/settings.js';
+
+const STREAM_RECOVERY_ATTEMPTS = 40;
+const STREAM_RECOVERY_DELAY_MS = 1500;
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 export default function App() {
   const [apiBase, setApiBase] = useState(() => readSetting(STORAGE_KEYS.apiBase, DEFAULT_SERVER));
@@ -65,6 +72,9 @@ export default function App() {
 
   const abortRef = useRef(null);
   const runTerminalRef = useRef(null);
+  const streamCheckpointRef = useRef({ runId: null, lastSeq: 0 });
+  const runCheckpointBySessionRef = useRef(new Map());
+  const activeRunSessionIdRef = useRef(null);
   const messageEndRef = useRef(null);
   const messageSetterRef = useRef(null);
   const clearCurrentSessionRef = useRef(null);
@@ -85,12 +95,19 @@ export default function App() {
     ]);
   }, []);
 
-  const clearConversationView = useCallback(({ abortActive = false } = {}) => {
+  const clearConversationView = useCallback(({ abortActive = false, preserveRun = false } = {}) => {
     if (abortActive) {
+      if (preserveRun) {
+        runTerminalRef.current = { type: 'detached', runId: streamCheckpointRef.current.runId };
+      }
       abortRef.current?.abort();
       abortRef.current = null;
     }
-    runTerminalRef.current = null;
+    if (!preserveRun) {
+      runTerminalRef.current = null;
+      streamCheckpointRef.current = { runId: null, lastSeq: 0 };
+      activeRunSessionIdRef.current = null;
+    }
     messageSetterRef.current?.([]);
     setPendingPermissions([]);
     clearTimeline();
@@ -182,6 +199,139 @@ export default function App() {
     runTerminalRef,
   });
 
+  async function refreshSessionHistory(sessionId) {
+    const history = await apiJson(`/sessions/${sessionId}/history`);
+    const visibleMessages = Array.isArray(history) ? history.filter(isVisibleChatMessage) : [];
+    setMessages(visibleMessages);
+    return visibleMessages;
+  }
+
+  function rememberStreamEvent(event, sessionId = activeRunSessionIdRef.current || currentSessionId) {
+    const payload = event?.payload;
+    const runId = typeof payload?.run_id === 'string' ? payload.run_id : null;
+    const seq = Number.isFinite(payload?.seq) ? payload.seq : null;
+    const checkpoint = {
+      runId: runId || streamCheckpointRef.current.runId,
+      lastSeq: seq == null ? streamCheckpointRef.current.lastSeq : Math.max(streamCheckpointRef.current.lastSeq, seq),
+    };
+    streamCheckpointRef.current = checkpoint;
+    if (sessionId && checkpoint.runId) {
+      if (['finish', 'error'].includes(event?.eventName) || ['finish', 'error'].includes(payload?.type)) {
+        runCheckpointBySessionRef.current.delete(sessionId);
+      } else {
+        runCheckpointBySessionRef.current.set(sessionId, checkpoint);
+      }
+    }
+  }
+
+  async function replayRunEvents(runId, afterSeq, sessionId = activeRunSessionIdRef.current || currentSessionId, signal) {
+    const response = await fetch(apiUrl(apiBase, `/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}`), {
+      method: 'GET',
+      headers,
+      signal,
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `HTTP ${response.status}`);
+    }
+    await readSseStream(response.body, (event) => {
+      rememberStreamEvent(event, sessionId);
+      handleAgentEvent(event.eventName, event.payload);
+    });
+  }
+
+  async function recoverDisconnectedStream(sessionId, baselineVisibleCount, detail) {
+    const checkpoint = streamCheckpointRef.current;
+    if (checkpoint.runId) {
+      addTimeline('stream_recovering', '连接恢复中', `${detail} · ${checkpoint.runId}`, 'warning');
+      for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
+        if (attempt > 0) {
+          await delay(STREAM_RECOVERY_DELAY_MS);
+        }
+
+        try {
+          await replayRunEvents(checkpoint.runId, streamCheckpointRef.current.lastSeq, sessionId);
+          if (runTerminalRef.current) {
+            return true;
+          }
+        } catch (error) {
+          addTimeline('stream_recovering', '重连重试', normalizeError(error), 'warning');
+        }
+      }
+    }
+
+    addTimeline('stream_recovering', '连接恢复中', `${detail} · 回退到会话历史同步`, 'warning');
+
+    for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) {
+        await delay(STREAM_RECOVERY_DELAY_MS);
+      }
+
+      try {
+        const visibleMessages = await refreshSessionHistory(sessionId);
+        if (visibleMessages.length >= baselineVisibleCount + 2) {
+          runTerminalRef.current = { type: 'recovered' };
+          setIsRunning(false);
+          setActiveRun((run) => (run ? { ...run, status: 'synced' } : { status: 'synced' }));
+          addTimeline('stream_recovered', '会话已同步', '已从会话历史补齐后台结果', 'success');
+          loadWorkspaceDiff();
+          return true;
+        }
+      } catch (error) {
+        addTimeline('stream_recovering', '同步重试', normalizeError(error), 'warning');
+      }
+    }
+
+    const timeoutDetail = '事件流已断开，后台任务可能仍在运行；稍后重新打开当前会话会同步结果';
+    setIsRunning(false);
+    setActiveRun((run) => (run ? { ...run, status: 'detached' } : { status: 'detached' }));
+    addTimeline('stream_detached', '连接已分离', timeoutDetail, 'warning');
+    showError(timeoutDetail);
+    return false;
+  }
+
+  async function handleSelectSession(id) {
+    const visibleMessages = await selectSession(id);
+    if (!visibleMessages) return;
+
+    const checkpoint = runCheckpointBySessionRef.current.get(id);
+    if (!checkpoint?.runId) {
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    activeRunSessionIdRef.current = id;
+    streamCheckpointRef.current = checkpoint;
+    runTerminalRef.current = null;
+    setIsRunning(true);
+    setActiveRun({ run_id: checkpoint.runId, status: 'reconnecting' });
+    addTimeline('stream_recovering', '继续接收会话事件', checkpoint.runId, 'warning');
+
+    try {
+      await replayRunEvents(checkpoint.runId, checkpoint.lastSeq, id, controller.signal);
+      if (!runTerminalRef.current) {
+        await refreshSessionHistory(id);
+        setIsRunning(false);
+        setActiveRun((run) => (run ? { ...run, status: 'synced' } : { status: 'synced' }));
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        setIsRunning(false);
+        setActiveRun((run) => (run ? { ...run, status: 'detached' } : { status: 'detached' }));
+        addTimeline('stream_detached', '会话事件暂未接上', normalizeError(error), 'warning');
+      }
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+      if (activeRunSessionIdRef.current === id) {
+        activeRunSessionIdRef.current = null;
+      }
+      loadSessions();
+    }
+  }
+
   async function sendTask() {
     const text = taskText.trim();
     if (!text || isRunning) return;
@@ -193,6 +343,7 @@ export default function App() {
     setTaskText('');
     setIsRunning(true);
     runTerminalRef.current = null;
+    streamCheckpointRef.current = { runId: null, lastSeq: 0 };
     setActiveRun({ status: 'running', started_at: new Date().toISOString() });
     addTimeline('run', '任务已发送', text, 'neutral');
 
@@ -202,10 +353,15 @@ export default function App() {
       content: [{ type: 'text', text }],
       created_at: new Date().toISOString(),
     };
+    const baselineVisibleCount = messages.length;
     setMessages((items) => [...items, userMessage]);
 
+    let streamWasOpen = false;
+    let activeSessionId = null;
     try {
       const sessionId = await ensureSession();
+      activeSessionId = sessionId;
+      activeRunSessionIdRef.current = sessionId;
       const controller = new AbortController();
       abortRef.current = controller;
       const response = await fetch(apiUrl(apiBase, '/reply'), {
@@ -230,17 +386,26 @@ export default function App() {
         throw new Error(errorText || `HTTP ${response.status}`);
       }
 
-      await readSseStream(response.body, (event) => handleAgentEvent(event.eventName, event.payload));
+      streamWasOpen = true;
+      await readSseStream(response.body, (event) => {
+        rememberStreamEvent(event, sessionId);
+        handleAgentEvent(event.eventName, event.payload);
+      });
       if (!runTerminalRef.current) {
         const detail = '事件流已断开，未收到任务结束信号';
-        showError(detail);
-        addTimeline('error', '连接中断', detail, 'error');
-        setActiveRun((run) => (run ? { ...run, status: 'interrupted' } : { status: 'interrupted' }));
-        setIsRunning(false);
+        await recoverDisconnectedStream(sessionId, baselineVisibleCount, detail);
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        runTerminalRef.current = { type: 'cancelled' };
+        if (runTerminalRef.current?.type !== 'detached') {
+          runTerminalRef.current = { type: 'cancelled' };
+        }
+      } else if (streamWasOpen && !runTerminalRef.current) {
+        await recoverDisconnectedStream(
+          activeSessionId,
+          baselineVisibleCount,
+          `事件流读取失败：${normalizeError(error)}`,
+        );
       } else {
         const detail = normalizeError(error);
         showError(`任务失败：${detail}`);
@@ -251,6 +416,9 @@ export default function App() {
       }
     } finally {
       abortRef.current = null;
+      if (activeRunSessionIdRef.current === activeSessionId) {
+        activeRunSessionIdRef.current = null;
+      }
       loadSessions();
     }
   }
@@ -348,7 +516,7 @@ export default function App() {
           settingsOpen={settingsOpen}
           onOpenWorkspace={openWorkspace}
           onCreateSession={createSession}
-          onSelectSession={selectSession}
+          onSelectSession={handleSelectSession}
           onDeleteSession={deleteSession}
           onToggleSettings={() => setSettingsOpen((value) => !value)}
         />

@@ -22,7 +22,7 @@
   padding: 0 8px;
   color: var(--text);
   background: transparent;
-  border-radius: 9px;
+  border-radius: 6px;
   cursor: pointer;
   text-align: left;
 }
@@ -49,13 +49,13 @@
   padding: 8px 10px;
   background: #ffffff;
   border-color: var(--line);
-  border-radius: 10px;
+  border-radius: 6px;
 }
 
 .recent-list button,
 .session-row,
 .tree-row {
-  border-radius: 9px;
+  border-radius: 6px;
 }
 
 .recent-list button,
@@ -72,7 +72,8 @@
 .session-row.active,
 .tree-row:hover,
 .tree-row.selected,
-.recent-list button:hover {
+.recent-list button:hover,
+.recent-list button.selected {
   color: var(--text);
   background: #ececea;
   border-color: transparent;

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use axum::{
     body::Body,
-    extract::State,
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -14,7 +14,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use futures::stream;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 
 use night24_core::{
     agent::{Agent, AgentConfig},
@@ -28,9 +28,13 @@ use night24_protocol::{
     ReplySession,
 };
 
+use crate::api_types::RunEventsQuery;
 use crate::api_types::{ReplyRequest, WorkspaceChangeSnapshot};
+use crate::run_events::{event_seq, is_terminal_event, RunEventStore};
 use crate::state::AppState;
 use crate::workspace::{build_diff_ready_event, current_workspace_path, workspace_change_snapshot};
+
+const SSE_SEND_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) async fn reply_core(
     State(state): State<AppState>,
@@ -75,6 +79,7 @@ pub(crate) async fn reply_core(
                 user_message,
                 diff_root,
                 diff_baseline,
+                run_events: state.run_events.clone(),
             },
         )
         .await;
@@ -85,6 +90,68 @@ pub(crate) async fn reply_core(
         rx.recv().await.map(|item| (item, rx))
     });
 
+    sse_stream_response(Body::from_stream(stream))
+}
+
+#[utoipa::path(
+    get,
+    path = "/runs/{run_id}/events",
+    tag = "night24",
+    params(
+        ("run_id" = String, Path, description = "Run ID"),
+        RunEventsQuery
+    ),
+    responses(
+        (status = 200, description = "Replayable SSE stream of persisted and live run events", content_type = "text/event-stream")
+    )
+)]
+pub(crate) async fn stream_run_events(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    Query(query): Query<RunEventsQuery>,
+) -> Response {
+    let mut live_rx = state.run_events.subscribe(&run_id).await;
+    let store = state.run_events.clone();
+    let (tx, rx) = mpsc::channel::<Result<String, Infallible>>(64);
+
+    tokio::spawn(async move {
+        let mut last_seq = query.after_seq.unwrap_or(0);
+        match store.load_after(&run_id, query.after_seq) {
+            Ok(events) => {
+                for event in events {
+                    update_last_seq(&event, &mut last_seq);
+                    let terminal = is_terminal_event(&event);
+                    if tx.send(Ok(sse_format_event(&event))).await.is_err() || terminal {
+                        return;
+                    }
+                }
+            }
+            Err(err) => {
+                let event = run_event_stream_error(&run_id, err.to_string());
+                let _ = tx.send(Ok(sse_format_event(&event))).await;
+                return;
+            }
+        }
+
+        if store.has_terminal(&run_id).unwrap_or(false) {
+            return;
+        }
+
+        while let Some(event) = live_rx.recv().await {
+            if !event_is_after_seq(&event, last_seq) {
+                continue;
+            }
+            update_last_seq(&event, &mut last_seq);
+            let terminal = is_terminal_event(&event);
+            if tx.send(Ok(sse_format_event(&event))).await.is_err() || terminal {
+                break;
+            }
+        }
+    });
+
+    let stream = stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
     sse_stream_response(Body::from_stream(stream))
 }
 
@@ -101,6 +168,7 @@ struct CoreEventPumpState {
     user_message: Message,
     diff_root: PathBuf,
     diff_baseline: Option<WorkspaceChangeSnapshot>,
+    run_events: Arc<RunEventStore>,
 }
 
 struct CoreEventDispatch {
@@ -120,12 +188,41 @@ async fn pump_core_events(
 ) -> Session {
     let user_message_id = state.user_message.id.clone();
     state.session.conversation.push(state.user_message.clone());
+    let mut sse_open = true;
 
     while let Some(event) = core_events.recv().await {
         let dispatch = prepare_core_event_dispatch(&mut state, event);
         for event_to_send in dispatch.events {
-            if tx.send(Ok(sse_format_event(&event_to_send))).await.is_err() {
-                return finalize_pumped_session(state.session, &state.run_id, &user_message_id);
+            if let Err(err) = state
+                .run_events
+                .append_and_publish(&state.run_id, &event_to_send)
+                .await
+            {
+                warn!(run_id = %state.run_id, error = ?err, "failed to persist run event");
+            }
+            if sse_open {
+                let send_result = tokio::time::timeout(
+                    SSE_SEND_TIMEOUT,
+                    tx.send(Ok(sse_format_event(&event_to_send))),
+                )
+                .await;
+                match send_result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
+                        sse_open = false;
+                        warn!(
+                            run_id = %state.run_id,
+                            "SSE client disconnected; continuing run until agent-core terminal event"
+                        );
+                    }
+                    Err(_) => {
+                        sse_open = false;
+                        warn!(
+                            run_id = %state.run_id,
+                            "SSE client stalled; continuing run without waiting for UI stream"
+                        );
+                    }
+                }
             }
         }
         if dispatch.is_terminal {
@@ -500,6 +597,30 @@ pub(crate) fn sse_format_event(event: &serde_json::Value) -> String {
     format!("event: {event_type}\ndata: {event}\n\n")
 }
 
+fn event_is_after_seq(event: &serde_json::Value, last_seq: u64) -> bool {
+    event_seq(event).is_some_and(|seq| seq > last_seq)
+}
+
+fn update_last_seq(event: &serde_json::Value, last_seq: &mut u64) {
+    if let Some(seq) = event_seq(event) {
+        *last_seq = (*last_seq).max(seq);
+    }
+}
+
+fn run_event_stream_error(run_id: &str, message: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({
+        "type": "error",
+        "run_id": run_id,
+        "seq": u64::MAX,
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "payload": {
+            "code": "run_event_replay_failed",
+            "message": message.into(),
+            "recoverable": true
+        }
+    })
+}
+
 fn sse_error_response(
     run_id: Option<String>,
     code: impl Into<String>,
@@ -781,6 +902,10 @@ mod tests {
                 recent: Vec::new(),
             })),
             core_client: Arc::new(tokio::sync::RwLock::new(None)),
+            run_events: Arc::new(RunEventStore::new(
+                std::env::temp_dir()
+                    .join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4())),
+            )),
         }
     }
 
@@ -1279,5 +1404,75 @@ mod tests {
             }
             _ => panic!("expected text block"),
         }
+    }
+
+    #[tokio::test]
+    async fn pump_core_events_continues_after_sse_disconnect() {
+        let (core_tx, core_rx) = tokio::sync::mpsc::channel(4);
+        let (sse_tx, sse_rx) = tokio::sync::mpsc::channel(1);
+        drop(sse_rx);
+
+        let user_message = Message::user("new question");
+        let assistant_id = "assistant-1";
+        let run_events_dir =
+            std::env::temp_dir().join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4()));
+        let run_events = Arc::new(RunEventStore::new(run_events_dir.clone()));
+        let pump = tokio::spawn(pump_core_events(
+            core_rx,
+            sse_tx,
+            CoreEventPumpState {
+                session: Session::new(
+                    "session",
+                    PathBuf::from("E:/codes/project"),
+                    SessionType::User,
+                ),
+                run_id: "run-test".to_string(),
+                user_message,
+                diff_root: PathBuf::from("E:/codes/project"),
+                diff_baseline: None,
+                run_events,
+            },
+        ));
+
+        core_tx
+            .send(serde_json::json!({
+                "type": "message_delta",
+                "run_id": "run-test",
+                "payload": {
+                    "message_id": assistant_id,
+                    "delta": "partial"
+                }
+            }))
+            .await
+            .unwrap();
+        core_tx
+            .send(serde_json::json!({
+                "type": "finish",
+                "run_id": "run-test",
+                "payload": {
+                    "status": "completed",
+                    "messages": [{
+                        "id": assistant_id,
+                        "role": "assistant",
+                        "content": [{ "type": "text", "text": "final reply" }],
+                        "created_at": "2026-07-03T01:02:05Z"
+                    }]
+                }
+            }))
+            .await
+            .unwrap();
+
+        let finalized = pump.await.unwrap();
+        let assistant = finalized
+            .conversation
+            .iter()
+            .find(|message| message.id == assistant_id)
+            .expect("assistant message should be retained after SSE disconnect");
+        match &assistant.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "final reply"),
+            _ => panic!("expected text block"),
+        }
+
+        let _ = std::fs::remove_dir_all(run_events_dir);
     }
 }

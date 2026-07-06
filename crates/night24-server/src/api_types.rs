@@ -51,6 +51,12 @@ pub(crate) struct CancelAgentRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+pub(crate) struct RunEventsQuery {
+    #[serde(default)]
+    pub(crate) after_seq: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
 pub(crate) struct SubAgentPoolQuery {
     #[serde(default)]
     pub(crate) subagent_id: Option<String>,
