@@ -683,6 +683,8 @@
 
 追加完成：`core_client.rs` 的 agent event 路由在消费端关闭时会移除对应 run sender，避免非终止事件继续保留无效 sender，并补充断开连接后的清理测试。
 
+追加完成：`core_client.rs` 抽出 event sender 清理 helper，重启、stdout 关闭、终止事件和接收端关闭复用同一清理入口，并补充批量清理与按 run_id 精确移除测试。
+
 #### S1：抽 session run 准备逻辑
 
 范围：

@@ -116,9 +116,7 @@ impl AgentCoreClient {
         }
 
         reject_pending_requests(&self.pending, "agent-core restarted");
-        if let Ok(mut senders) = self.event_senders.lock() {
-            senders.clear();
-        }
+        clear_event_senders(&self.event_senders);
 
         {
             let mut child = self
@@ -536,16 +534,12 @@ fn route_agent_event(event_senders: &EventSenders, params: serde_json::Value) {
         .and_then(|guard| guard.get(&run_id).cloned());
     if let Some(sender) = sender {
         if sender.blocking_send(params).is_err() {
-            if let Ok(mut guard) = event_senders.lock() {
-                guard.remove(&run_id);
-            }
+            remove_event_sender(event_senders, &run_id);
             return;
         }
     }
     if is_terminal {
-        if let Ok(mut guard) = event_senders.lock() {
-            guard.remove(&run_id);
-        }
+        remove_event_sender(event_senders, &run_id);
     }
 }
 
@@ -579,11 +573,26 @@ fn close_current_core_transport(
         *guard = CoreRuntimeStatus::unavailable(reason.to_string());
     }
     reject_pending_requests(pending, reason);
-    if let Ok(mut senders) = event_senders.lock() {
-        senders.clear();
-    }
+    clear_event_senders(event_senders);
     warn!(reason, "agent-core transport closed");
     true
+}
+
+fn clear_event_senders(event_senders: &EventSenders) -> usize {
+    let Ok(mut senders) = event_senders.lock() else {
+        return 0;
+    };
+    let count = senders.len();
+    senders.clear();
+    count
+}
+
+fn remove_event_sender(event_senders: &EventSenders, run_id: &str) -> bool {
+    event_senders
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.remove(run_id))
+        .is_some()
 }
 
 fn agent_event_run_id(event: &serde_json::Value) -> Option<&str> {
@@ -909,6 +918,46 @@ mod tests {
         );
 
         assert!(event_senders.lock().unwrap().get("run-1").is_none());
+    }
+
+    #[test]
+    fn clear_event_senders_removes_all_senders_and_reports_count() {
+        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let (tx1, _rx1) = mpsc::channel(1);
+        let (tx2, _rx2) = mpsc::channel(1);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-1".to_string(), tx1);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-2".to_string(), tx2);
+
+        assert_eq!(clear_event_senders(&event_senders), 2);
+        assert!(event_senders.lock().unwrap().is_empty());
+        assert_eq!(clear_event_senders(&event_senders), 0);
+    }
+
+    #[test]
+    fn remove_event_sender_removes_only_matching_run() {
+        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let (tx1, _rx1) = mpsc::channel(1);
+        let (tx2, _rx2) = mpsc::channel(1);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-1".to_string(), tx1);
+        event_senders
+            .lock()
+            .unwrap()
+            .insert("run-2".to_string(), tx2);
+
+        assert!(remove_event_sender(&event_senders, "run-1"));
+        assert!(!remove_event_sender(&event_senders, "missing"));
+        let guard = event_senders.lock().unwrap();
+        assert!(!guard.contains_key("run-1"));
+        assert!(guard.contains_key("run-2"));
     }
 
     #[test]
