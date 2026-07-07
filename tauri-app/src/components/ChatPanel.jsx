@@ -4,6 +4,7 @@ import { ChatComposer } from './chat/ChatComposer.jsx';
 import { ChatConversation } from './chat/ChatConversation.jsx';
 import { buildConversationItems, RunStatusRow } from './ConversationActivity.jsx';
 import { TaskProgressPanel } from './TaskProgressPanel.jsx';
+import { classNames } from '../utils/format.js';
 
 export function ChatPanel({
   messages,
@@ -30,16 +31,18 @@ export function ChatPanel({
     [messages],
   );
   const conversationItems = useMemo(() => buildConversationItems(chatMessages), [chatMessages]);
+  const hasConversationContent =
+    conversationItems.length > 0 || taskProgress.hasProgress || pendingPermissions.length > 0;
 
   return (
-    <section className="center-panel">
+    <section className={classNames('center-panel', hasConversationContent ? 'chat-active-state' : 'chat-initial-state')}>
       <ChatConversation
         chatMessages={chatMessages}
         conversationItems={conversationItems}
         messageEndRef={messageEndRef}
         pendingPermissions={pendingPermissions}
-        showEmpty={conversationItems.length === 0 && !taskProgress.hasProgress}
-        showTimeline
+        showEmpty={!hasConversationContent}
+        showTimeline={hasConversationContent}
         onResolvePermission={onResolvePermission}
       />
 

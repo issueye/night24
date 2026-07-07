@@ -96,6 +96,35 @@
   border-color: transparent;
 }
 
+.ui-tabs {
+  display: flex;
+  min-width: 0;
+}
+
+.ui-tabs-list {
+  display: flex;
+  min-width: 0;
+}
+
+.ui-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-gap);
+  min-width: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.ui-tab:focus-visible {
+  outline: 2px solid var(--ring-border);
+  outline-offset: -2px;
+}
+
 .ui-popover {
   position: relative;
   display: inline-grid;

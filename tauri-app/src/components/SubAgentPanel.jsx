@@ -3,7 +3,7 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Placeholder } from './Placeholder.jsx';
 import { SubAgentDetail } from './subagents/SubAgentDetail.jsx';
 import { compactSubAgentText, subAgentStatusMeta } from './subagents/status.js';
-import { Button, IconButton } from './ui/index.js';
+import { Button, IconButton, Tab, Tabs } from './ui/index.js';
 
 export function SubAgentPanel({
   pool,
@@ -75,28 +75,26 @@ export function SubAgentPanel({
         <Placeholder title="暂无子代理" detail="当前会话尚未创建子代理会话。" />
       ) : (
         <div className="subagent-layout">
-          <div className="subagent-tabs" role="tablist">
+          <Tabs ariaLabel="子代理页签" listClassName="subagent-tabs">
             {(loading || spawning) && agents.length === 0
               ? Array.from({ length: 3 }).map((_, index) => <div className="subagent-skeleton tab" key={index} />)
               : agents.map((agent, index) => {
                 const meta = subAgentStatusMeta(agent.status);
                 const label = agent.name || `Agent ${index + 1}`;
                 return (
-                  <Button
-                    className={selected?.id === agent.id ? 'active' : ''}
+                  <Tab
+                    active={selected?.id === agent.id}
                     key={agent.id || index}
-                    onClick={() => setSelectedId(agent.id)}
-                    role="tab"
+                    onSelect={() => setSelectedId(agent.id)}
                     title={agent.task || label}
-                    variant="ghost"
                   >
                     <span className={`subagent-dot ${meta.tone}`} />
                     <span>{compactSubAgentText(label, 22)}</span>
                     <em>{meta.label}</em>
-                  </Button>
+                  </Tab>
                 );
               })}
-          </div>
+          </Tabs>
           {agents.length === 0 && spawning ? (
             <Placeholder title="正在创建子代理" detail="已检测到子代理调用，正在同步子代理会话。" />
           ) : (

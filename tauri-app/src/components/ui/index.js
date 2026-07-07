@@ -11,6 +11,7 @@ export { ProgressRing } from './ProgressRing.jsx';
 export { Select } from './Select.jsx';
 export { Switch } from './Switch.jsx';
 export { Tag } from './Tag.jsx';
+export { Tab, Tabs } from './Tabs.jsx';
 export { TextField } from './TextField.jsx';
 export { Timeline } from './Timeline.jsx';
 export { Toast } from './Toast.jsx';

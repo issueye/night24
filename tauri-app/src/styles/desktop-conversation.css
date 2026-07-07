@@ -10,6 +10,31 @@
   box-shadow: none;
 }
 
+.app-shell .center-panel.chat-initial-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  gap: 20px;
+}
+
+.app-shell .center-panel.chat-initial-state .conversation-area {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.app-shell .center-panel.chat-initial-state .messages {
+  padding: 0;
+}
+
+.app-shell .center-panel.chat-initial-state .welcome-panel {
+  margin-top: 0;
+}
+
+.app-shell .center-panel.chat-initial-state .conversation-bottom-activity {
+  display: none;
+}
+
 .app-shell .conversation-area {
   width: min(940px, calc(100% - 52px));
   margin: 0 auto;

@@ -1,6 +1,6 @@
 import { Bot, Circle, Loader2, MessageSquarePlus, X } from 'lucide-react';
 import { classNames } from '../utils/format.js';
-import { IconButton } from './ui/index.js';
+import { IconButton, Tab, Tabs } from './ui/index.js';
 
 const MAX_TAB_LABEL = 24;
 
@@ -22,29 +22,50 @@ export function ChatTabs({
   onToggleAgents,
 }) {
   return (
-    <div className="chat-tabs-bar" role="tablist">
-      <div className="chat-tabs-list">
-        {openSessions.length === 0 && (
-          <div className="chat-tabs-empty">未打开会话</div>
-        )}
+    <Tabs
+      ariaLabel="会话页签"
+      className="chat-tabs-bar"
+      listClassName="chat-tabs-list"
+      empty={openSessions.length === 0 ? <div className="chat-tabs-empty">未打开会话</div> : null}
+      trailing={(
+        <div className="chat-tabs-trailing">
+          <div className="chat-tabs-server" title={serverDetail}>
+            <Circle size={8} fill="currentColor" />
+            <span>{serverDetail}</span>
+          </div>
+          <IconButton
+            className={classNames('icon-button compact', agentsActive && 'active')}
+            label="子代理浮窗"
+            onClick={onToggleAgents}
+            size="sm"
+          >
+            <Bot size={14} />
+          </IconButton>
+        </div>
+      )}
+    >
         {openSessions.map((session) => {
           const isActive = session.id === activeSessionId;
           const isRunning = runningSessionIds.has(session.id);
           return (
             <div
-              className={classNames('chat-tab', isActive && 'active', isRunning && 'running')}
+              className={classNames('chat-tab-shell', isActive && 'active', isRunning && 'running')}
               key={session.id}
-              onClick={() => onSelectSession(session.id)}
-              role="tab"
-              aria-selected={isActive}
               title={session.name || session.id}
             >
-              {isRunning ? (
-                <Loader2 className="chat-tab-spinner" size={12} />
-              ) : (
-                <span className="chat-tab-dot" />
-              )}
-              <span className="chat-tab-label">{compactLabel(session.name || session.id)}</span>
+              <Tab
+                active={isActive}
+                className="chat-tab"
+                onSelect={() => onSelectSession(session.id)}
+                title={session.name || session.id}
+              >
+                {isRunning ? (
+                  <Loader2 className="chat-tab-spinner" size={12} />
+                ) : (
+                  <span className="chat-tab-dot" />
+                )}
+                <span className="chat-tab-label">{compactLabel(session.name || session.id)}</span>
+              </Tab>
               <button
                 className="chat-tab-close"
                 aria-label="关闭页签"
@@ -68,21 +89,6 @@ export function ChatTabs({
         >
           <MessageSquarePlus size={14} />
         </IconButton>
-      </div>
-      <div className="chat-tabs-trailing">
-        <div className="chat-tabs-server" title={serverDetail}>
-          <Circle size={8} fill="currentColor" />
-          <span>{serverDetail}</span>
-        </div>
-        <IconButton
-          className={classNames('icon-button compact', agentsActive && 'active')}
-          label="子代理浮窗"
-          onClick={onToggleAgents}
-          size="sm"
-        >
-          <Bot size={14} />
-        </IconButton>
-      </div>
-    </div>
+    </Tabs>
   );
 }

@@ -7,6 +7,10 @@
   background: var(--bg);
 }
 
+.conversation-area.no-timeline {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .messages {
   display: flex;
   flex-direction: column;

@@ -43,7 +43,6 @@
 }
 
 .subagent-tabs {
-  display: flex;
   min-width: 0;
   gap: 6px;
   overflow-x: auto;
@@ -51,30 +50,31 @@
   scrollbar-gutter: stable;
 }
 
-.subagent-tabs .ui-button {
+.subagent-tabs .ui-tab {
   flex: 0 0 auto;
   max-width: 220px;
   justify-content: flex-start;
   gap: 6px;
   min-width: 108px;
   border: 1px solid var(--line);
+  border-radius: var(--radius-md);
   background: var(--surface-soft);
 }
 
-.subagent-tabs .ui-button.active {
+.subagent-tabs .ui-tab.active {
   color: var(--blue);
   background: var(--ring);
   border-color: var(--blue-soft);
 }
 
-.subagent-tabs .ui-button > span:not(.subagent-dot) {
+.subagent-tabs .ui-tab > span:not(.subagent-dot) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.subagent-tabs .ui-button em {
+.subagent-tabs .ui-tab em {
   flex: 0 0 auto;
   margin-left: auto;
   color: var(--subtle);

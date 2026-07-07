@@ -61,7 +61,11 @@ export function ChatConversation({
 
   return (
     <>
-      <div className="conversation-area" onScroll={updateScrollButton} ref={scrollRef}>
+      <div
+        className={classNames('conversation-area', !showTimeline && 'no-timeline')}
+        onScroll={updateScrollButton}
+        ref={scrollRef}
+      >
         {showTimeline && <ConversationTimeline messages={chatMessages} onJump={scrollToTarget} />}
 
         <div className="messages">
