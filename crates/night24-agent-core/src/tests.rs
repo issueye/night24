@@ -85,6 +85,26 @@ fn system_prompt_includes_complex_task_workflow_contract() {
     assert!(system.contains("return concise summaries with key files"));
 }
 
+#[test]
+fn provider_turn_retry_classifier_skips_non_recoverable_errors() {
+    assert!(!is_retryable_provider_turn_error(&anyhow::anyhow!(
+        "provider error: OpenAI Responses API error 403 Forbidden: insufficient balance"
+    )));
+    assert!(!is_retryable_provider_turn_error(&anyhow::anyhow!(
+        "Hint: the OpenAI Responses protocol requires a base URL that supports POST /responses. switch the provider to openai-chat"
+    )));
+}
+
+#[test]
+fn provider_turn_retry_classifier_accepts_transient_errors() {
+    assert!(is_retryable_provider_turn_error(&anyhow::anyhow!(
+        "provider error: OpenAI Responses API error 502 Bad Gateway: upstream request failed"
+    )));
+    assert!(is_retryable_provider_turn_error(&anyhow::anyhow!(
+        "network error: connection reset"
+    )));
+}
+
 #[tokio::test]
 async fn task_list_tool_creates_progress_message() {
     let mut core = initialized_core().await;

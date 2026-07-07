@@ -40,8 +40,8 @@ use night24_protocol::ProviderConfig;
 use night24_protocol::{
     AcceptedResult, AgentEvent, AgentEventKind, AgentToolsParams, AgentToolsResult, CancelParams,
     EventError, FinishStatus, InitializeParams, InitializeResult, JsonRpcError, JsonRpcId,
-    JsonRpcRequest, JsonRpcResponse, PeerInfo, PermissionResolution, PingParams, PingResult,
-    ReplyAccepted, ReplyParams, ShutdownParams, SkillLoadParams, SkillLoadResult,
+    JsonRpcRequest, JsonRpcResponse, OutputStream, PeerInfo, PermissionResolution, PingParams,
+    PingResult, ReplyAccepted, ReplyParams, ShutdownParams, SkillLoadParams, SkillLoadResult,
     SkillRegistryParams, SkillRegistryResult, SubAgentPoolParams, SubAgentPoolResult,
     PROTOCOL_VERSION,
 };
@@ -50,6 +50,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::Instant;
 
 const SERVER_NAME: &str = "night24-agent-core";
+const PROVIDER_TURN_RETRY_SOURCE: &str = "provider_retry";
 
 pub struct AgentCore {
     state: CoreState,
@@ -448,22 +449,19 @@ impl AgentCore {
                         max_tokens: None,
                         request_retries: clamp_request_retries(params.options.request_retries),
                     };
-                    let turn_result = tokio::time::timeout(
-                        Duration::from_millis(params.limits.turn_timeout_ms.max(1)),
-                        run_provider_turn(
-                            context,
-                            &params.run_id,
-                            &params.session.working_dir,
-                            provider.as_ref(),
-                            &model_config,
-                            &system,
-                            &messages,
-                            &tools,
-                            params.options.stream_message_delta,
-                        ),
+                    let turn_result = run_provider_turn_with_retries(
+                        context,
+                        &params.run_id,
+                        &params.session.working_dir,
+                        provider.as_ref(),
+                        &model_config,
+                        &system,
+                        &messages,
+                        &tools,
+                        params.options.stream_message_delta,
+                        params.limits.turn_timeout_ms,
                     )
-                    .await
-                    .map_err(|_| anyhow::anyhow!("agent turn timed out"))??;
+                    .await?;
                     let ProviderTurn {
                         messages: turn_messages,
                         has_tool_requests,
@@ -848,6 +846,106 @@ impl AgentCore {
 struct ProviderTurn {
     messages: Vec<Message>,
     has_tool_requests: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_provider_turn_with_retries(
+    context: &RunContext,
+    run_id: &str,
+    working_dir: &std::path::Path,
+    provider: &dyn Provider,
+    model_config: &ModelConfig,
+    system: &str,
+    messages: &[Message],
+    tools: &[Tool],
+    stream_message_delta: bool,
+    turn_timeout_ms: u64,
+) -> anyhow::Result<ProviderTurn> {
+    let max_retries = model_config.request_retries;
+    let mut retries_done = 0;
+
+    loop {
+        let result = tokio::time::timeout(
+            Duration::from_millis(turn_timeout_ms.max(1)),
+            run_provider_turn(
+                context,
+                run_id,
+                working_dir,
+                provider,
+                model_config,
+                system,
+                messages,
+                tools,
+                stream_message_delta,
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("agent turn timed out"))
+        .and_then(|result| result);
+
+        match result {
+            Ok(turn) => return Ok(turn),
+            Err(err) => {
+                if context.is_cancelled() {
+                    return Err(err);
+                }
+                if retries_done >= max_retries || !is_retryable_provider_turn_error(&err) {
+                    return Err(err);
+                }
+                retries_done += 1;
+                context.send(AgentEventKind::RunOutput {
+                    source: PROVIDER_TURN_RETRY_SOURCE.to_string(),
+                    stream: OutputStream::Stderr,
+                    text: format!(
+                        "模型请求失败，正在重试 {}/{}：{}",
+                        retries_done, max_retries, err
+                    ),
+                });
+                sleep_before_provider_turn_retry(retries_done).await;
+            }
+        }
+    }
+}
+
+fn is_retryable_provider_turn_error(err: &anyhow::Error) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+    if message.contains("cancelled")
+        || message.contains("401")
+        || message.contains("403")
+        || message.contains("forbidden")
+        || message.contains("unauthorized")
+        || message.contains("insufficient balance")
+        || message.contains("invalid api key")
+        || message.contains("requires a base url that supports post /responses")
+        || message.contains("switch the provider")
+    {
+        return false;
+    }
+
+    message.contains("network error")
+        || message.contains("timed out")
+        || message.contains("timeout")
+        || message.contains("connection")
+        || message.contains("upstream request failed")
+        || message.contains("too many requests")
+        || message.contains("429")
+        || message.contains("500")
+        || message.contains("502")
+        || message.contains("503")
+        || message.contains("504")
+        || message.contains("bad gateway")
+        || message.contains("service unavailable")
+}
+
+async fn sleep_before_provider_turn_retry(retry_number: u8) {
+    let delay_ms = match retry_number {
+        0 | 1 => 300,
+        2 => 700,
+        3 => 1_500,
+        4 => 3_000,
+        _ => 5_000,
+    };
+    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 }
 
 #[allow(clippy::too_many_arguments)]

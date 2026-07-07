@@ -95,8 +95,8 @@ export function RunStatusRow({ isRunning }) {
 
   return (
     <div className="conversation-activity-row run-status-row">
-      <span>正在思考</span>
       <RunningPanda className="run-status-panda" label="正在思考" showLabel={false} />
+      <span>正在思考</span>
     </div>
   );
 }

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Placeholder } from './Placeholder.jsx';
 import { SubAgentDetail } from './subagents/SubAgentDetail.jsx';
-import { SubAgentList } from './subagents/SubAgentList.jsx';
-import { SubAgentStats } from './subagents/SubAgentStats.jsx';
+import { compactSubAgentText, subAgentStatusMeta } from './subagents/status.js';
+import { Button, IconButton } from './ui/index.js';
 
 export function SubAgentPanel({
   pool,
   loading,
   error,
+  spawning,
   onRefresh,
 }) {
   const agents = useMemo(() => {
@@ -31,7 +32,12 @@ export function SubAgentPanel({
 
   return (
     <section className="subagent-panel">
-      <SubAgentStats loading={loading} onRefresh={onRefresh} pool={pool} />
+      <div className="subagent-toolbar">
+        <strong>子代理</strong>
+        <IconButton className="icon-button compact" disabled={loading} label="刷新子代理" onClick={onRefresh} size="sm">
+          <RefreshCw className={loading ? 'spin' : ''} size={13} />
+        </IconButton>
+      </div>
 
       {error && (
         <div className="subagent-error">
@@ -40,12 +46,37 @@ export function SubAgentPanel({
         </div>
       )}
 
-      {!loading && agents.length === 0 ? (
+      {!loading && !spawning && agents.length === 0 ? (
         <Placeholder title="暂无子代理" detail="当前任务尚未创建子代理，代理池为空。" />
       ) : (
         <div className="subagent-layout">
-          <SubAgentList agents={agents} loading={loading} onSelect={setSelectedId} selectedId={selected?.id} />
-          <SubAgentDetail selected={selected} />
+          <div className="subagent-tabs" role="tablist">
+            {(loading || spawning) && agents.length === 0
+              ? Array.from({ length: 3 }).map((_, index) => <div className="subagent-skeleton tab" key={index} />)
+              : agents.map((agent, index) => {
+                const meta = subAgentStatusMeta(agent.status);
+                const label = agent.name || `Agent ${index + 1}`;
+                return (
+                  <Button
+                    className={selected?.id === agent.id ? 'active' : ''}
+                    key={agent.id || index}
+                    onClick={() => setSelectedId(agent.id)}
+                    role="tab"
+                    title={agent.task || label}
+                    variant="ghost"
+                  >
+                    <span className={`subagent-dot ${meta.tone}`} />
+                    <span>{compactSubAgentText(label, 22)}</span>
+                    <em>{meta.label}</em>
+                  </Button>
+                );
+              })}
+          </div>
+          {agents.length === 0 && spawning ? (
+            <Placeholder title="正在创建子代理" detail="已检测到子代理调用，正在同步代理运行状态。" />
+          ) : (
+            <SubAgentDetail selected={selected} />
+          )}
         </div>
       )}
     </section>

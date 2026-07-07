@@ -8,61 +8,17 @@
 }
 
 .subagent-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.subagent-stats {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
+.subagent-toolbar strong {
   min-width: 0;
-}
-
-.subagent-stat {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 6px 8px;
-  background: var(--surface-soft);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-}
-
-.subagent-stat span {
-  color: var(--subtle);
-  font-size: var(--fs-sm);
-}
-
-.subagent-stat strong {
-  font-size: var(--fs-lg);
-}
-
-.subagent-stat.queued strong,
-.subagent-status.queued {
-  color: var(--amber);
-}
-
-.subagent-stat.running strong,
-.subagent-status.running {
-  color: var(--blue);
-}
-
-.subagent-stat.completed strong,
-.subagent-status.completed {
-  color: var(--green);
-}
-
-.subagent-stat.failed strong,
-.subagent-status.failed {
-  color: var(--red);
-}
-
-.subagent-stat.cancelled strong,
-.subagent-status.cancelled {
-  color: var(--amber);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 650;
 }
 
 .subagent-error {
@@ -80,9 +36,48 @@
 
 .subagent-layout {
   display: grid;
-  grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
   min-height: 0;
   overflow: hidden;
+}
+
+.subagent-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-gutter: stable;
+}
+
+.subagent-tabs .ui-button {
+  flex: 0 0 auto;
+  max-width: 220px;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 108px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
+  background: var(--surface-soft);
+}
+
+.subagent-tabs .ui-button.active {
+  color: var(--blue);
+  background: var(--ring);
+  border-color: var(--blue-soft);
+}
+
+.subagent-tabs .ui-button > span:not(.subagent-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-tabs .ui-button em {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--subtle);
+  font-style: normal;
+  font-size: var(--fs-xs);
 }

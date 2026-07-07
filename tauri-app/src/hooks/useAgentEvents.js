@@ -29,6 +29,7 @@ export function useAgentEvents({
   finishRun,
   openContextTab,
   loadWorkspaceDiff,
+  onSubAgentTool,
   showError,
   markRunTerminal,
 }) {
@@ -165,12 +166,18 @@ export function useAgentEvents({
     if (eventType === 'tool_started') {
       const timeline = normalizeToolStartedEvent(eventPayload);
       addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
+      if (eventPayload?.tool_name === 'developer__subagent_spawn') {
+        onSubAgentTool?.({ phase: 'started', payload: eventPayload, runId, sessionId });
+      }
       return;
     }
 
     if (eventType === 'tool_finished') {
       const timeline = normalizeToolFinishedEvent(eventPayload);
       addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
+      if (eventPayload?.tool_name === 'developer__subagent_spawn') {
+        onSubAgentTool?.({ phase: 'finished', payload: eventPayload, runId, sessionId });
+      }
       return;
     }
 
@@ -257,6 +264,7 @@ export function useAgentEvents({
     loadWorkspaceDiff,
     markRunEvent,
     markRunTerminal,
+    onSubAgentTool,
     openContextTab,
     setSessionMessages,
     setSessionPermissions,

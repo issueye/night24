@@ -50,6 +50,18 @@
   font-size: var(--fs-sm);
 }
 
+.subagent-status.queued {
+  color: var(--amber);
+}
+
+.subagent-status.running {
+  color: var(--blue);
+}
+
+.subagent-status.completed {
+  color: var(--green);
+}
+
 .subagent-status.failed,
 .subagent-result.error {
   color: var(--red);
@@ -188,4 +200,9 @@
   background: linear-gradient(90deg, var(--surface) 0%, var(--surface-soft) 50%, var(--surface) 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
+}
+
+.subagent-skeleton.tab {
+  flex: 0 0 128px;
+  height: 30px;
 }

@@ -61,6 +61,7 @@ export default function App() {
   const [fontSize, setFontSize] = useState(() => readSetting(STORAGE_KEYS.fontSize, 'normal'));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
+  const [subAgentSpawning, setSubAgentSpawning] = useState(false);
   const {
     providerProfiles,
     providerProfileId,
@@ -101,6 +102,8 @@ export default function App() {
   const clearCurrentSessionRef = useRef(null);
   const runTerminalsRef = useRef(new Map());
   const runEventListenersRef = useRef(new Map());
+  const lastSubAgentCountRef = useRef(0);
+  const loadSubAgentsRef = useRef(null);
   const { headers, apiJson } = useApiClient(apiBase, apiKey);
 
   const {
@@ -246,6 +249,17 @@ export default function App() {
     messageEndRef.current?.scrollIntoView({ block: 'end' });
   }, [currentContext.messages]);
 
+  const handleSubAgentTool = useCallback(({ phase }) => {
+    setSubAgentSpawning(true);
+    openContextTab('agents');
+    loadSubAgentsRef.current?.({ silent: true });
+    if (phase === 'started') {
+      [800, 1800, 3200].forEach((delayMs) => {
+        window.setTimeout(() => loadSubAgentsRef.current?.({ silent: true }), delayMs);
+      });
+    }
+  }, [openContextTab]);
+
   const { handleAgentEvent } = useAgentEvents({
     getSessionContext,
     setSessionMessages,
@@ -258,6 +272,7 @@ export default function App() {
     finishRun,
     openContextTab,
     loadWorkspaceDiff,
+    onSubAgentTool: handleSubAgentTool,
     showError,
     markRunTerminal,
   });
@@ -652,6 +667,21 @@ export default function App() {
     notify,
     running: visibleSessionRunning,
   });
+  loadSubAgentsRef.current = loadSubAgents;
+
+  useEffect(() => {
+    const count = Array.isArray(subAgentPool?.subagents)
+      ? subAgentPool.subagents.length
+      : Number(subAgentPool?.total) || 0;
+    const previousCount = lastSubAgentCountRef.current;
+    lastSubAgentCountRef.current = count;
+    if (count > 0) {
+      setSubAgentSpawning(false);
+    }
+    if (count > previousCount && visibleSessionRunning) {
+      openContextTab('agents');
+    }
+  }, [openContextTab, subAgentPool, visibleSessionRunning]);
 
   return (
     <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>
@@ -774,6 +804,7 @@ export default function App() {
           subAgentPool={subAgentPool}
           subAgentLoading={subAgentLoading}
           subAgentError={subAgentError}
+          subAgentSpawning={subAgentSpawning}
           onTabChange={openContextTab}
           onClose={() => setContextOpen(false)}
           onOpenFile={openFile}

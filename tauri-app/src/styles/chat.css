@@ -47,11 +47,61 @@
   min-width: 0;
 }
 
-.message-body > span {
-  display: block;
+.message-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 4px;
+}
+
+.message-head > span {
+  display: block;
+  min-width: 0;
   color: var(--subtle);
   font-size: var(--fs-sm);
+}
+
+.message-collapse-button {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  color: var(--subtle);
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition), background var(--transition);
+}
+
+.message:hover .message-collapse-button,
+.message:focus-within .message-collapse-button,
+.message.collapsed .message-collapse-button {
+  opacity: 1;
+}
+
+.message-collapse-button:hover {
+  color: var(--muted);
+}
+
+.message-preview {
+  display: block;
+  max-width: min(520px, 100%);
+  padding: 8px 11px;
+  overflow: hidden;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.message-preview:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
 }
 
 .message-body pre {
@@ -160,6 +210,7 @@
 .run-status-panda .running-panda-pixel {
   width: 34px;
   height: 17px;
+  transform: scaleX(-1);
 }
 
 @keyframes panda-pixel-hop {

@@ -64,11 +64,13 @@ export function useSubAgents({ apiJson, active, notify, running }) {
   useEffect(() => {
     if (active) {
       loadSubAgents();
+    } else if (running) {
+      loadSubAgents({ silent: true });
     }
-  }, [active, loadSubAgents]);
+  }, [active, loadSubAgents, running]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active && !running) return undefined;
     if (!running && !hasLiveSubAgents) return undefined;
     const timer = window.setInterval(() => {
       loadSubAgents({ silent: true });

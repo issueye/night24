@@ -48,6 +48,7 @@ export function ContextPanel({
   subAgentPool,
   subAgentLoading,
   subAgentError,
+  subAgentSpawning,
   onTabChange,
   onClose,
   onOpenFile,
@@ -156,6 +157,7 @@ export function ContextPanel({
           pool={subAgentPool}
           loading={subAgentLoading}
           error={subAgentError}
+          spawning={subAgentSpawning}
           onRefresh={onRefreshSubAgents}
         />
       )}
