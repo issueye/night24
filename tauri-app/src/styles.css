@@ -15,6 +15,7 @@
 @import "./styles/sidebar.css";
 @import "./styles/timeline.css";
 @import "./styles/chat.css";
+@import "./styles/chat-tabs.css";
 @import "./styles/chat-permissions.css";
 @import "./styles/chat-tools.css";
 @import "./styles/chat-composer.css";

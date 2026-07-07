@@ -703,6 +703,50 @@ async fn subagent_sync_spawn_returns_child_result() {
 }
 
 #[tokio::test]
+async fn subagent_sync_spawn_does_not_forward_child_events_to_parent_stream() {
+    let mut core = initialized_core().await;
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-reply",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-subagent-isolated",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_sync: inspect docs" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let events = output
+        .iter()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|value| value["method"] == "agent.event")
+        .collect::<Vec<_>>();
+
+    assert!(!events.is_empty());
+    for event in events {
+        assert_eq!(event["params"]["run_id"], "run-subagent-isolated");
+    }
+}
+
+#[tokio::test]
 async fn subagent_async_spawn_is_visible_in_pool_status() {
     let mut core = initialized_core().await;
     let spawn = json!({
@@ -770,9 +814,152 @@ async fn subagent_async_spawn_is_visible_in_pool_status() {
     let status_text = status_output.join("\n");
     assert!(status_text.contains("summarize files"));
 
-    let pool = core.subagents.snapshot(None, true, true).unwrap();
+    let pool = core.subagents.snapshot(None, None, true, true).unwrap();
     assert_eq!(pool["total"], 1);
     assert_eq!(pool["subagents"][0]["task"], "summarize files");
+}
+
+#[tokio::test]
+async fn subagent_pool_query_filters_by_parent_session() {
+    let mut core = initialized_core().await;
+
+    // 为 session-a 创建一个子代理
+    let spawn_a = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-spawn-a",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-pool-session-a",
+            "session": {
+                "id": "session-a",
+                "name": "alpha",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_async: alpha task" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+    let _ = core.handle_line(&spawn_a.to_string()).await;
+
+    // 为 session-b 创建另一个子代理
+    let spawn_b = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-spawn-b",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-pool-session-b",
+            "session": {
+                "id": "session-b",
+                "name": "beta",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:subagent_async: beta task" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+    let _ = core.handle_line(&spawn_b.to_string()).await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    // 不带过滤 → 应返回全部子代理
+    let query_all = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-pool-all",
+        "method": "agent.subagents",
+        "params": { "include_messages": false, "include_result": false }
+    });
+    let all_output = core.handle_line(&query_all.to_string()).await;
+    let all_result = all_output
+        .iter()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("pool response");
+    assert_eq!(all_result["result"]["pool"]["total"], 2);
+
+    // 按 session-a 过滤 → 只返回 session-a 的子代理
+    let query_a = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-pool-a",
+        "method": "agent.subagents",
+        "params": {
+            "parent_session_id": "session-a",
+            "include_messages": false,
+            "include_result": false
+        }
+    });
+    let a_output = core.handle_line(&query_a.to_string()).await;
+    let a_result = a_output
+        .iter()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("pool response");
+    assert_eq!(a_result["result"]["pool"]["total"], 1);
+    assert_eq!(
+        a_result["result"]["pool"]["subagents"][0]["parent_session_id"],
+        "session-a"
+    );
+
+    // 按 session-b 过滤 → 只返回 session-b 的子代理
+    let query_b = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-pool-b",
+        "method": "agent.subagents",
+        "params": {
+            "parent_session_id": "session-b",
+            "include_messages": false,
+            "include_result": false
+        }
+    });
+    let b_output = core.handle_line(&query_b.to_string()).await;
+    let b_result = b_output
+        .iter()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("pool response");
+    assert_eq!(b_result["result"]["pool"]["total"], 1);
+    assert_eq!(
+        b_result["result"]["pool"]["subagents"][0]["parent_session_id"],
+        "session-b"
+    );
+
+    // 按不存在的 session 过滤 → 空
+    let query_none = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-pool-none",
+        "method": "agent.subagents",
+        "params": {
+            "parent_session_id": "session-missing",
+            "include_messages": false,
+            "include_result": false
+        }
+    });
+    let none_output = core.handle_line(&query_none.to_string()).await;
+    let none_result = none_output
+        .iter()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("pool response");
+    assert_eq!(none_result["result"]["pool"]["total"], 0);
 }
 
 #[tokio::test]
@@ -782,6 +969,7 @@ async fn subagent_cancel_tool_marks_target_cancelled() {
         .subagents
         .create(
             "run-subagent-cancel-tool",
+            "session-cancel-tool",
             "run-subagent-cancel-tool:child",
             Some("worker"),
             "long task",
@@ -848,7 +1036,7 @@ async fn subagent_cancel_tool_marks_target_cancelled() {
 
     let snapshot = core
         .subagents
-        .snapshot(Some(&handle.id), true, true)
+        .snapshot(Some(&handle.id), None, true, true)
         .unwrap();
     assert_eq!(snapshot["status"], "cancelled");
     assert_eq!(snapshot["task"], "long task");
@@ -1177,7 +1365,7 @@ async fn denied_subagent_tool_permission_fails_without_starting_tool() {
         .iter()
         .any(|event| event["params"]["type"] == "tool_started"));
     assert_eq!(
-        core.subagents.snapshot(None, false, false).unwrap()["total"],
+        core.subagents.snapshot(None, None, false, false).unwrap()["total"],
         0
     );
 

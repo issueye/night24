@@ -338,6 +338,7 @@ impl AgentCore {
 
         let pool = match self.subagents.snapshot(
             params.subagent_id.as_deref(),
+            params.parent_session_id.as_deref(),
             params.include_messages,
             params.include_result,
         ) {
@@ -1359,7 +1360,7 @@ async fn execute_subagent_tool(
             let value =
                 context
                     .subagents
-                    .snapshot(id.as_deref(), include_messages, include_result)?;
+                    .snapshot(id.as_deref(), None, include_messages, include_result)?;
             Ok(serde_json::to_string_pretty(&value)?)
         }
         "developer__subagent_message" => {
@@ -1404,16 +1405,17 @@ async fn spawn_subagent(
     context: &RunContext,
     arguments: &serde_json::Value,
 ) -> anyhow::Result<String> {
-    let task = required_string_arg(arguments, "task")?;
+    let task = required_string_arg(arguments, "task")?.to_string();
     let mode = SubAgentMode::from_value(string_arg(arguments, "mode").as_deref());
     let name = string_arg(arguments, "name");
     let child_run_id = format!("{}:subagent:{}", context.run_id, uuid::Uuid::new_v4());
     let handle =
         context
             .subagents
-            .create(&context.run_id, &child_run_id, name.as_deref(), task, mode)?;
+            .create(&context.run_id, &params.session.id, &child_run_id, name.as_deref(), &task, mode)?;
 
-    let child_params = build_child_reply_params(params, arguments, &handle.id, &child_run_id, task);
+    let child_params =
+        build_child_reply_params(params, arguments, &handle.id, &child_run_id, &task);
     let child_context = RunContext {
         run_id: child_run_id,
         agent_id: Some(handle.id.clone()),
@@ -1430,19 +1432,36 @@ async fn spawn_subagent(
     };
 
     let pool = context.subagents.clone();
-    let parent_output = context.output.clone();
     let default_provider = default_provider.to_string();
     let subagent_id = handle.id.clone();
+    let parent_context = context.clone();
+    let parent_session_id = params.session.id.clone();
+    let child_run_id = child_params.run_id.clone();
+    let subagent_name = name.unwrap_or_else(|| "subagent".to_string());
+    send_subagent_session_event(
+        &parent_context,
+        &subagent_id,
+        &child_run_id,
+        &parent_session_id,
+        &subagent_name,
+        &task,
+        "running",
+        vec![Message::user(task.clone())],
+    );
 
     match mode {
         SubAgentMode::Sync => {
             run_subagent_once(
                 pool.clone(),
-                parent_output,
                 subagent_id.clone(),
                 child_params,
                 default_provider,
                 child_context,
+                parent_context,
+                parent_session_id,
+                child_run_id,
+                subagent_name,
+                task.clone(),
             )
             .await;
             let snapshot = pool
@@ -1477,11 +1496,15 @@ async fn spawn_subagent(
                     };
                     runtime.block_on(run_subagent_once(
                         worker_pool,
-                        parent_output,
                         worker_subagent_id,
                         child_params,
                         default_provider,
                         child_context,
+                        parent_context,
+                        parent_session_id,
+                        child_run_id,
+                        subagent_name,
+                        task,
                     ));
                 })
                 .map_err(|err| anyhow::anyhow!("failed to spawn subagent thread: {err}"))?;
@@ -1489,7 +1512,7 @@ async fn spawn_subagent(
                 "accepted": true,
                 "subagent_id": subagent_id,
                 "status": "running",
-                "pool": pool.snapshot(None, false, false)?,
+                "pool": pool.snapshot(None, None, false, false)?,
             });
             Ok(serde_json::to_string_pretty(&value)?)
         }
@@ -1498,23 +1521,51 @@ async fn spawn_subagent(
 
 async fn run_subagent_once(
     pool: Arc<SubAgentPool>,
-    parent_output: Option<UnboundedSender<String>>,
     subagent_id: String,
     child_params: ReplyParams,
     default_provider: String,
     child_context: RunContext,
+    parent_context: RunContext,
+    parent_session_id: String,
+    child_run_id: String,
+    name: String,
+    task: String,
 ) {
     pool.mark_running(&subagent_id);
     let events = Box::pin(reply_events(child_params, default_provider, child_context)).await;
-    if let Some(output) = parent_output {
-        for event in &events {
-            let _ = output.send(event.clone());
-        }
-    }
 
     match subagent_result_from_events(&events) {
-        Ok(result) => pool.mark_completed(&subagent_id, result, events),
-        Err(error) => pool.mark_failed(&subagent_id, error, events),
+        Ok(result) => {
+            let messages = subagent_session_messages_from_events(&task, &events);
+            pool.mark_completed(&subagent_id, result, events.clone());
+            send_subagent_session_event(
+                &parent_context,
+                &subagent_id,
+                &child_run_id,
+                &parent_session_id,
+                &name,
+                &task,
+                "completed",
+                messages,
+            );
+        }
+        Err(error) => {
+            let mut messages = subagent_session_messages_from_events(&task, &events);
+            if messages.len() == 1 {
+                messages.push(Message::assistant(error.clone()));
+            }
+            pool.mark_failed(&subagent_id, error, events.clone());
+            send_subagent_session_event(
+                &parent_context,
+                &subagent_id,
+                &child_run_id,
+                &parent_session_id,
+                &name,
+                &task,
+                "failed",
+                messages,
+            );
+        }
     }
 }
 
@@ -1546,6 +1597,51 @@ fn build_child_reply_params(
         child.provider.model = model;
     }
     child
+}
+
+#[allow(clippy::too_many_arguments)]
+fn send_subagent_session_event(
+    parent_context: &RunContext,
+    subagent_id: &str,
+    child_run_id: &str,
+    parent_session_id: &str,
+    name: &str,
+    task: &str,
+    status: &str,
+    messages: Vec<Message>,
+) {
+    parent_context.send(AgentEventKind::SubAgentSession {
+        subagent_id: subagent_id.to_string(),
+        child_run_id: child_run_id.to_string(),
+        parent_session_id: parent_session_id.to_string(),
+        parent_run_id: parent_context.run_id.clone(),
+        name: name.to_string(),
+        task: task.to_string(),
+        status: status.to_string(),
+        messages,
+    });
+}
+
+fn subagent_session_messages_from_events(task: &str, events: &[String]) -> Vec<Message> {
+    let mut messages = vec![Message::user(task.to_string())];
+    for event in events.iter().rev() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
+            continue;
+        };
+        if value["params"]["type"].as_str() != Some("finish") {
+            continue;
+        }
+        let Some(finish_messages) = value["params"]["payload"]["messages"].as_array() else {
+            break;
+        };
+        messages.extend(
+            finish_messages
+                .iter()
+                .filter_map(|message| serde_json::from_value::<Message>(message.clone()).ok()),
+        );
+        break;
+    }
+    messages
 }
 
 fn subagent_result_from_events(events: &[String]) -> Result<String, String> {

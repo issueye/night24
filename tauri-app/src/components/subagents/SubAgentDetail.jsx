@@ -1,5 +1,7 @@
+import { ExternalLink } from 'lucide-react';
 import { classNames, formatTime } from '../../utils/format.js';
 import { Placeholder } from '../Placeholder.jsx';
+import { Button } from '../ui/index.js';
 import { subAgentStatusMeta } from './status.js';
 
 function StatusPill({ status }) {
@@ -27,7 +29,7 @@ function MessageRow({ message }) {
   );
 }
 
-export function SubAgentDetail({ selected }) {
+export function SubAgentDetail({ selected, onOpenSession }) {
   if (!selected) {
     return (
       <div className="subagent-detail">
@@ -43,7 +45,19 @@ export function SubAgentDetail({ selected }) {
           <strong>{selected.name || 'subagent'}</strong>
           <span>{selected.id}</span>
         </div>
-        <StatusPill status={selected.status} />
+        <div className="subagent-head-actions">
+          {selected.is_session_backed && (
+            <Button
+              icon={<ExternalLink size={13} />}
+              onClick={() => onOpenSession?.(selected.id)}
+              size="sm"
+              variant="soft"
+            >
+              打开
+            </Button>
+          )}
+          <StatusPill status={selected.status} />
+        </div>
       </div>
 
       <div className="subagent-meta">
@@ -82,6 +96,7 @@ export function SubAgentDetail({ selected }) {
 
       <details className="subagent-debug">
         <summary>运行标识</summary>
+        <code>parent session: {selected.parent_session_id || selected.session?.parent_id || '-'}</code>
         <code>parent: {selected.parent_run_id || '-'}</code>
         <code>child: {selected.child_run_id || '-'}</code>
       </details>

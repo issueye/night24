@@ -73,6 +73,17 @@ pub enum AgentEventKind {
         deletions: u32,
         summary: String,
     },
+    SubAgentSession {
+        subagent_id: String,
+        child_run_id: String,
+        parent_session_id: String,
+        parent_run_id: String,
+        name: String,
+        task: String,
+        status: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        messages: Vec<Message>,
+    },
     Finish {
         status: FinishStatus,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

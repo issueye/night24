@@ -113,6 +113,7 @@ export function useSessions({
     sessionsLoading,
     sessionActionId,
     currentSessionId,
+    setCurrentSessionId,
     messages,
     setMessages,
     loadSessions,

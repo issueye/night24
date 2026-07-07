@@ -1,9 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bot, Code2, FileCode2, GitCompare, Grip, RefreshCw, X } from 'lucide-react';
-import { DiffPanel } from './DiffPanel.jsx';
-import { FilePreview } from './FilePreview.jsx';
-import { FileTree } from './FileTree.jsx';
-import { Placeholder } from './Placeholder.jsx';
+import { Grip, X } from 'lucide-react';
 import { SubAgentPanel } from './SubAgentPanel.jsx';
 import { Button, IconButton } from './ui/index.js';
 
@@ -35,30 +31,18 @@ function clampRect(rect) {
 
 export function ContextPanel({
   open,
-  rightTab,
-  tree,
-  treeLoading,
-  selectedPath,
-  selectedFile,
-  fileLoading,
-  diff,
-  status,
-  diffLoading,
-  diffError,
   subAgentPool,
+  subAgentSessions,
+  currentSessionId,
   subAgentLoading,
   subAgentError,
   subAgentSpawning,
-  onTabChange,
   onClose,
-  onOpenFile,
-  onRefreshWorkspace,
-  onRefreshDiff,
   onRefreshSubAgents,
+  onSelectSession,
 }) {
   const [rect, setRect] = useState(defaultPanelRect);
   const [drag, setDrag] = useState(null);
-  const activeTab = ['files', 'diff', 'preview', 'agents'].includes(rightTab) ? rightTab : 'files';
 
   useEffect(() => {
     if (!drag) return undefined;
@@ -123,44 +107,20 @@ export function ContextPanel({
     >
       <div className="float-head draggable" onPointerDown={(event) => startDrag(event, 'move')}>
         <span className="drag-indicator"><Grip size={13} /></span>
-        <strong>辅助面板</strong>
+        <strong>AGENTS</strong>
         <IconButton className="icon-button compact" label="关闭浮窗" onClick={onClose} size="sm"><X size={14} /></IconButton>
       </div>
 
-      <div className="tabs">
-        <Button className={activeTab === 'files' ? 'active' : ''} icon={<FileCode2 size={14} />} onClick={() => onTabChange('files')} variant="ghost">Files</Button>
-        <Button className={activeTab === 'diff' ? 'active' : ''} icon={<GitCompare size={14} />} onClick={() => onTabChange('diff')} variant="ghost">Diff</Button>
-        <Button className={activeTab === 'preview' ? 'active' : ''} icon={<Code2 size={14} />} onClick={() => onTabChange('preview')} variant="ghost">Preview</Button>
-        <Button className={activeTab === 'agents' ? 'active' : ''} icon={<Bot size={14} />} onClick={() => onTabChange('agents')} variant="ghost">Agents</Button>
-      </div>
-
-      {activeTab === 'files' && (
-        <section className="files-context">
-          <div className="context-tree">
-            <div className="context-section-head">
-              <strong>项目目录</strong>
-              <IconButton className="icon-button compact" disabled={treeLoading} label="刷新目录" onClick={() => onRefreshWorkspace({ notifySuccess: true })} size="sm">
-                <RefreshCw className={treeLoading ? 'spin' : ''} size={13} />
-              </IconButton>
-            </div>
-            <div className="tree-scroll">
-              <FileTree loading={treeLoading} tree={tree} selectedPath={selectedPath} onOpenFile={onOpenFile} />
-            </div>
-          </div>
-          <FilePreview file={selectedFile} loading={fileLoading} />
-        </section>
-      )}
-      {activeTab === 'diff' && <DiffPanel diff={diff} status={status} loading={diffLoading} error={diffError} onRefresh={() => onRefreshDiff({ notifySuccess: true })} />}
-      {activeTab === 'preview' && <Placeholder title="尚未启动预览" detail="后续接入进程管理后会在这里显示本地预览地址。" />}
-      {activeTab === 'agents' && (
-        <SubAgentPanel
-          pool={subAgentPool}
-          loading={subAgentLoading}
-          error={subAgentError}
-          spawning={subAgentSpawning}
-          onRefresh={onRefreshSubAgents}
-        />
-      )}
+      <SubAgentPanel
+        pool={subAgentPool}
+        sessions={subAgentSessions}
+        currentSessionId={currentSessionId}
+        loading={subAgentLoading}
+        error={subAgentError}
+        spawning={subAgentSpawning}
+        onRefresh={onRefreshSubAgents}
+        onSelectSession={onSelectSession}
+      />
       <Button
         className="panel-resize-handle"
         aria-label="拖动调整大小"

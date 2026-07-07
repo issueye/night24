@@ -700,6 +700,7 @@ async fn get_agent_subagents(
     match core_client
         .subagents(SubAgentPoolParams {
             subagent_id: query.subagent_id,
+            parent_session_id: query.parent_session_id,
             include_messages: query.include_messages,
             include_result: query.include_result,
         })

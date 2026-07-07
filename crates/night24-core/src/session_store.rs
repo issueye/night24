@@ -35,11 +35,23 @@ impl SessionStore {
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 session_type TEXT NOT NULL,
+                parent_id TEXT,
                 working_dir TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 archived_at TEXT
             )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        self.ensure_sessions_parent_id_column().await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_sessions_parent_id
+            ON sessions(parent_id)
             "#,
         )
         .execute(&self.pool)
@@ -112,6 +124,21 @@ impl SessionStore {
         Ok(())
     }
 
+    async fn ensure_sessions_parent_id_column(&self) -> anyhow::Result<()> {
+        let columns: Vec<(String,)> =
+            sqlx::query_as(r#"SELECT name FROM pragma_table_info('sessions')"#)
+                .fetch_all(&self.pool)
+                .await?;
+        if columns.iter().any(|(name,)| name == "parent_id") {
+            return Ok(());
+        }
+
+        sqlx::query(r#"ALTER TABLE sessions ADD COLUMN parent_id TEXT"#)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn create_session(
         &self,
         name: impl Into<String>,
@@ -128,11 +155,12 @@ impl SessionStore {
 
         sqlx::query(
             r#"
-            INSERT INTO sessions (id, name, session_type, working_dir, created_at, updated_at, archived_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO sessions (id, name, session_type, parent_id, working_dir, created_at, updated_at, archived_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 session_type = excluded.session_type,
+                parent_id = excluded.parent_id,
                 working_dir = excluded.working_dir,
                 updated_at = excluded.updated_at,
                 archived_at = excluded.archived_at
@@ -141,6 +169,7 @@ impl SessionStore {
         .bind(&session.id)
         .bind(&session.name)
         .bind(session_type_to_str(session.session_type))
+        .bind(&session.parent_id)
         .bind(session.working_dir.to_string_lossy().as_ref())
         .bind(session.created_at.to_rfc3339())
         .bind(session.updated_at.to_rfc3339())
@@ -178,7 +207,7 @@ impl SessionStore {
 
     pub async fn get_session(&self, id: &str) -> anyhow::Result<Option<Session>> {
         let row = sqlx::query_as::<_, SessionMetadataRow>(
-            r#"SELECT id, name, session_type, working_dir, created_at, updated_at, archived_at FROM sessions WHERE id = ?1"#,
+            r#"SELECT id, name, session_type, parent_id, working_dir, created_at, updated_at, archived_at FROM sessions WHERE id = ?1"#,
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -195,7 +224,7 @@ impl SessionStore {
 
     pub async fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
         let rows = sqlx::query_as::<_, SessionMetadataRow>(
-            r#"SELECT id, name, session_type, working_dir, created_at, updated_at, archived_at FROM sessions ORDER BY updated_at DESC"#,
+            r#"SELECT id, name, session_type, parent_id, working_dir, created_at, updated_at, archived_at FROM sessions ORDER BY updated_at DESC"#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -266,6 +295,7 @@ struct SessionMetadataRow {
     id: String,
     name: String,
     session_type: String,
+    parent_id: Option<String>,
     working_dir: String,
     created_at: String,
     updated_at: String,
@@ -282,6 +312,7 @@ impl TryInto<Session> for SessionMetadataRow {
             id: self.id,
             name: self.name,
             session_type,
+            parent_id: self.parent_id,
             working_dir: std::path::PathBuf::from(self.working_dir),
             conversation: Vec::new(),
             created_at: DateTime::parse_from_rfc3339(&self.created_at)?.with_timezone(&Utc),
@@ -812,6 +843,37 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(message_count, 2);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn session_parent_id_is_persisted() {
+        let (db_path, db_url) = temp_db_url();
+        let store = SessionStore::new(&db_url).await.unwrap();
+        let mut session = Session::new(
+            "child",
+            std::path::PathBuf::from("."),
+            SessionType::SubAgent,
+        );
+        session.parent_id = Some("parent-session".to_string());
+
+        store.upsert_session(&session).await.unwrap();
+
+        let reloaded = store
+            .get_session(&session.id)
+            .await
+            .unwrap()
+            .expect("session should reload");
+        assert_eq!(reloaded.parent_id.as_deref(), Some("parent-session"));
+
+        let parent_id: Option<String> =
+            sqlx::query_scalar(r#"SELECT parent_id FROM sessions WHERE id = ?1"#)
+                .bind(&session.id)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(parent_id.as_deref(), Some("parent-session"));
 
         let _ = std::fs::remove_file(db_path);
     }

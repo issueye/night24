@@ -3,45 +3,11 @@
    避免误伤 settings/subagents 等面板里的同名按钮。 */
 
 .app-shell .center-panel {
-  grid-template-rows: 48px minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   background: var(--surface);
   border: 0;
   border-radius: 0;
   box-shadow: none;
-}
-
-.app-shell .conversation-head {
-  padding: 0 22px 0 38px;
-  background: var(--surface);
-  border-bottom-color: var(--line);
-}
-
-.app-shell .conversation-head > div:first-child {
-  min-width: 0;
-}
-
-.app-shell .conversation-head > div:first-child span {
-  display: none;
-}
-
-.app-shell .conversation-head strong {
-  margin: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--fs-lg);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.app-shell .core-note {
-  margin-left: auto;
-  color: var(--green);
-  font-size: var(--fs-base);
-}
-
-.app-shell .context-actions {
-  gap: 4px;
 }
 
 .app-shell .conversation-area {

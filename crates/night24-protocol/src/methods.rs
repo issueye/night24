@@ -103,6 +103,8 @@ pub struct AgentToolsResult {
 pub struct SubAgentPoolParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     #[serde(default)]
     pub include_messages: bool,
     #[serde(default)]

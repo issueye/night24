@@ -3,6 +3,7 @@ import { TopBar } from './components/TopBar.jsx';
 import { SettingsStrip } from './components/SettingsStrip.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { ChatPanel } from './components/ChatPanel.jsx';
+import { ChatTabs } from './components/ChatTabs.jsx';
 import { ContextPanel } from './components/ContextPanel.jsx';
 import { TimelinePanel } from './components/TimelinePanel.jsx';
 import { useApiClient } from './hooks/useApiClient.js';
@@ -39,6 +40,11 @@ const STREAM_RECOVERY_DELAY_MS = 1500;
 const TERMINAL_RUN_EVENTS = new Set(['finish', 'error']);
 const LIVE_CHECKPOINT_STATUSES = new Set(['running', 'reconnecting', 'detached', 'cancelling']);
 
+function isSubAgentSession(session) {
+  const type = String(session?.session_type || '').toLowerCase().replace(/[_\s-]/g, '');
+  return type === 'subagent';
+}
+
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -62,6 +68,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
   const [subAgentSpawning, setSubAgentSpawning] = useState(false);
+  const [openSessionIds, setOpenSessionIds] = useState([]);
   const {
     providerProfiles,
     providerProfileId,
@@ -171,22 +178,11 @@ export default function App() {
   const {
     workspace,
     recentWorkspaces,
-    tree,
-    treeLoading,
-    selectedFile,
-    fileLoading,
-    rightTab,
     contextOpen,
-    workspaceStatus,
-    workspaceDiff,
     workspaceLoading,
-    diffLoading,
-    diffError,
     setContextOpen,
     loadWorkspace,
-    loadWorkspaceDiff,
     openWorkspace,
-    openFile,
     openContextTab,
   } = useWorkspaceState({
     apiJson,
@@ -202,6 +198,7 @@ export default function App() {
     sessionsLoading,
     sessionActionId,
     currentSessionId,
+    setCurrentSessionId,
     loadSessions,
     createSession,
     selectSession,
@@ -223,6 +220,32 @@ export default function App() {
   const currentContext = sessionContexts[currentContextId] || getSessionContext(currentContextId);
   const currentSessionRun = currentSessionId ? getSessionRun(currentSessionId) : null;
   const visibleSessionRunning = Boolean(currentSessionRun);
+  const currentSession = useMemo(
+    () => sessions.find((item) => item.id === currentSessionId) || null,
+    [currentSessionId, sessions],
+  );
+  const currentSubAgentSessions = useMemo(() => {
+    if (!currentSessionId) return [];
+    const parentId = isSubAgentSession(currentSession) && currentSession?.parent_id
+      ? currentSession.parent_id
+      : currentSessionId;
+    return sessions
+      .filter((item) => isSubAgentSession(item) && item.parent_id === parentId)
+      .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  }, [currentSession, currentSessionId, sessions]);
+  const openSessions = useMemo(
+    () => openSessionIds
+      .map((id) => sessions.find((item) => item.id === id))
+      .filter(Boolean),
+    [openSessionIds, sessions],
+  );
+  const runningSessionIds = useMemo(() => {
+    const ids = new Set();
+    for (const session of sessions) {
+      if (getSessionRun(session.id)) ids.add(session.id);
+    }
+    return ids;
+  }, [sessions, getSessionRun]);
   const visibleActiveRun = currentSessionRun ? {
     run_id: currentSessionRun.runId,
     status: currentSessionRun.status || 'running',
@@ -251,7 +274,7 @@ export default function App() {
 
   const handleSubAgentTool = useCallback(({ phase }) => {
     setSubAgentSpawning(true);
-    openContextTab('agents');
+    openContextTab();
     loadSubAgentsRef.current?.({ silent: true });
     if (phase === 'started') {
       [800, 1800, 3200].forEach((delayMs) => {
@@ -259,6 +282,13 @@ export default function App() {
       });
     }
   }, [openContextTab]);
+
+  const handleSubAgentSession = useCallback(() => {
+    setSubAgentSpawning(false);
+    openContextTab();
+    loadSessions();
+    loadSubAgentsRef.current?.({ silent: true });
+  }, [loadSessions, openContextTab]);
 
   const { handleAgentEvent } = useAgentEvents({
     getSessionContext,
@@ -271,8 +301,8 @@ export default function App() {
     markRunEvent,
     finishRun,
     openContextTab,
-    loadWorkspaceDiff,
     onSubAgentTool: handleSubAgentTool,
+    onSubAgentSession: handleSubAgentSession,
     showError,
     markRunTerminal,
   });
@@ -444,9 +474,6 @@ export default function App() {
           finishRun(runId, 'synced');
           clearSessionRunContext(sessionId, runId);
           addSessionTimeline(sessionId, 'stream_recovered', '会话已同步', '已从会话历史补齐后台结果', 'success');
-          if (currentSessionIdRef.current === sessionId) {
-            loadWorkspaceDiff();
-          }
           return true;
         }
       } catch (error) {
@@ -463,6 +490,7 @@ export default function App() {
   }
 
   async function handleSelectSession(id) {
+    openSessionTab(id);
     const visibleMessages = await selectSession(id);
     if (!visibleMessages) return;
     mergeSessionHistory(id, visibleMessages, { replace: true });
@@ -491,6 +519,28 @@ export default function App() {
     });
   }
 
+  function openSessionTab(id) {
+    if (!id) return;
+    setOpenSessionIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+  }
+
+  function closeSessionTab(id) {
+    setOpenSessionIds((ids) => {
+      const index = ids.indexOf(id);
+      if (index === -1) return ids;
+      const next = ids.filter((item) => item !== id);
+      if (currentSessionId === id) {
+        const neighbor = next[index] || next[index - 1] || null;
+        if (neighbor) {
+          handleSelectSession(neighbor);
+        } else {
+          setCurrentSessionId(null);
+        }
+      }
+      return next;
+    });
+  }
+
   async function sendTask() {
     const text = currentContext.draftText.trim();
     if (!text || (currentSessionId && getSessionRun(currentSessionId))) return;
@@ -512,6 +562,7 @@ export default function App() {
       sessionId = await ensureSession();
       if (!sessionId) return;
       if (getSessionRun(sessionId)) return;
+      openSessionTab(sessionId);
 
       if (draftContextId !== sessionId) {
         setSessionDraft(sessionId, '');
@@ -663,9 +714,10 @@ export default function App() {
     loadSubAgents,
   } = useSubAgents({
     apiJson,
-    active: contextOpen && rightTab === 'agents',
+    active: contextOpen,
     notify,
     running: visibleSessionRunning,
+    parentSessionId: currentSessionId,
   });
   loadSubAgentsRef.current = loadSubAgents;
 
@@ -679,7 +731,7 @@ export default function App() {
       setSubAgentSpawning(false);
     }
     if (count > previousCount && visibleSessionRunning) {
-      openContextTab('agents');
+      openContextTab();
     }
   }, [openContextTab, subAgentPool, visibleSessionRunning]);
 
@@ -759,58 +811,64 @@ export default function App() {
           onOpenWorkspace={openWorkspace}
           onCreateSession={createSession}
           onSelectSession={handleSelectSession}
-          onDeleteSession={deleteSession}
+          onDeleteSession={(id, event) => {
+            closeSessionTab(id);
+            return deleteSession(id, event);
+          }}
           onToggleSettings={() => setSettingsOpen((value) => !value)}
         />
 
-        <ChatPanel
-          title={sessions.find((item) => item.id === currentSessionId)?.name || 'New session'}
-          serverDetail={serverStatus.detail}
-          messages={currentContext.messages}
-          messageEndRef={messageEndRef}
-          taskText={currentContext.draftText}
-          isRunning={visibleSessionRunning}
-          canSend={canSend}
-          workspace={workspace}
-          providerProfiles={providerProfiles}
-          providerProfileId={providerProfileId}
-          accessMode={accessMode}
-          contextUsage={contextUsage}
-          activeContext={contextOpen ? rightTab : null}
-          pendingPermissions={currentContext.pendingPermissions}
-          onTaskTextChange={(value) => setSessionDraft(currentContextId, value)}
-          onProviderProfileChange={selectProviderProfile}
-          onAccessModeChange={setAccessMode}
-          onResolvePermission={resolvePermission}
-          onSendTask={sendTask}
-          onCancelRun={() => cancelRun({ sessionId: currentSessionId, runId: currentSessionRun?.runId })}
-          onOpenContext={(tab) => {
-            openContextTab(tab);
-          }}
-        />
+        <div className="chat-column">
+          <ChatTabs
+            openSessions={openSessions}
+            activeSessionId={currentSessionId}
+            runningSessionIds={runningSessionIds}
+            serverDetail={serverStatus.detail}
+            agentsActive={contextOpen}
+            onSelectSession={handleSelectSession}
+            onCloseSession={closeSessionTab}
+            onNewSession={createSession}
+            onToggleAgents={() => setContextOpen((value) => !value)}
+          />
+
+          {currentSessionId ? (
+            <ChatPanel
+              messages={currentContext.messages}
+              messageEndRef={messageEndRef}
+              taskText={currentContext.draftText}
+              isRunning={visibleSessionRunning}
+              canSend={canSend}
+              workspace={workspace}
+              providerProfiles={providerProfiles}
+              providerProfileId={providerProfileId}
+              accessMode={accessMode}
+              contextUsage={contextUsage}
+              pendingPermissions={currentContext.pendingPermissions}
+              onTaskTextChange={(value) => setSessionDraft(currentContextId, value)}
+              onProviderProfileChange={selectProviderProfile}
+              onAccessModeChange={setAccessMode}
+              onResolvePermission={resolvePermission}
+              onSendTask={sendTask}
+              onCancelRun={() => cancelRun({ sessionId: currentSessionId, runId: currentSessionRun?.runId })}
+            />
+          ) : (
+            <div className="center-panel chat-empty-state">
+              <div className="chat-empty-hint">选择左侧会话或点击「新建会话」开始对话</div>
+            </div>
+          )}
+        </div>
 
         <ContextPanel
           open={contextOpen}
-          rightTab={rightTab}
-          tree={tree}
-          treeLoading={treeLoading}
-          selectedPath={selectedFile?.path}
-          selectedFile={selectedFile}
-          fileLoading={fileLoading}
-          diff={workspaceDiff}
-          status={workspaceStatus}
-          diffLoading={diffLoading}
-          diffError={diffError}
           subAgentPool={subAgentPool}
+          subAgentSessions={currentSubAgentSessions}
+          currentSessionId={currentSessionId}
           subAgentLoading={subAgentLoading}
           subAgentError={subAgentError}
           subAgentSpawning={subAgentSpawning}
-          onTabChange={openContextTab}
           onClose={() => setContextOpen(false)}
-          onOpenFile={openFile}
-          onRefreshWorkspace={loadWorkspace}
-          onRefreshDiff={loadWorkspaceDiff}
           onRefreshSubAgents={() => loadSubAgents({ notifySuccess: true })}
+          onSelectSession={handleSelectSession}
         />
       </main>
 

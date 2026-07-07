@@ -26,6 +26,8 @@ pub struct Session {
     pub id: String,
     pub name: String,
     pub session_type: SessionType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
     #[schema(value_type = String)]
     pub working_dir: PathBuf,
     pub conversation: Vec<crate::model::Message>,
@@ -41,6 +43,7 @@ impl Session {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             session_type,
+            parent_id: None,
             working_dir,
             conversation: Vec::new(),
             created_at: now,
@@ -66,6 +69,7 @@ impl Session {
             id: Uuid::new_v4().to_string(),
             name: format!("fork of {} ({})", self.name, short_id),
             session_type: self.session_type,
+            parent_id: self.parent_id.clone(),
             working_dir: self.working_dir.clone(),
             conversation,
             created_at: now,

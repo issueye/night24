@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   Folder,
@@ -12,6 +13,11 @@ import {
 import { classNames, formatRelativeShort } from '../utils/format.js';
 import { sameWorkspacePath } from '../utils/settings.js';
 import { Button, IconButton } from './ui/index.js';
+
+function isSubAgentSession(session) {
+  const type = String(session?.session_type || '').toLowerCase().replace(/[_\s-]/g, '');
+  return type === 'subagent';
+}
 
 export function Sidebar({
   workspace,
@@ -71,6 +77,7 @@ export function Sidebar({
   const sessionsByProject = useMemo(() => {
     const grouped = new Map();
     for (const session of sessions || []) {
+      if (isSubAgentSession(session)) continue;
       for (const project of projects) {
         if (sameWorkspacePath(session.working_dir, project.root_path)) {
           const items = grouped.get(project.root_path) || [];
@@ -82,6 +89,20 @@ export function Sidebar({
     }
     return grouped;
   }, [projects, sessions]);
+
+  const subAgentSessionsByParent = useMemo(() => {
+    const grouped = new Map();
+    for (const session of sessions || []) {
+      if (!isSubAgentSession(session) || !session.parent_id) continue;
+      const items = grouped.get(session.parent_id) || [];
+      items.push(session);
+      grouped.set(session.parent_id, items);
+    }
+    for (const items of grouped.values()) {
+      items.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+    }
+    return grouped;
+  }, [sessions]);
 
   function toggleProject(path) {
     setExpandedProjects((items) => {
@@ -155,38 +176,85 @@ export function Sidebar({
                         const runId = activeRunBySession?.[session.id];
                         const runState = runId ? runsById?.[runId] : null;
                         const isSessionRunning = Boolean(runState);
+                        const childSessions = subAgentSessionsByParent.get(session.id) || [];
                         return (
-                          <div
-                            className={classNames(
-                              'project-session-row',
-                              session.id === currentSessionId && 'active',
-                              isSessionRunning && 'running',
-                            )}
-                            key={session.id}
-                          >
-                            <Button
-                              disabled={sessionActionId === session.id}
-                              className="project-session-main"
-                              onClick={() => selectProjectSession(item, isCurrentProject, session.id)}
-                              title={session.name || session.id}
-                              variant="ghost"
-                            >
-                              <span className="session-title">{session.name || session.id}</span>
-                              {isSessionRunning ? (
-                                <Loader2 className="session-running-icon" size={13} />
-                              ) : (
-                                <small>{formatRelativeShort(session.updated_at)}</small>
+                          <div className="project-session-branch" key={session.id}>
+                            <div
+                              className={classNames(
+                                'project-session-row',
+                                session.id === currentSessionId && 'active',
+                                isSessionRunning && 'running',
                               )}
-                            </Button>
-                            <IconButton
-                              className="session-delete"
-                              disabled={sessionActionId === session.id}
-                              onClick={(event) => onDeleteSession(session.id, event)}
-                              label="删除会话"
-                              size="sm"
                             >
-                              <Trash2 size={13} />
-                            </IconButton>
+                              <Button
+                                disabled={sessionActionId === session.id}
+                                className="project-session-main"
+                                onClick={() => selectProjectSession(item, isCurrentProject, session.id)}
+                                title={session.name || session.id}
+                                variant="ghost"
+                              >
+                                <span className="session-title">{session.name || session.id}</span>
+                                {isSessionRunning ? (
+                                  <Loader2 className="session-running-icon" size={13} />
+                                ) : (
+                                  <small>{formatRelativeShort(session.updated_at)}</small>
+                                )}
+                              </Button>
+                              <IconButton
+                                className="session-delete"
+                                disabled={sessionActionId === session.id}
+                                onClick={(event) => onDeleteSession(session.id, event)}
+                                label="删除会话"
+                                size="sm"
+                              >
+                                <Trash2 size={13} />
+                              </IconButton>
+                            </div>
+                            {childSessions.length > 0 && (
+                              <div className="subagent-session-list">
+                                {childSessions.map((child) => {
+                                  const childRunId = activeRunBySession?.[child.id];
+                                  const childRunState = childRunId ? runsById?.[childRunId] : null;
+                                  const isChildRunning = Boolean(childRunState);
+                                  return (
+                                    <div
+                                      className={classNames(
+                                        'project-session-row',
+                                        'subagent-session-row',
+                                        child.id === currentSessionId && 'active',
+                                        isChildRunning && 'running',
+                                      )}
+                                      key={child.id}
+                                    >
+                                      <Button
+                                        disabled={sessionActionId === child.id}
+                                        className="project-session-main"
+                                        onClick={() => selectProjectSession(item, isCurrentProject, child.id)}
+                                        title={child.name || child.id}
+                                        variant="ghost"
+                                      >
+                                        <Bot size={13} />
+                                        <span className="session-title">{child.name || child.id}</span>
+                                        {isChildRunning ? (
+                                          <Loader2 className="session-running-icon" size={13} />
+                                        ) : (
+                                          <small>{formatRelativeShort(child.updated_at)}</small>
+                                        )}
+                                      </Button>
+                                      <IconButton
+                                        className="session-delete"
+                                        disabled={sessionActionId === child.id}
+                                        onClick={(event) => onDeleteSession(child.id, event)}
+                                        label="删除子代理会话"
+                                        size="sm"
+                                      >
+                                        <Trash2 size={13} />
+                                      </IconButton>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}

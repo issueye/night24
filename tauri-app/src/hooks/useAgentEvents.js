@@ -28,8 +28,8 @@ export function useAgentEvents({
   markRunEvent,
   finishRun,
   openContextTab,
-  loadWorkspaceDiff,
   onSubAgentTool,
+  onSubAgentSession,
   showError,
   markRunTerminal,
 }) {
@@ -219,6 +219,18 @@ export function useAgentEvents({
       return;
     }
 
+    if (eventType === 'sub_agent_session') {
+      onSubAgentSession?.({ payload: eventPayload, runId, sessionId });
+      addSessionTimeline(
+        sessionId,
+        eventType,
+        '子代理会话已更新',
+        eventPayload?.name || eventPayload?.subagent_id || 'subagent',
+        'neutral',
+      );
+      return;
+    }
+
     if (eventType === 'finish') {
       markRunTerminal(sessionId, runId, 'finish');
       const finish = normalizeFinishEvent(eventPayload);
@@ -231,9 +243,6 @@ export function useAgentEvents({
         setSessionPermissions(sessionId, (items) => items.filter((item) => item.run_id !== runId));
         finishRun(runId, finishStatus);
         clearSessionRun(sessionId, runId);
-      }
-      if (isCurrentSession) {
-        loadWorkspaceDiff();
       }
       addSessionTimeline(sessionId, eventType, '任务结束', finishStatus, finish.tone);
       return;
@@ -261,9 +270,9 @@ export function useAgentEvents({
     currentSessionIdRef,
     finishRun,
     getSessionContext,
-    loadWorkspaceDiff,
     markRunEvent,
     markRunTerminal,
+    onSubAgentSession,
     onSubAgentTool,
     openContextTab,
     setSessionMessages,

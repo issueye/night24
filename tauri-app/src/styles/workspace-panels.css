@@ -10,6 +10,6 @@
 .center-panel {
   display: grid;
   position: relative;
-  grid-template-rows: 54px minmax(0, 1fr) auto 146px;
+  grid-template-rows: minmax(0, 1fr) auto 146px;
   overflow: hidden;
 }

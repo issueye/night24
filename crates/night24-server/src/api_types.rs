@@ -86,6 +86,8 @@ pub(crate) struct SubAgentPoolQuery {
     #[serde(default)]
     pub(crate) subagent_id: Option<String>,
     #[serde(default)]
+    pub(crate) parent_session_id: Option<String>,
+    #[serde(default)]
     pub(crate) include_messages: bool,
     #[serde(default)]
     pub(crate) include_result: bool,
@@ -111,6 +113,8 @@ pub(crate) struct CreateSessionRequest {
     pub(crate) name: Option<String>,
     #[schema(example = "user")]
     pub(crate) session_type: Option<String>,
+    #[schema(example = "parent-session-123")]
+    pub(crate) parent_id: Option<String>,
     #[schema(example = "E:\\code\\project")]
     pub(crate) working_dir: Option<String>,
 }
@@ -150,6 +154,7 @@ pub(crate) struct SessionSummary {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) session_type: String,
+    pub(crate) parent_id: Option<String>,
     pub(crate) working_dir: String,
     pub(crate) updated_at: String,
 }

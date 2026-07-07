@@ -21,7 +21,7 @@ use night24_core::{
     context_mgmt::{CompactionResult, ContextManager},
     model::{ContentBlock, Message, Role},
     provider::{clamp_request_retries, ModelConfig},
-    session::{Session, SessionType},
+    session::{Session, SessionManager, SessionType},
 };
 use night24_protocol::{
     normalize_permission_mode, ProviderConfig, ReplyInput, ReplyLimits, ReplyOptions, ReplyParams,
@@ -89,6 +89,7 @@ pub(crate) async fn reply_core(
                 diff_root,
                 diff_baseline,
                 run_events: state.run_events.clone(),
+                session_manager: state.session_manager.clone(),
             },
         )
         .await;
@@ -178,6 +179,7 @@ struct CoreEventPumpState {
     diff_root: PathBuf,
     diff_baseline: Option<WorkspaceChangeSnapshot>,
     run_events: Arc<RunEventStore>,
+    session_manager: Arc<SessionManager>,
 }
 
 struct CoreEventDispatch {
@@ -202,6 +204,13 @@ async fn pump_core_events(
     let mut terminal_was_finish = false;
 
     while let Some(event) = core_events.recv().await {
+        if let Err(err) = persist_subagent_session_event(&state, &event).await {
+            warn!(
+                run_id = %state.run_id,
+                error = ?err,
+                "failed to persist sub-agent session event"
+            );
+        }
         let dispatch = prepare_core_event_dispatch(&mut state, event);
         for event_to_send in dispatch.events {
             if let Err(err) = state
@@ -254,6 +263,19 @@ fn prepare_core_event_dispatch(
     state: &mut CoreEventPumpState,
     event: serde_json::Value,
 ) -> CoreEventDispatch {
+    if !core_event_belongs_to_run(&event, &state.run_id) {
+        warn!(
+            run_id = %state.run_id,
+            event_run_id = ?event.get("run_id").and_then(|value| value.as_str()),
+            "dropping event for a different run"
+        );
+        return CoreEventDispatch {
+            events: Vec::new(),
+            is_terminal: false,
+            terminal_type: None,
+        };
+    }
+
     persist_core_event(&mut state.session.conversation, &event);
 
     let is_terminal = is_terminal_core_event(&event);
@@ -278,6 +300,81 @@ fn prepare_core_event_dispatch(
         is_terminal,
         terminal_type,
     }
+}
+
+async fn persist_subagent_session_event(
+    state: &CoreEventPumpState,
+    event: &serde_json::Value,
+) -> anyhow::Result<()> {
+    if core_event_type(event) != "sub_agent_session" {
+        return Ok(());
+    }
+    if !core_event_belongs_to_run(event, &state.run_id) {
+        return Ok(());
+    }
+
+    let payload = event
+        .get("payload")
+        .ok_or_else(|| anyhow::anyhow!("sub-agent session event missing payload"))?;
+    let subagent_id = payload
+        .get("subagent_id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| anyhow::anyhow!("sub-agent session event missing subagent_id"))?;
+    let parent_session_id = payload
+        .get("parent_session_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(state.session.id.as_str());
+    let name = payload
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("subagent");
+    let task = payload
+        .get("task")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+
+    let mut messages = payload
+        .get("messages")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| serde_json::from_value::<Message>(item.clone()).ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if messages.is_empty() && !task.trim().is_empty() {
+        messages.push(Message::user(task));
+    }
+
+    let mut session = state
+        .session_manager
+        .get(subagent_id)
+        .await?
+        .unwrap_or_else(|| {
+            let mut session = Session::new(
+                name,
+                state.session.working_dir.clone(),
+                SessionType::SubAgent,
+            );
+            session.id = subagent_id.to_string();
+            session.created_at = event_created_at(event).unwrap_or_else(Utc::now);
+            session
+        });
+
+    session.name = name.to_string();
+    session.session_type = SessionType::SubAgent;
+    session.parent_id = Some(parent_session_id.to_string());
+    session.working_dir = state.session.working_dir.clone();
+    if !messages.is_empty() {
+        session.conversation = messages;
+    }
+    session.updated_at = event_created_at(event).unwrap_or_else(Utc::now);
+    state.session_manager.save(&session).await?;
+
+    Ok(())
 }
 
 fn append_diff_ready_before_terminal(
@@ -653,6 +750,13 @@ fn core_event_type(event: &serde_json::Value) -> &str {
         .get("type")
         .and_then(|value| value.as_str())
         .unwrap_or("message")
+}
+
+fn core_event_belongs_to_run(event: &serde_json::Value, run_id: &str) -> bool {
+    event
+        .get("run_id")
+        .and_then(|value| value.as_str())
+        .is_none_or(|event_run_id| event_run_id == run_id)
 }
 
 fn is_terminal_core_event(event: &serde_json::Value) -> bool {
@@ -1648,6 +1752,111 @@ mod tests {
         }
     }
 
+    #[test]
+    fn prepare_core_event_dispatch_drops_events_for_other_runs() {
+        let run_events_dir =
+            std::env::temp_dir().join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4()));
+        let user_message = Message::user("new question");
+        let mut state = CoreEventPumpState {
+            session: Session::new(
+                "session",
+                PathBuf::from("E:/codes/project"),
+                SessionType::User,
+            ),
+            run_id: "run-parent".to_string(),
+            user_message,
+            diff_root: PathBuf::from("E:/codes/project"),
+            diff_baseline: None,
+            run_events: Arc::new(RunEventStore::new(run_events_dir.clone())),
+            session_manager: Arc::new(SessionManager::new()),
+        };
+
+        let dispatch = prepare_core_event_dispatch(
+            &mut state,
+            serde_json::json!({
+                "type": "finish",
+                "run_id": "run-parent:subagent:child",
+                "seq": 4,
+                "payload": {
+                    "status": "completed",
+                    "messages": [{
+                        "id": "assistant-child",
+                        "role": "assistant",
+                        "content": [{ "type": "text", "text": "child output" }],
+                        "created_at": "2026-07-03T01:02:05Z"
+                    }]
+                }
+            }),
+        );
+
+        assert!(dispatch.events.is_empty());
+        assert!(!dispatch.is_terminal);
+        assert!(dispatch.terminal_type.is_none());
+        assert!(state.session.conversation.is_empty());
+
+        let _ = std::fs::remove_dir_all(run_events_dir);
+    }
+
+    #[tokio::test]
+    async fn subagent_session_event_persists_independent_child_session() {
+        let session_manager = Arc::new(SessionManager::new());
+        let parent = Session::new(
+            "parent",
+            PathBuf::from("E:/codes/project"),
+            SessionType::User,
+        );
+        let state = CoreEventPumpState {
+            session: parent.clone(),
+            run_id: "run-parent".to_string(),
+            user_message: Message::user("new question"),
+            diff_root: parent.working_dir.clone(),
+            diff_baseline: None,
+            run_events: Arc::new(RunEventStore::new(
+                std::env::temp_dir()
+                    .join(format!("night24-run-events-test-{}", uuid::Uuid::new_v4())),
+            )),
+            session_manager: session_manager.clone(),
+        };
+
+        persist_subagent_session_event(
+            &state,
+            &serde_json::json!({
+                "type": "sub_agent_session",
+                "run_id": "run-parent",
+                "seq": 2,
+                "created_at": "2026-07-03T01:02:05Z",
+                "payload": {
+                    "subagent_id": "subagent-1",
+                    "child_run_id": "run-parent:subagent:1",
+                    "parent_session_id": parent.id,
+                    "parent_run_id": "run-parent",
+                    "name": "inspector",
+                    "task": "inspect docs",
+                    "status": "completed",
+                    "messages": [{
+                        "id": "assistant-child",
+                        "role": "assistant",
+                        "content": [{ "type": "text", "text": "child result" }],
+                        "created_at": "2026-07-03T01:02:05Z"
+                    }]
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let child = session_manager
+            .get("subagent-1")
+            .await
+            .unwrap()
+            .expect("sub-agent session should be saved");
+        assert_eq!(child.session_type, SessionType::SubAgent);
+        assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(child.name, "inspector");
+        assert_eq!(child.conversation.len(), 1);
+        assert_eq!(child.conversation[0].role, Role::Assistant);
+    }
+
     #[tokio::test]
     async fn pump_core_events_continues_after_sse_disconnect() {
         let (core_tx, core_rx) = tokio::sync::mpsc::channel(4);
@@ -1673,6 +1882,7 @@ mod tests {
                 diff_root: PathBuf::from("E:/codes/project"),
                 diff_baseline: None,
                 run_events,
+                session_manager: Arc::new(SessionManager::new()),
             },
         ));
 

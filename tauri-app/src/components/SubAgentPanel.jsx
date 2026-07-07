@@ -7,15 +7,40 @@ import { Button, IconButton } from './ui/index.js';
 
 export function SubAgentPanel({
   pool,
+  sessions,
+  currentSessionId,
   loading,
   error,
   spawning,
   onRefresh,
+  onSelectSession,
 }) {
   const agents = useMemo(() => {
-    const items = Array.isArray(pool?.subagents) ? pool.subagents : [];
+    const poolItems = Array.isArray(pool?.subagents) ? pool.subagents : [];
+    const byId = new Map(poolItems.map((item) => [item.id, item]));
+    const sessionItems = Array.isArray(sessions) ? sessions : [];
+    if (sessionItems.length > 0) {
+      return sessionItems.map((session) => {
+        const poolAgent = byId.get(session.id) || {};
+        return {
+          ...poolAgent,
+          id: session.id,
+          name: session.name || poolAgent.name || 'subagent',
+          task: poolAgent.task || session.name || '',
+          status: poolAgent.status || 'completed',
+          updated_at: session.updated_at || poolAgent.updated_at,
+          parent_session_id: session.parent_id,
+          session,
+          is_session_backed: true,
+        };
+      }).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+    }
+    if (currentSessionId) {
+      return [];
+    }
+    const items = poolItems;
     return [...items].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-  }, [pool]);
+  }, [currentSessionId, pool, sessions]);
   const [selectedId, setSelectedId] = useState('');
 
   useEffect(() => {
@@ -47,7 +72,7 @@ export function SubAgentPanel({
       )}
 
       {!loading && !spawning && agents.length === 0 ? (
-        <Placeholder title="暂无子代理" detail="当前任务尚未创建子代理，代理池为空。" />
+        <Placeholder title="暂无子代理" detail="当前会话尚未创建子代理会话。" />
       ) : (
         <div className="subagent-layout">
           <div className="subagent-tabs" role="tablist">
@@ -73,9 +98,9 @@ export function SubAgentPanel({
               })}
           </div>
           {agents.length === 0 && spawning ? (
-            <Placeholder title="正在创建子代理" detail="已检测到子代理调用，正在同步代理运行状态。" />
+            <Placeholder title="正在创建子代理" detail="已检测到子代理调用，正在同步子代理会话。" />
           ) : (
-            <SubAgentDetail selected={selected} />
+            <SubAgentDetail selected={selected} onOpenSession={onSelectSession} />
           )}
         </div>
       )}

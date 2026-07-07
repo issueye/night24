@@ -224,6 +224,42 @@
   background: var(--line);
 }
 
+.project-session-branch {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.subagent-session-list {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  margin-left: 12px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.subagent-session-row {
+  min-height: 28px;
+  color: var(--subtle);
+}
+
+.subagent-session-row::before {
+  left: -11px;
+  top: 13px;
+  width: 10px;
+}
+
+.subagent-session-row .project-session-main {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  min-height: 26px;
+  padding-left: 8px;
+}
+
+.subagent-session-row .project-session-main svg {
+  color: var(--blue);
+}
+
 .project-session-main {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;

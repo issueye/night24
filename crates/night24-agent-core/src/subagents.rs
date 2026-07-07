@@ -86,6 +86,7 @@ struct SubAgentRecord {
     mode: SubAgentMode,
     status: SubAgentStatus,
     parent_run_id: String,
+    parent_session_id: String,
     child_run_id: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -104,6 +105,7 @@ pub(super) struct SubAgentSnapshot {
     pub(super) mode: String,
     pub(super) status: String,
     pub(super) parent_run_id: String,
+    pub(super) parent_session_id: String,
     pub(super) child_run_id: String,
     pub(super) created_at: DateTime<Utc>,
     pub(super) updated_at: DateTime<Utc>,
@@ -144,6 +146,7 @@ impl SubAgentPool {
     pub(super) fn create(
         &self,
         parent_run_id: &str,
+        parent_session_id: &str,
         child_run_id: &str,
         name: Option<&str>,
         task: &str,
@@ -163,6 +166,7 @@ impl SubAgentPool {
             mode,
             status: SubAgentStatus::Queued,
             parent_run_id: parent_run_id.to_string(),
+            parent_session_id: parent_session_id.to_string(),
             child_run_id: child_run_id.to_string(),
             created_at: now,
             updated_at: now,
@@ -259,12 +263,13 @@ impl SubAgentPool {
             }
         }
 
-        Ok(snapshot_records(&records, true, true))
+        Ok(snapshot_records(&records, true, true, None))
     }
 
     pub(super) fn snapshot(
         &self,
         id: Option<&str>,
+        parent_session_id: Option<&str>,
         include_messages: bool,
         include_result: bool,
     ) -> anyhow::Result<serde_json::Value> {
@@ -288,6 +293,7 @@ impl SubAgentPool {
             &records,
             include_messages,
             include_result,
+            parent_session_id,
         ))?)
     }
 
@@ -351,9 +357,11 @@ fn snapshot_records(
     records: &HashMap<String, SubAgentRecord>,
     include_messages: bool,
     include_result: bool,
+    parent_session_id: Option<&str>,
 ) -> SubAgentPoolSnapshot {
     let mut subagents = records
         .values()
+        .filter(|record| match_parent_session(record, parent_session_id))
         .map(|record| snapshot_record(record, include_messages, include_result))
         .collect::<Vec<_>>();
     subagents.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
@@ -366,6 +374,13 @@ fn snapshot_records(
         failed: count_status(&subagents, SubAgentStatus::Failed),
         cancelled: count_status(&subagents, SubAgentStatus::Cancelled),
         subagents,
+    }
+}
+
+fn match_parent_session(record: &SubAgentRecord, parent_session_id: Option<&str>) -> bool {
+    match parent_session_id.map(str::trim).filter(|value| !value.is_empty()) {
+        None => true,
+        Some(filter) => record.parent_session_id == filter,
     }
 }
 
@@ -389,6 +404,7 @@ fn snapshot_record(
         mode: record.mode.as_str().to_string(),
         status: record.status.as_str().to_string(),
         parent_run_id: record.parent_run_id.clone(),
+        parent_session_id: record.parent_session_id.clone(),
         child_run_id: record.child_run_id.clone(),
         created_at: record.created_at,
         updated_at: record.updated_at,
@@ -448,6 +464,7 @@ mod tests {
         let running = pool
             .create(
                 "parent",
+                "parent-session",
                 "child-running",
                 Some("running"),
                 "task",
@@ -459,6 +476,7 @@ mod tests {
         let completed = pool
             .create(
                 "parent",
+                "parent-session",
                 "child-completed",
                 Some("completed"),
                 "task",
@@ -470,6 +488,7 @@ mod tests {
         let failed = pool
             .create(
                 "parent",
+                "parent-session",
                 "child-failed",
                 Some("failed"),
                 "task",
@@ -481,6 +500,7 @@ mod tests {
         let cancelled = pool
             .create(
                 "parent",
+                "parent-session",
                 "child-cancelled",
                 Some("cancelled"),
                 "task",
@@ -491,6 +511,7 @@ mod tests {
 
         pool.create(
             "parent",
+            "parent-session",
             "child-queued",
             Some("queued"),
             "task",
@@ -498,7 +519,7 @@ mod tests {
         )
         .unwrap();
 
-        let snapshot = pool.snapshot(None, false, false).unwrap();
+        let snapshot = pool.snapshot(None, None, false, false).unwrap();
         let snapshot: SubAgentPoolSnapshot = serde_json::from_value(snapshot).unwrap();
 
         assert_eq!(snapshot.total, 5);
@@ -507,5 +528,84 @@ mod tests {
         assert_eq!(snapshot.completed, 1);
         assert_eq!(snapshot.failed, 1);
         assert_eq!(snapshot.cancelled, 1);
+    }
+
+    #[test]
+    fn pool_snapshot_filters_by_parent_session_id() {
+        let pool = SubAgentPool::default();
+
+        pool.create(
+            "run-a",
+            "session-a",
+            "child-a1",
+            Some("alpha"),
+            "task a1",
+            SubAgentMode::Async,
+        )
+        .unwrap();
+        pool.create(
+            "run-a",
+            "session-a",
+            "child-a2",
+            Some("alpha"),
+            "task a2",
+            SubAgentMode::Async,
+        )
+        .unwrap();
+        let beta_handle = pool
+            .create(
+                "run-b",
+                "session-b",
+                "child-b1",
+                Some("beta"),
+                "task b1",
+                SubAgentMode::Async,
+            )
+            .unwrap();
+
+        // 精确 id 查询不受 parent_session_id 过滤影响（即使带不匹配的过滤也能查到）
+        let by_id = pool
+            .snapshot(Some(&beta_handle.id), Some("session-a"), false, false)
+            .unwrap();
+        let by_id_obj = by_id.as_object().unwrap();
+        assert_eq!(
+            by_id_obj.get("id").and_then(|v| v.as_str()),
+            Some(beta_handle.id.as_str())
+        );
+
+        // 不传过滤 → 返回全部
+        let all = pool.snapshot(None, None, false, false).unwrap();
+        let all: SubAgentPoolSnapshot = serde_json::from_value(all).unwrap();
+        assert_eq!(all.total, 3);
+
+        // 按 session-a 过滤 → 只剩 2 个
+        let filtered = pool
+            .snapshot(None, Some("session-a"), false, false)
+            .unwrap();
+        let filtered: SubAgentPoolSnapshot = serde_json::from_value(filtered).unwrap();
+        assert_eq!(filtered.total, 2);
+        assert!(filtered
+            .subagents
+            .iter()
+            .all(|item| item.parent_session_id == "session-a"));
+
+        // 按 session-b 过滤 → 只剩 1 个
+        let beta = pool.snapshot(None, Some("session-b"), false, false).unwrap();
+        let beta: SubAgentPoolSnapshot = serde_json::from_value(beta).unwrap();
+        assert_eq!(beta.total, 1);
+        assert_eq!(beta.subagents[0].parent_session_id, "session-b");
+
+        // 按不存在的 session 过滤 → 空
+        let none = pool
+            .snapshot(None, Some("session-missing"), false, false)
+            .unwrap();
+        let none: SubAgentPoolSnapshot = serde_json::from_value(none).unwrap();
+        assert_eq!(none.total, 0);
+        assert!(none.subagents.is_empty());
+
+        // 空字符串过滤 → 视同不过滤，返回全部
+        let empty = pool.snapshot(None, Some(""), false, false).unwrap();
+        let empty: SubAgentPoolSnapshot = serde_json::from_value(empty).unwrap();
+        assert_eq!(empty.total, 3);
     }
 }

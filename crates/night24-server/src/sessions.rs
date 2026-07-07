@@ -40,6 +40,7 @@ pub(crate) async fn list_sessions(
             id: s.id,
             name: s.name,
             session_type: format!("{:?}", s.session_type),
+            parent_id: s.parent_id,
             working_dir: s.working_dir.to_string_lossy().to_string(),
             updated_at: s.updated_at.to_rfc3339(),
         })
@@ -97,6 +98,18 @@ pub(crate) async fn create_session(
         .create(name, working_dir, session_type)
         .await
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    let session = if req.parent_id.is_some() {
+        let mut session = session;
+        session.parent_id = req.parent_id;
+        state
+            .session_manager
+            .save(&session)
+            .await
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+        session
+    } else {
+        session
+    };
     Ok(Json(session))
 }
 
