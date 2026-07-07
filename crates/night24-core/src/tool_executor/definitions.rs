@@ -394,13 +394,13 @@ pub fn builtin_tools() -> Vec<Tool> {
         },
         Tool {
             name: "developer__subagent_spawn".to_string(),
-            description: "Create a sub-agent to handle a delegated task. Use sync mode to wait for the result immediately, or async mode to run it in the background and manage it through the sub-agent pool.".to_string(),
+            description: "Create a sub-agent to handle a delegated task. Prefer this for project analysis, repository or directory surveys, multi-file code reading, log/data review, long-context summarization, parallel investigation, or isolated research so the parent context receives only a concise summary. Use sync mode to wait for the result immediately, or async mode to run it in the background and manage it through the sub-agent pool.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": "The delegated task for the sub-agent. Include all context needed to complete it."
+                        "description": "The delegated task for the sub-agent. Include all context needed to complete it and ask for a concise summary with key files, facts, risks, and recommended next actions."
                     },
                     "mode": {
                         "type": "string",

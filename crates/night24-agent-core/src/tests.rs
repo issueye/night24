@@ -80,6 +80,9 @@ fn system_prompt_includes_complex_task_workflow_contract() {
     assert!(system.contains("developer__task_list_finish"));
     assert!(system.contains("Work step by step"));
     assert!(system.contains("Do not stop after only creating the task list"));
+    assert!(system.contains("Prefer sub-agents for project analysis"));
+    assert!(system.contains("long-context summarization"));
+    assert!(system.contains("return concise summaries with key files"));
 }
 
 #[tokio::test]
@@ -2328,9 +2331,8 @@ fn write_file_complete_arguments_do_not_trigger_recoverable_instruction() {
 
 #[test]
 fn read_file_empty_arguments_return_recoverable_instruction() {
-    let message =
-        recoverable_tool_argument_message("developer__read_file", &serde_json::json!({}))
-            .expect("empty read_file arguments should be recoverable");
+    let message = recoverable_tool_argument_message("developer__read_file", &serde_json::json!({}))
+        .expect("empty read_file arguments should be recoverable");
 
     assert!(message.contains("缺少字段: path"));
     assert!(message.contains("Required arguments"));

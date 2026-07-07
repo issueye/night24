@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronDown, TerminalSquare } from 'lucide-react';
+import { ChevronDown, TerminalSquare } from 'lucide-react';
 import { messageText, messageToolBlocks } from '../utils/format.js';
 import { RunningPanda } from './RunningPanda.jsx';
 import { AiToolCall } from './ui/index.js';
@@ -95,9 +95,8 @@ export function RunStatusRow({ isRunning }) {
 
   return (
     <div className="conversation-activity-row run-status-row">
-      <CheckCircle2 size={14} />
-      <RunningPanda className="run-status-panda" label="正在思考" showLabel={false} />
       <span>正在思考</span>
+      <RunningPanda className="run-status-panda" label="正在思考" showLabel={false} />
     </div>
   );
 }

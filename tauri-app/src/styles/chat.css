@@ -282,6 +282,10 @@
   cursor: default;
 }
 
+.run-status-row {
+  gap: 6px;
+}
+
 .conversation-activity-row summary::-webkit-details-marker {
   display: none;
 }

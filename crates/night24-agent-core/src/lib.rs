@@ -1006,14 +1006,22 @@ fn recoverable_tool_argument_message(
 ) -> Option<String> {
     let requirements: &[(&str, &[&str], &str)] = match tool_name {
         "developer__shell" => &[("command", &["command"], "the shell command to run")],
-        "developer__read_file" => &[("path", &["path", "file_path", "filepath"], "the relative file path to read")],
+        "developer__read_file" => &[(
+            "path",
+            &["path", "file_path", "filepath"],
+            "the relative file path to read",
+        )],
         "developer__write_file" => &[
             (
                 "path",
                 &["path", "file_path", "filepath", "target_path"],
                 "the relative target file path",
             ),
-            ("content", &["content"], "the complete file content to write"),
+            (
+                "content",
+                &["content"],
+                "the complete file content to write",
+            ),
         ],
         "developer__file_search" => &[("query", &["query"], "the text pattern to search for")],
         "developer__http_request" | "developer__network_request" => {
@@ -1066,7 +1074,6 @@ fn first_string_arg<'a>(arguments: &'a serde_json::Value, keys: &[&str]) -> Opti
             .filter(|value| !value.is_empty())
     })
 }
-
 
 const TASK_WORKFLOW_PROMPT: &str = r#"For complex tasks, use the Night24 task workflow:
 - First decompose the request before taking implementation action.
@@ -1197,7 +1204,7 @@ fn task_workflow_continue_message(run_id: &str, turn: usize) -> Message {
 }
 
 fn build_system_prompt(context: &RunContext, input_text: &str) -> String {
-    let mut system = "You are Night24 Agent Core. When a task benefits from delegation, parallel analysis, background work, or isolated investigation, you may autonomously create and manage sub-agents using the developer__subagent_* tools. Use sync sub-agents when you need the result before continuing; use async sub-agents when work can continue while the child runs. Query the sub-agent pool before depending on asynchronous results.".to_string();
+    let mut system = "You are Night24 Agent Core. When a task benefits from delegation, parallel analysis, background work, or isolated investigation, you may autonomously create and manage sub-agents using the developer__subagent_* tools. Prefer sub-agents for project analysis, repository or directory surveys, multi-file code reading, log/data review, long-context summarization, and any investigation likely to consume substantial context before the main task can proceed. Ask sub-agents to inspect independently and return concise summaries with key files, facts, risks, and recommended next actions, then use only that summary in the parent context. Use sync sub-agents when you need the result before continuing; use async sub-agents when work can continue while the child runs. Query the sub-agent pool before depending on asynchronous results.".to_string();
     system.push_str("\n\n");
     system.push_str(TASK_WORKFLOW_PROMPT);
     let skill_list = context.skills.available_for_prompt();
