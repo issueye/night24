@@ -47,6 +47,121 @@ async fn initialize_then_tools_returns_builtin_tools() {
     assert!(tools
         .iter()
         .any(|tool| tool["name"] == "developer__skill_load"));
+    assert!(tools
+        .iter()
+        .any(|tool| tool["name"] == "developer__task_list_create"));
+    assert!(tools
+        .iter()
+        .any(|tool| tool["name"] == "developer__task_list_update"));
+}
+
+#[test]
+fn system_prompt_includes_complex_task_workflow_contract() {
+    let context = RunContext {
+        run_id: "run-prompt".to_string(),
+        agent_id: None,
+        emit_tool_events: true,
+        cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        seq: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        output: None,
+        collected: None,
+        permissions: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        hooks: std::sync::Arc::new(HookRunner::default()),
+        subagents: std::sync::Arc::new(SubAgentPool::default()),
+        skills: std::sync::Arc::new(SkillRegistry::load(std::path::Path::new("."))),
+        task_list: std::sync::Arc::new(std::sync::Mutex::new(TaskListState::default())),
+    };
+
+    let system = build_system_prompt(&context, "build a feature");
+
+    assert!(system.contains("For complex tasks"));
+    assert!(system.contains("developer__task_list_create"));
+    assert!(system.contains("developer__task_list_update"));
+    assert!(system.contains("developer__task_list_finish"));
+    assert!(system.contains("Work step by step"));
+    assert!(system.contains("Do not stop after only creating the task list"));
+}
+
+#[tokio::test]
+async fn task_list_tool_creates_progress_message() {
+    let mut core = initialized_core().await;
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "rpc-task-list",
+        "method": "agent.reply",
+        "params": {
+            "run_id": "run-task-list",
+            "session": {
+                "id": "session-1",
+                "name": "test",
+                "working_dir": ".",
+                "conversation": []
+            },
+            "input": { "text": "tool:task_list_create:Inspect project|Write report" },
+            "provider": { "provider": "echo", "model": "echo-v1" },
+            "limits": {
+                "max_turns": 2,
+                "turn_timeout_ms": 10000,
+                "tool_timeout_ms": 10000,
+                "total_timeout_ms": 30000
+            },
+            "options": {
+                "stream_message_delta": false,
+                "emit_tool_events": true,
+                "permission_mode": "permissive"
+            }
+        }
+    });
+
+    let output = core.handle_line(&request.to_string()).await;
+    let joined = output.join("\n");
+
+    assert!(joined.contains("developer__task_list_create"));
+    assert!(joined.contains("## 任务列表"));
+    assert!(joined.contains("- [ ] Inspect project"));
+    assert!(joined.contains("- [ ] Write report"));
+}
+
+#[test]
+fn open_task_list_response_requests_followup_turn() {
+    let message = Message {
+        id: "msg-task-list".to_string(),
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text {
+            text: "## 任务列表\n- [ ] 确认目录结构\n- [ ] 输出方案".to_string(),
+        }],
+        created_at: Utc::now(),
+    };
+
+    assert!(should_continue_task_workflow(&[message]));
+}
+
+#[test]
+fn completed_task_workflow_does_not_request_followup_turn() {
+    let message = Message {
+        id: "msg-report".to_string(),
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text {
+            text: "## 任务列表\n- [x] 确认目录结构\n\n## 完成报告\n已完成。".to_string(),
+        }],
+        created_at: Utc::now(),
+    };
+
+    assert!(!should_continue_task_workflow(&[message]));
+}
+
+#[test]
+fn ordinary_checkbox_list_does_not_request_followup_turn() {
+    let message = Message {
+        id: "msg-checkbox".to_string(),
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text {
+            text: "- [ ] 只是普通清单".to_string(),
+        }],
+        created_at: Utc::now(),
+    };
+
+    assert!(!should_continue_task_workflow(&[message]));
 }
 
 #[tokio::test]
@@ -1545,6 +1660,45 @@ fn stepfun_provider_uses_inline_request_config() {
 }
 
 #[test]
+fn openai_alias_normalizes_to_chat_protocol() {
+    let config = ProviderConfig {
+        provider: " OpenAI ".to_string(),
+        model: "gpt-4o-mini".to_string(),
+        base_url: Some("https://api.openai.com/v1".to_string()),
+        api_key_ref: None,
+        api_key: Some("test-key".to_string()),
+    };
+
+    let normalized = effective_provider(&config, "echo");
+
+    assert_eq!(normalized.provider, "openai-chat");
+}
+
+#[test]
+fn openai_chat_and_responses_create_distinct_providers() {
+    let chat = ProviderConfig {
+        provider: "openai-chat".to_string(),
+        model: "gpt-4o-mini".to_string(),
+        base_url: Some("https://api.openai.com/v1".to_string()),
+        api_key_ref: None,
+        api_key: Some("test-key".to_string()),
+    };
+    let responses = ProviderConfig {
+        provider: "openai-responses".to_string(),
+        model: "gpt-4o".to_string(),
+        base_url: Some("https://api.openai.com/v1".to_string()),
+        api_key_ref: None,
+        api_key: Some("test-key".to_string()),
+    };
+
+    assert_eq!(create_provider(&chat).unwrap().name(), "openai");
+    assert_eq!(
+        create_provider(&responses).unwrap().name(),
+        "openai-responses"
+    );
+}
+
+#[test]
 fn network_proxy_is_injected_only_for_network_tools() {
     let args = json!({"url": "https://example.com"});
     let with_proxy = arguments_with_network_proxy(
@@ -2151,4 +2305,33 @@ fn agent_events(output: &[String]) -> Vec<serde_json::Value> {
         .filter_map(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
         .filter(|value| value["method"] == "agent.event")
         .collect()
+}
+#[test]
+fn write_file_empty_arguments_return_recoverable_instruction() {
+    let message =
+        recoverable_tool_argument_message("developer__write_file", &serde_json::json!({}))
+            .expect("empty write_file arguments should be recoverable");
+
+    assert!(message.contains("缺少字段: path, content"));
+    assert!(message.contains("请不要再次用空参数调用该工具"));
+}
+
+#[test]
+fn write_file_complete_arguments_do_not_trigger_recoverable_instruction() {
+    let message = recoverable_tool_argument_message(
+        "developer__write_file",
+        &serde_json::json!({"path": "README.md", "content": "hello"}),
+    );
+
+    assert!(message.is_none());
+}
+
+#[test]
+fn read_file_empty_arguments_return_recoverable_instruction() {
+    let message =
+        recoverable_tool_argument_message("developer__read_file", &serde_json::json!({}))
+            .expect("empty read_file arguments should be recoverable");
+
+    assert!(message.contains("缺少字段: path"));
+    assert!(message.contains("Required arguments"));
 }

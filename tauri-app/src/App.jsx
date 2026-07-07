@@ -28,6 +28,7 @@ import {
   DEFAULT_SERVER,
   STORAGE_KEYS,
   apiUrl,
+  parseRequestRetries,
   readAccessMode,
   readSetting,
 } from './utils/settings.js';
@@ -68,15 +69,31 @@ export default function App() {
     baseUrl,
     providerKey,
     contextThreshold,
+    requestRetries,
+    maxTurns,
+    turnTimeoutSeconds,
+    toolTimeoutSeconds,
+    totalTimeoutMinutes,
+    providerDraft,
+    providerDraftDirty,
+    providerDraftCreating,
     setProvider,
     setModel,
     setBaseUrl,
     setProviderKey,
     setContextThreshold,
+    setRequestRetries,
+    setMaxTurns,
+    setTurnTimeoutSeconds,
+    setToolTimeoutSeconds,
+    setTotalTimeoutMinutes,
+    setProviderName,
     createProviderProfileFromCurrent,
     selectProviderProfile,
     updateProviderProfile,
     deleteProviderProfile,
+    saveProviderProfile,
+    cancelProviderEdit,
   } = useProviderSettings({ notify });
 
   const currentSessionIdRef = useRef(null);
@@ -433,7 +450,7 @@ export default function App() {
   async function handleSelectSession(id) {
     const visibleMessages = await selectSession(id);
     if (!visibleMessages) return;
-    mergeSessionHistory(id, visibleMessages);
+    mergeSessionHistory(id, visibleMessages, { replace: true });
 
     const activeRun = getSessionRun(id);
     if (activeRun?.runId && !isPendingRunId(activeRun.runId)) {
@@ -516,6 +533,11 @@ export default function App() {
           accessMode,
           networkProxy,
           contextThreshold,
+          requestRetries,
+          maxTurns,
+          turnTimeoutSeconds,
+          toolTimeoutSeconds,
+          totalTimeoutMinutes,
         })),
         signal: controller.signal,
       });
@@ -591,6 +613,34 @@ export default function App() {
     isRunning: visibleSessionRunning,
     showError,
   });
+
+  const testProviderProfile = useCallback(async () => {
+    try {
+      const result = await apiJson('/providers/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: providerDraft.provider,
+          model: providerDraft.model.trim() || undefined,
+          base_url: providerDraft.baseUrl.trim() || undefined,
+          api_key: providerDraft.apiKey.trim() || undefined,
+          request_retries: parseRequestRetries(providerDraft.requestRetries),
+        }),
+      });
+      notify({
+        message: '供应商测试成功',
+        detail: result?.message || '连接正常',
+        tone: 'success',
+      });
+      return result;
+    } catch (error) {
+      notify({
+        message: '供应商测试失败',
+        detail: normalizeError(error),
+        tone: 'danger',
+      });
+      throw error;
+    }
+  }, [apiJson, notify, providerDraft]);
   const {
     subAgentPool,
     subAgentLoading,
@@ -620,11 +670,19 @@ export default function App() {
         apiKey={apiKey}
         providerProfiles={providerProfiles}
         providerProfileId={providerProfileId}
-        provider={provider}
-        model={model}
-        baseUrl={baseUrl}
-        providerKey={providerKey}
-        contextThreshold={contextThreshold}
+        provider={providerDraft.provider}
+        model={providerDraft.model}
+        baseUrl={providerDraft.baseUrl}
+        providerKey={providerDraft.apiKey}
+        contextThreshold={providerDraft.contextThreshold}
+        requestRetries={providerDraft.requestRetries}
+        maxTurns={providerDraft.maxTurns}
+        turnTimeoutSeconds={providerDraft.turnTimeoutSeconds}
+        toolTimeoutSeconds={providerDraft.toolTimeoutSeconds}
+        totalTimeoutMinutes={providerDraft.totalTimeoutMinutes}
+        providerName={providerDraft.name}
+        providerDraftDirty={providerDraftDirty}
+        providerDraftCreating={providerDraftCreating}
         networkProxy={networkProxy}
         theme={theme}
         fontSize={fontSize}
@@ -637,11 +695,20 @@ export default function App() {
         onProviderProfileCreate={createProviderProfileFromCurrent}
         onProviderProfileUpdate={updateProviderProfile}
         onProviderProfileDelete={deleteProviderProfile}
+        onProviderProfileSave={saveProviderProfile}
+        onProviderProfileCancel={cancelProviderEdit}
+        onProviderProfileTest={testProviderProfile}
+        onProviderNameChange={setProviderName}
         onProviderChange={setProvider}
         onModelChange={setModel}
         onBaseUrlChange={setBaseUrl}
         onProviderKeyChange={setProviderKey}
         onContextThresholdChange={setContextThreshold}
+        onRequestRetriesChange={setRequestRetries}
+        onMaxTurnsChange={setMaxTurns}
+        onTurnTimeoutSecondsChange={setTurnTimeoutSeconds}
+        onToolTimeoutSecondsChange={setToolTimeoutSeconds}
+        onTotalTimeoutMinutesChange={setTotalTimeoutMinutes}
         onNetworkProxyChange={setNetworkProxy}
         onThemeChange={setTheme}
         onFontSizeChange={setFontSize}

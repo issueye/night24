@@ -18,6 +18,14 @@ export function SettingsStrip({
   baseUrl,
   providerKey,
   contextThreshold,
+  requestRetries,
+  maxTurns,
+  turnTimeoutSeconds,
+  toolTimeoutSeconds,
+  totalTimeoutMinutes,
+  providerName,
+  providerDraftDirty,
+  providerDraftCreating,
   networkProxy,
   theme,
   fontSize,
@@ -30,11 +38,20 @@ export function SettingsStrip({
   onProviderProfileCreate,
   onProviderProfileUpdate,
   onProviderProfileDelete,
+  onProviderProfileSave,
+  onProviderProfileCancel,
+  onProviderProfileTest,
+  onProviderNameChange,
   onProviderChange,
   onModelChange,
   onBaseUrlChange,
   onProviderKeyChange,
   onContextThresholdChange,
+  onRequestRetriesChange,
+  onMaxTurnsChange,
+  onTurnTimeoutSecondsChange,
+  onToolTimeoutSecondsChange,
+  onTotalTimeoutMinutesChange,
   onNetworkProxyChange,
   onThemeChange,
   onFontSizeChange,
@@ -72,16 +89,33 @@ export function SettingsStrip({
                 baseUrl={baseUrl}
                 providerKey={providerKey}
                 contextThreshold={contextThreshold}
+                requestRetries={requestRetries}
+                maxTurns={maxTurns}
+                turnTimeoutSeconds={turnTimeoutSeconds}
+                toolTimeoutSeconds={toolTimeoutSeconds}
+                totalTimeoutMinutes={totalTimeoutMinutes}
+                providerName={providerName}
+                providerDraftDirty={providerDraftDirty}
+                providerDraftCreating={providerDraftCreating}
                 networkProxy={networkProxy}
                 onProviderProfileChange={onProviderProfileChange}
                 onProviderProfileCreate={onProviderProfileCreate}
                 onProviderProfileUpdate={onProviderProfileUpdate}
                 onProviderProfileDelete={onProviderProfileDelete}
+                onProviderProfileSave={onProviderProfileSave}
+                onProviderProfileCancel={onProviderProfileCancel}
+                onProviderProfileTest={onProviderProfileTest}
+                onProviderNameChange={onProviderNameChange}
                 onProviderChange={onProviderChange}
                 onModelChange={onModelChange}
                 onBaseUrlChange={onBaseUrlChange}
                 onProviderKeyChange={onProviderKeyChange}
                 onContextThresholdChange={onContextThresholdChange}
+                onRequestRetriesChange={onRequestRetriesChange}
+                onMaxTurnsChange={onMaxTurnsChange}
+                onTurnTimeoutSecondsChange={onTurnTimeoutSecondsChange}
+                onToolTimeoutSecondsChange={onToolTimeoutSecondsChange}
+                onTotalTimeoutMinutesChange={onTotalTimeoutMinutesChange}
                 onNetworkProxyChange={onNetworkProxyChange}
               />
             )}

@@ -4,6 +4,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+const DESKTOP_USER_AGENT: &str = "red_panda Desktop/0.1.0";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageRequest {
     pub text: String,
@@ -12,6 +14,7 @@ pub struct MessageRequest {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub session_id: Option<String>,
+    pub request_retries: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +42,7 @@ async fn send_message(
         "base_url": request.base_url,
         "model": request.model,
         "session_id": request.session_id,
+        "request_retries": request.request_retries,
     });
 
     let resp = state
@@ -145,7 +149,10 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState {
             base_url: "http://localhost:17787".to_string(),
-            client: Client::new(),
+            client: Client::builder()
+                .user_agent(DESKTOP_USER_AGENT)
+                .build()
+                .expect("failed to build HTTP client"),
         })
         .invoke_handler(tauri::generate_handler![
             send_message,

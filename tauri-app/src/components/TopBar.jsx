@@ -1,5 +1,5 @@
 import { AlertTriangle, FolderOpen, Loader2, RotateCcw, Wifi, WifiOff } from 'lucide-react';
-import night24Mark from '../assets/night24-mark.svg';
+import redPandaMark from '../assets/red-panda-mark.svg';
 import { classNames } from '../utils/format.js';
 import { Button, IconButton } from './ui/index.js';
 
@@ -14,9 +14,9 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark"><img src={night24Mark} alt="" /></div>
+        <div className="brand-mark"><img src={redPandaMark} alt="" /></div>
         <div>
-          <strong>Night24</strong>
+          <strong>red_panda</strong>
           <span>本地 AI 编程助手</span>
         </div>
       </div>

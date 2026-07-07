@@ -92,6 +92,22 @@ impl PermissionManager {
             PermissionLevel::Allow,
         );
         policies.insert(
+            "developer__task_list_create".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__task_list_update".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__task_list_status".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
+            "developer__task_list_finish".to_string(),
+            PermissionLevel::Allow,
+        );
+        policies.insert(
             "developer__subagent_spawn".to_string(),
             PermissionLevel::Allow,
         );

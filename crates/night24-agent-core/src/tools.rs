@@ -455,6 +455,9 @@ fn summarize_tool_call(tool_name: &str, arguments: &serde_json::Value) -> String
             .unwrap_or_else(|| "Run shell command".to_string()),
         "developer__write_file" => arguments
             .get("path")
+            .or_else(|| arguments.get("file_path"))
+            .or_else(|| arguments.get("filepath"))
+            .or_else(|| arguments.get("target_path"))
             .and_then(|value| value.as_str())
             .map(|value| format!("Write file: {}", value))
             .unwrap_or_else(|| "Write file".to_string()),

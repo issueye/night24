@@ -216,6 +216,48 @@ pub async fn route_tool_input(tool_input: &str) -> Option<Message> {
         });
     }
 
+    if tool_input.starts_with("task_list_create:") {
+        let tasks = tool_input
+            .trim_start_matches("task_list_create:")
+            .split('|')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        return Some(Message {
+            id: Uuid::new_v4().to_string(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolRequest {
+                id: Uuid::new_v4().to_string(),
+                name: "developer__task_list_create".to_string(),
+                arguments: serde_json::json!({"tasks": tasks}),
+            }],
+            created_at: chrono::Utc::now(),
+        });
+    }
+
+    if tool_input.starts_with("task_list_update:") {
+        let rest = tool_input
+            .trim_start_matches("task_list_update:")
+            .trim()
+            .to_string();
+        let mut parts = rest.split_whitespace();
+        let index = parts
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(1);
+        let status = parts.next().unwrap_or("completed");
+        return Some(Message {
+            id: Uuid::new_v4().to_string(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolRequest {
+                id: Uuid::new_v4().to_string(),
+                name: "developer__task_list_update".to_string(),
+                arguments: serde_json::json!({"index": index, "status": status}),
+            }],
+            created_at: chrono::Utc::now(),
+        });
+    }
+
     if tool_input.starts_with("subagent_sync:") {
         let task = tool_input
             .trim_start_matches("subagent_sync:")

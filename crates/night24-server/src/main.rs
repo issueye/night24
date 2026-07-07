@@ -1,16 +1,19 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     extract::{Path, Query, State},
     http::{header, Method, StatusCode},
+    response::{IntoResponse, Response},
     routing::delete,
     routing::get,
     routing::post,
     routing::put,
     Json, Router,
 };
+use futures::StreamExt;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
@@ -33,8 +36,8 @@ use agent_runner::{build_agent_runner, AgentRunner, RunnerMode};
 use api_types::{
     AcceptedResponse, CancelAgentRequest, CompactSessionRequest, CompactSessionResponse,
     CoreRestartResponse, CoreStatusResponse, CreateSessionRequest, ForkSessionRequest,
-    PermissionDecisionRequest, ReadyResponse, RenameSessionRequest, ReplyRequest, SessionSummary,
-    SkillLoadQuery, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
+    PermissionDecisionRequest, ProviderTestRequest, ReadyResponse, RenameSessionRequest,
+    ReplyRequest, SessionSummary, SkillLoadQuery, SubAgentPoolQuery, ToolsResponse, WorkspaceState,
 };
 use auth::require_api_key;
 use core_client::{AgentCoreClient, CoreRuntimeStatus};
@@ -52,7 +55,14 @@ use workspace::{
 };
 
 use night24_core::{
-    provider::registry::ProviderRegistry, session::SessionManager, tool_executor::builtin_tools,
+    model::{ContentBlock, Message},
+    provider::{
+        clamp_request_retries, registry::ProviderRegistry, AnthropicProvider, EchoProvider,
+        ModelConfig, OpenAIProvider, OpenAIResponsesProvider, Provider,
+    },
+    session::SessionManager,
+    tool_executor::builtin_tools,
+    OllamaProvider,
 };
 use night24_protocol::{
     PermissionDecision, PermissionMode, SkillRegistryParams, SubAgentPoolParams,
@@ -121,6 +131,7 @@ fn sqlite_file_url(path: PathBuf) -> String {
         healthz,
         reply::reply,
         reply::stream_run_events,
+        test_provider,
         sessions::list_sessions,
         sessions::get_session_history,
         sessions::create_session,
@@ -138,6 +149,7 @@ fn sqlite_file_url(path: PathBuf) -> String {
     ),
     components(schemas(
         ReplyRequest,
+        ProviderTestRequest,
         CreateSessionRequest,
         CompactSessionRequest,
         CompactSessionResponse,
@@ -217,6 +229,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/agent/cancel", post(agent_cancel))
         .route("/agent/core/restart", post(restart_agent_core))
         .route("/agent/subagents", get(get_agent_subagents))
+        .route("/providers/test", post(test_provider))
         .route("/tools", get(get_tools))
         .route("/workspaces/open", post(open_workspace))
         .route("/workspaces/current", get(current_workspace))
@@ -285,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
 /// Build the provider registry from environment variables.
 ///
 /// Providers are registered only when their API key / base URL is available:
-/// - `OPENAI_API_KEY`         → openai (also drives stepfun if STEPFUN_API_KEY set)
+/// - `OPENAI_API_KEY`         → openai-chat and openai-responses
 /// - `ANTHROPIC_API_KEY`      → anthropic
 /// - `STEPFUN_API_KEY`        → stepfun (OpenAI-compatible endpoint)
 /// - `OLLAMA_BASE_URL`        → ollama (defaults to http://localhost:11434)
@@ -297,7 +310,10 @@ fn build_provider_registry() -> ProviderRegistry {
     if let Some(api_key) = non_empty_env("OPENAI_API_KEY") {
         let base_url = env_or_default("OPENAI_BASE_URL", "https://api.openai.com/v1");
         let model = env_or_default("OPENAI_MODEL", "gpt-4o-mini");
-        registry = registry.with_openai(api_key, base_url, model);
+        let responses_model = env_or_default("OPENAI_RESPONSES_MODEL", "gpt-4o");
+        registry = registry
+            .with_openai(api_key.clone(), base_url.clone(), model)
+            .with_openai_responses(api_key, base_url, responses_model);
     }
 
     if let Some(api_key) = non_empty_env("ANTHROPIC_API_KEY") {
@@ -468,6 +484,197 @@ async fn get_tools(State(state): State<AppState>) -> Json<ToolsResponse> {
         source: "night24-core builtin fallback".to_string(),
         core_available: false,
     })
+}
+
+#[utoipa::path(
+    post,
+    path = "/providers/test",
+    tag = "night24",
+    request_body = ProviderTestRequest,
+    responses(
+        (status = 200, description = "Provider connectivity test", body = serde_json::Value)
+    )
+)]
+async fn test_provider(Json(req): Json<ProviderTestRequest>) -> Response {
+    match run_provider_test(req).await {
+        Ok(message) => Json(serde_json::json!({
+            "ok": true,
+            "message": message,
+        }))
+        .into_response(),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": err.to_string(),
+            })),
+        )
+            .into_response(),
+    }
+}
+
+async fn run_provider_test(req: ProviderTestRequest) -> anyhow::Result<String> {
+    let provider_name = normalize_provider_name(Some(&req.provider));
+    let model = req
+        .model
+        .as_deref()
+        .and_then(trimmed_non_empty)
+        .unwrap_or_else(|| provider_test_default_model(&provider_name));
+    let provider = build_test_provider(&provider_name, &req)?;
+    let messages = vec![Message::user("ping")];
+    let model_config = ModelConfig {
+        model,
+        temperature: Some(0.0),
+        max_tokens: Some(16),
+        request_retries: clamp_request_retries(req.request_retries),
+    };
+    let mut stream = tokio::time::timeout(
+        Duration::from_secs(25),
+        provider.stream(&model_config, "Reply with OK.", &messages, &[]),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("provider test timed out before response"))??;
+
+    let mut text = String::new();
+    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(25), stream.next())
+        .await
+        .map_err(|_| anyhow::anyhow!("provider test timed out while reading response"))?
+    {
+        let (message, _) = chunk?;
+        if let Some(message) = message {
+            text = message_text(&message);
+            if !text.trim().is_empty() {
+                break;
+            }
+        }
+    }
+
+    if text.trim().is_empty() {
+        anyhow::bail!("provider test returned an empty response");
+    }
+    Ok(text.trim().to_string())
+}
+
+fn build_test_provider(
+    provider_name: &str,
+    req: &ProviderTestRequest,
+) -> anyhow::Result<Box<dyn Provider>> {
+    match provider_name {
+        "echo" => Ok(Box::new(EchoProvider)),
+        "openai-chat" | "openai" => Ok(Box::new(
+            OpenAIProvider::new(resolve_test_api_key(req, "OPENAI_API_KEY", provider_name)?)
+                .with_base_url(resolve_test_base_url(
+                    req,
+                    "OPENAI_BASE_URL",
+                    "https://api.openai.com/v1",
+                ))
+                .with_model(provider_test_default_model(provider_name)),
+        )),
+        "openai-responses" => Ok(Box::new(
+            OpenAIResponsesProvider::new(resolve_test_api_key(
+                req,
+                "OPENAI_API_KEY",
+                provider_name,
+            )?)
+            .with_base_url(resolve_test_base_url(
+                req,
+                "OPENAI_BASE_URL",
+                "https://api.openai.com/v1",
+            ))
+            .with_model(provider_test_default_model(provider_name)),
+        )),
+        "stepfun" => Ok(Box::new(
+            OpenAIProvider::new(resolve_test_api_key(req, "STEPFUN_API_KEY", provider_name)?)
+                .with_base_url(resolve_test_base_url(
+                    req,
+                    "STEPFUN_BASE_URL",
+                    "https://api.stepfun.com/step_plan/v1",
+                ))
+                .with_model(provider_test_default_model(provider_name)),
+        )),
+        "anthropic" => Ok(Box::new(
+            AnthropicProvider::new(resolve_test_api_key(
+                req,
+                "ANTHROPIC_API_KEY",
+                provider_name,
+            )?)
+            .with_base_url(resolve_test_base_url(
+                req,
+                "ANTHROPIC_BASE_URL",
+                "https://api.anthropic.com/v1",
+            ))
+            .with_model(provider_test_default_model(provider_name)),
+        )),
+        "ollama" => Ok(Box::new(
+            OllamaProvider::new(resolve_test_base_url(
+                req,
+                "OLLAMA_BASE_URL",
+                "http://localhost:11434",
+            ))
+            .with_model(provider_test_default_model(provider_name)),
+        )),
+        other => anyhow::bail!("unknown provider: {other}"),
+    }
+}
+
+fn resolve_test_api_key(
+    req: &ProviderTestRequest,
+    env_name: &str,
+    provider_name: &str,
+) -> anyhow::Result<String> {
+    if let Some(key) = req.api_key.as_deref().and_then(trimmed_non_empty) {
+        return Ok(key);
+    }
+    let key = std::env::var(env_name)
+        .map_err(|_| anyhow::anyhow!("API key is required for {provider_name}"))?;
+    trimmed_non_empty(&key)
+        .ok_or_else(|| anyhow::anyhow!("API key is required for {provider_name}"))
+}
+
+fn resolve_test_base_url(req: &ProviderTestRequest, env_name: &str, default_value: &str) -> String {
+    req.base_url
+        .as_deref()
+        .and_then(trimmed_non_empty)
+        .or_else(|| {
+            std::env::var(env_name)
+                .ok()
+                .and_then(|value| trimmed_non_empty(&value))
+        })
+        .unwrap_or_else(|| default_value.to_string())
+}
+
+fn provider_test_default_model(provider_name: &str) -> String {
+    match provider_name {
+        "openai" | "openai-chat" => "gpt-4o-mini",
+        "openai-responses" => "gpt-4o",
+        "stepfun" => "step-3.7-flash",
+        "anthropic" => "claude-3-5-sonnet-latest",
+        "ollama" => "llama3.2",
+        _ => "echo-v1",
+    }
+    .to_string()
+}
+
+fn normalize_provider_name(value: Option<&str>) -> String {
+    let Some(provider) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "echo".to_string();
+    };
+    match provider.to_ascii_lowercase().as_str() {
+        "openai" => "openai-chat".to_string(),
+        normalized => normalized.to_string(),
+    }
+}
+
+fn message_text(message: &Message) -> String {
+    message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            ContentBlock::Thinking { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[utoipa::path(
@@ -760,6 +967,21 @@ mod tests {
     fn test_binary_detection() {
         assert!(is_binary_bytes(b"abc\0def"));
         assert!(!is_binary_bytes(b"plain utf-8 text"));
+    }
+
+    #[tokio::test]
+    async fn provider_test_echo_returns_response() {
+        let result = run_provider_test(ProviderTestRequest {
+            provider: "echo".to_string(),
+            model: Some("echo-v1".to_string()),
+            base_url: None,
+            api_key: None,
+            request_retries: Some(8),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.contains("ping"));
     }
 
     #[test]

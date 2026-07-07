@@ -95,19 +95,20 @@
 
 .app-shell .project-session-tree {
   padding-bottom: 8px;
+  overflow-x: hidden;
 }
 
 .app-shell .project-row {
-  min-height: 31px;
-  padding: 0 8px;
+  min-height: 32px;
+  padding: 0 8px 0 7px;
 }
 
 .app-shell .project-session-list {
-  margin-left: 25px;
+  margin-left: 20px;
 }
 
 .app-shell .project-session-row {
-  min-height: 30px;
+  min-height: 31px;
 }
 
 .app-shell .project-session-list::before,

@@ -181,8 +181,15 @@ export function useAgentEvents({
         ...items,
         {
           id: `tool-error-${eventPayload?.tool_call_id || Date.now()}-${Math.random().toString(16).slice(2)}`,
-          role: 'assistant',
-          content: [{ type: 'text', text: tool.messageText }],
+          role: 'tool',
+          content: [{
+            type: 'tool_response',
+            id: eventPayload?.tool_call_id || `${runId || 'run'}-tool-error`,
+            name: tool.toolName,
+            tool_name: tool.toolName,
+            content: tool.detail,
+            is_error: true,
+          }],
           tone: 'error',
           created_at: envelope?.created_at || new Date().toISOString(),
         },

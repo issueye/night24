@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{ContentBlock, Message, Role, Tool};
-use crate::provider::{MessageStream, ModelConfig, Provider, ProviderError, ProviderUsage};
+use crate::provider::{
+    retry_error_suffix, retryable_status, sleep_before_retry, MessageStream, ModelConfig, Provider,
+    ProviderError, ProviderUsage, MAX_REQUEST_RETRIES, PROVIDER_USER_AGENT,
+};
 
 #[derive(Debug, Clone)]
 pub struct OllamaProvider {
@@ -82,21 +85,53 @@ impl Provider for OllamaProvider {
             });
 
             let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
-            let response = client
-                .post(url)
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await?;
+            let request_retries = model_config.request_retries.min(MAX_REQUEST_RETRIES);
+            let mut retries_done = 0;
+            let response = loop {
+                let result = client
+                    .post(url.clone())
+                    .header("User-Agent", PROVIDER_USER_AGENT)
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .await;
 
-            if !response.status().is_success() {
-                let status = response.status();
-                let text = response.text().await?;
-                return Err(ProviderError::Message(format!(
-                    "Ollama API error {}: {}",
-                    status, text
-                )));
-            }
+                match result {
+                    Ok(response) if response.status().is_success() => break response,
+                    Ok(response) => {
+                        let status = response.status();
+                        let text = response.text().await?;
+                        if retryable_status(status) && retries_done < request_retries {
+                            retries_done += 1;
+                            sleep_before_retry(retries_done).await;
+                            continue;
+                        }
+                        let total_attempts = retries_done + 1;
+                        return Err(ProviderError::Message(format!(
+                            "Ollama API error {}{}: {}",
+                            status,
+                            retry_error_suffix(total_attempts),
+                            text
+                        )));
+                    }
+                    Err(err) => {
+                        if retries_done < request_retries {
+                            retries_done += 1;
+                            sleep_before_retry(retries_done).await;
+                            continue;
+                        }
+                        let total_attempts = retries_done + 1;
+                        if total_attempts > 1 {
+                            return Err(ProviderError::Message(format!(
+                                "network error{}: {}",
+                                retry_error_suffix(total_attempts),
+                                err
+                            )));
+                        }
+                        return Err(ProviderError::Network(err));
+                    }
+                }
+            };
 
             let stream = response.bytes_stream();
             let output = try_stream! {

@@ -145,6 +145,7 @@ export function Sidebar({
                     <ExpandIcon className="project-expand-icon" size={13} />
                     <ProjectIcon size={14} />
                     <span>{item.name || item.root_path}</span>
+                    {projectSessions.length > 0 && <small className="project-session-count">{projectSessions.length}</small>}
                   </Button>
                   {isExpanded && (
                     <div className="project-session-list">
@@ -170,7 +171,7 @@ export function Sidebar({
                               title={session.name || session.id}
                               variant="ghost"
                             >
-                              <span>{session.name || session.id}</span>
+                              <span className="session-title">{session.name || session.id}</span>
                               {isSessionRunning ? (
                                 <Loader2 className="session-running-icon" size={13} />
                               ) : (

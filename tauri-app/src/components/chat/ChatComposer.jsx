@@ -1,4 +1,5 @@
 import { Play, Square } from 'lucide-react';
+import { providerDisplayName } from '../../utils/settings.js';
 import { Button, ChatInput, IconButton, Popover, ProgressRing, Select } from '../ui/index.js';
 
 export function ChatComposer({
@@ -24,7 +25,7 @@ export function ChatComposer({
   const thresholdText = contextUsage?.threshold ? formatTokenCount(contextUsage.threshold) : '--';
   const contextPercent = contextUsage?.percent ?? 0;
   const providerOptions = providerProfiles.map((item) => ({
-    label: `${item.name || item.provider} · ${item.model || 'default'}`,
+    label: `${item.name || providerDisplayName(item.provider)} · ${providerDisplayName(item.provider)} · ${item.model || 'default'}`,
     value: item.id,
   }));
   const accessOptions = [
@@ -41,7 +42,7 @@ export function ChatComposer({
         onSubmit={() => {
           if (canSend) onSendTask();
         }}
-        placeholder={isRunning ? '正在执行当前任务...' : workspace ? '给 Night24 发消息...' : '请先打开项目'}
+        placeholder={isRunning ? '正在执行当前任务...' : workspace ? '给 red_panda 发消息...' : '请先打开项目'}
         disabled={isRunning}
       />
       <div className="composer-actions">

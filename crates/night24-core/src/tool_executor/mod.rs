@@ -100,9 +100,7 @@ async fn execute_tool_inner(
                 Ok(content)
             }
             "developer__write_file" => {
-                let path = arguments
-                    .get("path")
-                    .and_then(|v| v.as_str())
+                let path = string_arg(arguments, &["path", "file_path", "filepath", "target_path"])
                     .ok_or_else(|| anyhow::anyhow!("missing `path` for developer__write_file"))?;
 
                 let content = arguments
@@ -425,6 +423,16 @@ async fn execute_tool_inner(
     .map_err(|_| anyhow::anyhow!("tool execution timed out: {}", name))?
 }
 
+fn string_arg<'a>(arguments: &'a serde_json::Value, names: &[&str]) -> Option<&'a str> {
+    names.iter().find_map(|name| {
+        arguments
+            .get(*name)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,6 +633,37 @@ mod tests {
         assert!(result.contains("Token means session state"));
         assert!(result.contains("OPENAI_API_KEY=[redacted sensitive value]"));
         assert!(!result.contains("sk-test1234567890abcdef"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_write_file_accepts_path_aliases() {
+        let security = SecurityInspector::new(std::sync::Arc::new(PermissionManager::new(
+            PermissionLevel::Allow,
+        )));
+        let temp_dir =
+            std::env::temp_dir().join(format!("night24-write-file-alias-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+
+        let args = serde_json::json!({
+            "file_path": "nested/output.txt",
+            "content": "hello alias"
+        });
+        let result = execute_tool(
+            "developer__write_file",
+            &args,
+            temp_dir.as_path(),
+            &security,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, "file written");
+        let content = tokio::fs::read_to_string(temp_dir.join("nested/output.txt"))
+            .await
+            .unwrap();
+        assert_eq!(content, "hello alias");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

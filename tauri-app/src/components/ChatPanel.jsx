@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Bot, Circle, Code2, FileCode2, GitCompare } from 'lucide-react';
 import { classNames } from '../utils/format.js';
+import { deriveTaskProgress, isTaskProgressMessage } from '../utils/taskProgress.js';
 import { ChatComposer } from './chat/ChatComposer.jsx';
 import { ConversationTimeline } from './chat/ConversationTimeline.jsx';
+import { buildConversationItems, RunStatusRow, ToolActivityRow } from './ConversationActivity.jsx';
 import { MessageBubble } from './MessageBubble.jsx';
 import { PermissionRequestCard } from './PermissionRequestCard.jsx';
+import { TaskProgressPanel } from './TaskProgressPanel.jsx';
 import { IconButton } from './ui/index.js';
 
 export function ChatPanel({
@@ -35,6 +38,12 @@ export function ChatPanel({
   const highlightTimerRef = useRef(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedTarget, setHighlightedTarget] = useState('');
+  const taskProgress = useMemo(() => deriveTaskProgress(messages, isRunning), [messages, isRunning]);
+  const chatMessages = useMemo(
+    () => messages.filter((message) => !isTaskProgressMessage(message)),
+    [messages],
+  );
+  const conversationItems = useMemo(() => buildConversationItems(chatMessages), [chatMessages]);
 
   function updateScrollButton() {
     const node = scrollRef.current;
@@ -68,7 +77,7 @@ export function ChatPanel({
 
   useEffect(() => {
     updateScrollButton();
-  }, [messages.length, pendingPermissions.length]);
+  }, [conversationItems.length, pendingPermissions.length, taskProgress.hasProgress, taskProgress.updatedAt]);
 
   useEffect(() => () => window.clearTimeout(highlightTimerRef.current), []);
 
@@ -92,24 +101,31 @@ export function ChatPanel({
       </div>
 
       <div className="conversation-area" onScroll={updateScrollButton} ref={scrollRef}>
-        <ConversationTimeline messages={messages} onJump={scrollToTarget} />
+        <ConversationTimeline messages={chatMessages} onJump={scrollToTarget} />
 
         <div className="messages">
-          {messages.length === 0 ? (
+          {conversationItems.length === 0 && !taskProgress.hasProgress ? (
             <div className="welcome-panel">
               <Bot size={30} />
               <strong>开始一个编程任务</strong>
               <span>打开项目后，像聊天一样描述要修改、解释或检查的内容。</span>
             </div>
-          ) : messages.map((message, index) => (
-            <div
-              className={classNames('message-anchor', highlightedTarget === `message-${message.id || index}` && 'highlighted')}
-              key={message.id || index}
-              ref={setTargetRef(`message-${message.id || index}`)}
-            >
-              <MessageBubble message={message} />
-            </div>
-          ))}
+          ) : conversationItems.map((item, index) => {
+            if (item.type === 'tool_group') {
+              return <ToolActivityRow key={item.id || `tools-${index}`} messages={item.messages} />;
+            }
+
+            const message = item.message;
+            return (
+              <div
+                className={classNames('message-anchor', highlightedTarget === `message-${message.id || index}` && 'highlighted')}
+                key={message.id || index}
+                ref={setTargetRef(`message-${message.id || index}`)}
+              >
+                <MessageBubble message={message} />
+              </div>
+            );
+          })}
           {pendingPermissions.map((permission) => (
             <div
               className={classNames('message-anchor', highlightedTarget === `permission-${permission.permission_id}` && 'highlighted')}
@@ -131,6 +147,10 @@ export function ChatPanel({
         </IconButton>
       )}
 
+      <div className="conversation-bottom-activity">
+        <TaskProgressPanel progress={taskProgress} />
+        <RunStatusRow isRunning={isRunning} />
+      </div>
       <ChatComposer
         taskText={taskText}
         isRunning={isRunning}

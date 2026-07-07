@@ -11,6 +11,7 @@ use crate::hooks::{HookContext, HookRunner};
 use crate::rpc::agent_event_notification;
 use crate::skills::SkillRegistry;
 use crate::subagents::SubAgentPool;
+use crate::task_list::TaskListState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CoreState {
@@ -42,6 +43,7 @@ pub(super) struct RunContext {
     pub(super) hooks: Arc<HookRunner>,
     pub(super) subagents: Arc<SubAgentPool>,
     pub(super) skills: Arc<SkillRegistry>,
+    pub(super) task_list: Arc<Mutex<TaskListState>>,
 }
 
 impl RunContext {

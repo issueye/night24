@@ -375,6 +375,7 @@ mod tests {
                 permission_mode: Some("strict".to_string()),
                 network_proxy: None,
                 context_threshold_tokens: None,
+                request_retries: None,
             },
         }
     }

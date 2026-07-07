@@ -3,7 +3,7 @@
    避免误伤 settings/subagents 等面板里的同名按钮。 */
 
 .app-shell .center-panel {
-  grid-template-rows: 48px minmax(0, 1fr) auto;
+  grid-template-rows: 48px minmax(0, 1fr) auto auto;
   background: var(--surface);
   border: 0;
   border-radius: 0;
@@ -66,7 +66,7 @@
 .app-shell .messages {
   width: min(760px, calc(100% - 92px));
   margin: 0 auto;
-  padding: 34px 0 24px;
+  padding: 34px 0 18px;
   background: transparent;
 }
 
@@ -107,7 +107,8 @@
 
 .app-shell .composer {
   width: min(738px, calc(100% - 92px));
-  margin: 12px auto 16px;
+  min-height: 108px;
+  margin: 0 auto 16px;
   padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -116,6 +117,7 @@
 }
 
 .app-shell .composer textarea {
+  min-height: 52px;
   padding: 0;
   background: transparent;
   border: 0;
@@ -155,7 +157,8 @@
 
 @media (max-width: 1180px) {
   .app-shell .messages,
-  .app-shell .composer {
+  .app-shell .composer,
+  .app-shell .conversation-bottom-activity {
     width: min(700px, calc(100% - 56px));
   }
 }

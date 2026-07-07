@@ -6,7 +6,7 @@
     "distDir": "../dist"
   },
   "package": {
-    "productName": "Night24",
+    "productName": "red_panda",
     "version": "0.1.0"
   },
   "tauri": {
@@ -25,7 +25,7 @@
     "bundle": {
       "active": false,
       "targets": "all",
-      "identifier": "com.night24.chat",
+      "identifier": "com.redpanda.chat",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -42,7 +42,7 @@
     },
     "windows": [
       {
-        "title": "Night24",
+        "title": "red_panda",
         "width": 1440,
         "height": 920,
         "resizable": true,

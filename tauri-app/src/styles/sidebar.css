@@ -114,13 +114,15 @@
   align-content: start;
   gap: 2px;
   min-height: 0;
-  overflow: auto;
-  padding-right: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 0;
 }
 
 .project-tree-group {
   display: grid;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
 }
 
 .project-row,
@@ -138,10 +140,11 @@
 }
 
 .project-row {
-  grid-template-columns: 14px 16px minmax(0, 1fr);
+  position: relative;
+  grid-template-columns: 14px 16px minmax(0, 1fr) auto;
   gap: 6px;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 32px;
+  padding: 0 8px 0 7px;
 }
 
 .project-expand-icon {
@@ -154,6 +157,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-session-count {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 5px;
+  color: var(--subtle);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: 600;
 }
 
 .project-row:hover,
@@ -169,16 +186,17 @@
   position: relative;
   display: grid;
   gap: 1px;
-  margin: 0 0 6px 25px;
-  padding-left: 8px;
+  min-width: 0;
+  margin: 1px 0 7px 20px;
+  padding: 2px 0 2px 12px;
 }
 
 .project-session-list::before {
   content: "";
   position: absolute;
   left: 0;
-  top: -2px;
-  bottom: 14px;
+  top: -3px;
+  bottom: 12px;
   width: 1px;
   background: var(--line);
 }
@@ -186,9 +204,10 @@
 .project-session-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 20px;
+  grid-template-columns: minmax(0, 1fr) 24px;
   align-items: center;
-  min-height: 30px;
+  min-width: 0;
+  min-height: 31px;
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
@@ -198,9 +217,9 @@
 .project-session-row::before {
   content: "";
   position: absolute;
-  left: -8px;
+  left: -12px;
   top: 15px;
-  width: 8px;
+  width: 11px;
   height: 1px;
   background: var(--line);
 }
@@ -208,8 +227,9 @@
 .project-session-main {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
-  min-height: 28px;
-  padding: 0 2px 0 10px;
+  min-width: 0;
+  min-height: 29px;
+  padding: 0 5px 0 10px;
   color: inherit;
 }
 
@@ -230,12 +250,13 @@
 .session-delete {
   display: grid;
   place-items: center;
-  width: 20px;
+  width: 22px;
   height: 24px;
   background: transparent;
   border-radius: var(--radius-xs);
   opacity: 0;
   cursor: pointer;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
 }
 
 .project-session-row:hover .session-delete,

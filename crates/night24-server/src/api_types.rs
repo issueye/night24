@@ -22,6 +22,31 @@ pub(crate) struct ReplyRequest {
     pub(crate) network_proxy: Option<String>,
     #[schema(example = 24000)]
     pub(crate) context_threshold_tokens: Option<usize>,
+    #[schema(example = 2)]
+    pub(crate) request_retries: Option<u8>,
+    #[schema(example = 120)]
+    pub(crate) max_turns: Option<usize>,
+    #[schema(example = 180000)]
+    pub(crate) turn_timeout_ms: Option<u64>,
+    #[schema(example = 180000)]
+    pub(crate) tool_timeout_ms: Option<u64>,
+    #[schema(example = 1800000)]
+    pub(crate) total_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct ProviderTestRequest {
+    #[schema(example = "openai-chat")]
+    pub(crate) provider: String,
+    #[schema(example = "gpt-4o-mini")]
+    pub(crate) model: Option<String>,
+    #[schema(example = "https://api.openai.com/v1")]
+    pub(crate) base_url: Option<String>,
+    #[schema(example = "sk-...")]
+    pub(crate) api_key: Option<String>,
+    #[schema(example = 2)]
+    pub(crate) request_retries: Option<u8>,
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]

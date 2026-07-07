@@ -20,7 +20,7 @@ use night24_core::{
     agent::{Agent, AgentConfig},
     context_mgmt::{CompactionResult, ContextManager},
     model::{ContentBlock, Message, Role},
-    provider::ModelConfig,
+    provider::{clamp_request_retries, ModelConfig},
     session::{Session, SessionType},
 };
 use night24_protocol::{
@@ -36,6 +36,8 @@ use crate::state::AppState;
 use crate::workspace::{build_diff_ready_event, current_workspace_path, workspace_change_snapshot};
 
 const SSE_SEND_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_REPLY_TURNS: usize = 1000;
+const MAX_REPLY_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 
 pub(crate) async fn reply_core(
     State(state): State<AppState>,
@@ -181,6 +183,7 @@ struct CoreEventPumpState {
 struct CoreEventDispatch {
     events: Vec<serde_json::Value>,
     is_terminal: bool,
+    terminal_type: Option<String>,
 }
 
 struct MessageDeltaPayload<'a> {
@@ -196,6 +199,7 @@ async fn pump_core_events(
     let user_message_id = state.user_message.id.clone();
     state.session.conversation.push(state.user_message.clone());
     let mut sse_open = true;
+    let mut terminal_was_finish = false;
 
     while let Some(event) = core_events.recv().await {
         let dispatch = prepare_core_event_dispatch(&mut state, event);
@@ -233,11 +237,17 @@ async fn pump_core_events(
             }
         }
         if dispatch.is_terminal {
+            terminal_was_finish = dispatch.terminal_type.as_deref() == Some("finish");
             break;
         }
     }
 
-    finalize_pumped_session(state.session, &state.run_id, &user_message_id)
+    finalize_pumped_session(
+        state.session,
+        &state.run_id,
+        &user_message_id,
+        terminal_was_finish,
+    )
 }
 
 fn prepare_core_event_dispatch(
@@ -261,10 +271,12 @@ fn prepare_core_event_dispatch(
         append_diff_ready_before_terminal(&mut events, &mut event_to_send, diff_event);
     }
 
+    let terminal_type = is_terminal.then(|| core_event_type(&event_to_send).to_string());
     events.push(event_to_send);
     CoreEventDispatch {
         events,
         is_terminal,
+        terminal_type,
     }
 }
 
@@ -280,8 +292,15 @@ fn append_diff_ready_before_terminal(
     events.push(diff_event);
 }
 
-fn finalize_pumped_session(mut session: Session, run_id: &str, user_message_id: &str) -> Session {
-    if should_append_no_reply_placeholder(&session.conversation, user_message_id) {
+fn finalize_pumped_session(
+    mut session: Session,
+    run_id: &str,
+    user_message_id: &str,
+    terminal_was_finish: bool,
+) -> Session {
+    if terminal_was_finish
+        && should_append_no_reply_placeholder(&session.conversation, user_message_id)
+    {
         session.conversation.push(text_message(
             Role::Assistant,
             format!("Run {run_id} completed without assistant message."),
@@ -356,6 +375,8 @@ async fn load_or_create_reply_session(
 }
 
 fn compact_session_for_reply(session: &mut Session, threshold: Option<usize>) {
+    remove_no_reply_placeholders(&mut session.conversation);
+
     let Some(threshold) = threshold.filter(|value| *value > 0) else {
         return;
     };
@@ -373,6 +394,20 @@ fn compact_session_for_reply(session: &mut Session, threshold: Option<usize>) {
             "session context summarized"
         );
     }
+}
+
+fn remove_no_reply_placeholders(conversation: &mut Vec<Message>) {
+    conversation.retain(|message| !is_no_reply_placeholder(message));
+}
+
+fn is_no_reply_placeholder(message: &Message) -> bool {
+    if message.role != Role::Assistant || message.content.len() != 1 {
+        return false;
+    }
+    let Some(ContentBlock::Text { text }) = message.content.first() else {
+        return false;
+    };
+    text.starts_with("Run run-") && text.ends_with(" completed without assistant message.")
 }
 
 fn effective_permission_mode(request_mode: Option<String>) -> String {
@@ -400,6 +435,7 @@ fn build_reply_params(
     permission_mode: String,
 ) -> ReplyParams {
     let provider_name = normalize_provider_name(req.provider.as_deref());
+    let limits = reply_limits_from_request(&req);
     ReplyParams {
         run_id: run_id.to_string(),
         session: ReplySession {
@@ -416,22 +452,59 @@ fn build_reply_params(
             api_key_ref: None,
             api_key: req.api_key,
         },
-        limits: ReplyLimits::default(),
+        limits,
         options: ReplyOptions {
             stream_message_delta: true,
             emit_tool_events: true,
             permission_mode: Some(permission_mode),
             network_proxy: normalize_network_proxy(req.network_proxy),
             context_threshold_tokens: req.context_threshold_tokens,
+            request_retries: Some(clamp_request_retries(req.request_retries)),
         },
     }
+}
+
+fn reply_limits_from_request(req: &ReplyRequest) -> ReplyLimits {
+    let defaults = ReplyLimits::default();
+    ReplyLimits {
+        max_turns: bounded_usize(req.max_turns, defaults.max_turns, 1, MAX_REPLY_TURNS),
+        turn_timeout_ms: bounded_u64(
+            req.turn_timeout_ms,
+            defaults.turn_timeout_ms,
+            1,
+            MAX_REPLY_TIMEOUT_MS,
+        ),
+        tool_timeout_ms: bounded_u64(
+            req.tool_timeout_ms,
+            defaults.tool_timeout_ms,
+            1,
+            MAX_REPLY_TIMEOUT_MS,
+        ),
+        total_timeout_ms: bounded_u64(
+            req.total_timeout_ms,
+            defaults.total_timeout_ms,
+            1,
+            MAX_REPLY_TIMEOUT_MS,
+        ),
+    }
+}
+
+fn bounded_usize(value: Option<usize>, fallback: usize, min: usize, max: usize) -> usize {
+    value.unwrap_or(fallback).clamp(min, max)
+}
+
+fn bounded_u64(value: Option<u64>, fallback: u64, min: u64, max: u64) -> u64 {
+    value.unwrap_or(fallback).clamp(min, max)
 }
 
 fn normalize_provider_name(value: Option<&str>) -> String {
     let Some(provider) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return "echo".to_string();
     };
-    provider.to_ascii_lowercase()
+    match provider.to_ascii_lowercase().as_str() {
+        "openai" => "openai-chat".to_string(),
+        normalized => normalized.to_string(),
+    }
 }
 
 fn normalize_network_proxy(value: Option<String>) -> Option<String> {
@@ -501,9 +574,28 @@ fn merge_conversation_message(conversation: &mut Vec<Message>, message: Message)
         .iter_mut()
         .find(|existing| !message.id.is_empty() && existing.id == message.id)
     {
-        *existing = message;
+        if same_message_kind(existing, &message) {
+            *existing = message;
+        } else {
+            conversation.push(message);
+        }
     } else {
         conversation.push(message);
+    }
+}
+
+fn same_message_kind(left: &Message, right: &Message) -> bool {
+    left.role == right.role
+        && left.content.first().map(content_block_kind)
+            == right.content.first().map(content_block_kind)
+}
+
+fn content_block_kind(block: &ContentBlock) -> &'static str {
+    match block {
+        ContentBlock::Text { .. } => "text",
+        ContentBlock::ToolRequest { .. } => "tool_request",
+        ContentBlock::ToolResponse { .. } => "tool_response",
+        ContentBlock::Thinking { .. } => "thinking",
     }
 }
 
@@ -697,7 +789,8 @@ pub(crate) async fn reply(
     Json(req): Json<ReplyRequest>,
 ) -> Response {
     let provider_name = normalize_provider_name(req.provider.as_deref());
-    let provider: Arc<dyn night24_core::provider::Provider> = if provider_name == "openai" {
+    let limits = reply_limits_from_request(&req);
+    let provider: Arc<dyn night24_core::provider::Provider> = if provider_name == "openai-chat" {
         let api_key = req
             .api_key
             .unwrap_or_else(|| std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "".to_string()));
@@ -709,7 +802,21 @@ pub(crate) async fn reply(
         }
         state.provider_registry.create_with_model(
             "openai",
-            legacy_provider_model("openai", req.model.as_deref()),
+            legacy_provider_model("openai-chat", req.model.as_deref()),
+        )
+    } else if provider_name == "openai-responses" {
+        let api_key = req
+            .api_key
+            .unwrap_or_else(|| std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "".to_string()));
+        if api_key.is_empty() {
+            return json_error_response(
+                StatusCode::BAD_REQUEST,
+                "api_key is required for openai-responses provider",
+            );
+        }
+        state.provider_registry.create_with_model(
+            "openai-responses",
+            legacy_provider_model("openai-responses", req.model.as_deref()),
         )
     } else if provider_name == "anthropic" {
         state.provider_registry.create_with_model(
@@ -775,12 +882,13 @@ pub(crate) async fn reply(
                 model: req.model.clone().unwrap_or_else(|| "echo-v1".to_string()),
                 temperature: None,
                 max_tokens: None,
+                request_retries: clamp_request_retries(req.request_retries),
             },
             system_prompt: "You are a helpful AI assistant.".to_string(),
-            max_turns: 40,
-            turn_timeout: Duration::from_secs(60),
-            tool_timeout: Duration::from_secs(60),
-            total_timeout: Duration::from_secs(600),
+            max_turns: limits.max_turns,
+            turn_timeout: Duration::from_millis(limits.turn_timeout_ms),
+            tool_timeout: Duration::from_millis(limits.tool_timeout_ms),
+            total_timeout: Duration::from_millis(limits.total_timeout_ms),
         },
         provider,
         state.permission_manager.clone(),
@@ -864,7 +972,8 @@ fn legacy_provider_model(provider_name: &str, requested_model: Option<&str>) -> 
     requested_model
         .map(str::to_string)
         .unwrap_or_else(|| match provider_name {
-            "openai" => "gpt-4o-mini".to_string(),
+            "openai" | "openai-chat" => "gpt-4o-mini".to_string(),
+            "openai-responses" => "gpt-4o".to_string(),
             "anthropic" | "stepfun" => "step-3.7-flash".to_string(),
             "ollama" => "llama3.2".to_string(),
             _ => "echo-v1".to_string(),
@@ -890,6 +999,11 @@ mod tests {
             permission_mode: None,
             network_proxy: None,
             context_threshold_tokens: None,
+            request_retries: None,
+            max_turns: None,
+            turn_timeout_ms: None,
+            tool_timeout_ms: None,
+            total_timeout_ms: None,
         }
     }
 
@@ -947,18 +1061,26 @@ mod tests {
     fn provider_name_normalization_trims_cases_and_defaults_blank_values() {
         assert_eq!(normalize_provider_name(None), "echo");
         assert_eq!(normalize_provider_name(Some("   ")), "echo");
-        assert_eq!(normalize_provider_name(Some(" OpenAI ")), "openai");
+        assert_eq!(normalize_provider_name(Some(" OpenAI ")), "openai-chat");
+        assert_eq!(
+            normalize_provider_name(Some(" OpenAI-Responses ")),
+            "openai-responses"
+        );
         assert_eq!(normalize_provider_name(Some("STEPFUN")), "stepfun");
     }
 
     #[test]
     fn legacy_provider_model_uses_provider_defaults_and_request_override() {
-        assert_eq!(legacy_provider_model("openai", None), "gpt-4o-mini");
+        assert_eq!(legacy_provider_model("openai-chat", None), "gpt-4o-mini");
+        assert_eq!(legacy_provider_model("openai-responses", None), "gpt-4o");
         assert_eq!(legacy_provider_model("anthropic", None), "step-3.7-flash");
         assert_eq!(legacy_provider_model("stepfun", None), "step-3.7-flash");
         assert_eq!(legacy_provider_model("ollama", None), "llama3.2");
         assert_eq!(legacy_provider_model("echo", None), "echo-v1");
-        assert_eq!(legacy_provider_model("openai", Some("custom")), "custom");
+        assert_eq!(
+            legacy_provider_model("openai-chat", Some("custom")),
+            "custom"
+        );
     }
 
     #[test]
@@ -981,6 +1103,11 @@ mod tests {
                 permission_mode: None,
                 network_proxy: Some(" http://127.0.0.1:7890 ".to_string()),
                 context_threshold_tokens: Some(24000),
+                request_retries: Some(8),
+                max_turns: Some(200),
+                turn_timeout_ms: Some(240_000),
+                tool_timeout_ms: Some(300_000),
+                total_timeout_ms: Some(3_600_000),
             },
             "strict".to_string(),
         );
@@ -994,6 +1121,11 @@ mod tests {
             Some("http://127.0.0.1:7890")
         );
         assert_eq!(params.options.context_threshold_tokens, Some(24000));
+        assert_eq!(params.options.request_retries, Some(5));
+        assert_eq!(params.limits.max_turns, 200);
+        assert_eq!(params.limits.turn_timeout_ms, 240_000);
+        assert_eq!(params.limits.tool_timeout_ms, 300_000);
+        assert_eq!(params.limits.total_timeout_ms, 3_600_000);
         assert_eq!(params.options.permission_mode.as_deref(), Some("strict"));
     }
 
@@ -1017,11 +1149,32 @@ mod tests {
                 permission_mode: None,
                 network_proxy: None,
                 context_threshold_tokens: None,
+                request_retries: None,
+                max_turns: None,
+                turn_timeout_ms: None,
+                tool_timeout_ms: None,
+                total_timeout_ms: None,
             },
             "strict".to_string(),
         );
 
         assert_eq!(params.provider.provider, "stepfun");
+    }
+
+    #[test]
+    fn reply_limits_from_request_clamps_invalid_values() {
+        let mut req = reply_request("hello");
+        req.max_turns = Some(0);
+        req.turn_timeout_ms = Some(0);
+        req.tool_timeout_ms = Some(u64::MAX);
+        req.total_timeout_ms = Some(u64::MAX);
+
+        let limits = reply_limits_from_request(&req);
+
+        assert_eq!(limits.max_turns, 1);
+        assert_eq!(limits.turn_timeout_ms, 1);
+        assert_eq!(limits.tool_timeout_ms, MAX_REPLY_TIMEOUT_MS);
+        assert_eq!(limits.total_timeout_ms, MAX_REPLY_TIMEOUT_MS);
     }
 
     #[test]
@@ -1221,6 +1374,44 @@ mod tests {
     }
 
     #[test]
+    fn merge_conversation_message_keeps_tool_request_when_tool_response_reuses_id() {
+        let mut conversation = vec![Message {
+            id: "assistant-tool".to_string(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolRequest {
+                id: "call-1".to_string(),
+                name: "developer__list_files".to_string(),
+                arguments: serde_json::json!({}),
+            }],
+            created_at: Utc::now(),
+        }];
+
+        merge_conversation_message(
+            &mut conversation,
+            Message {
+                id: "assistant-tool".to_string(),
+                role: Role::Tool,
+                content: vec![ContentBlock::ToolResponse {
+                    id: "call-1".to_string(),
+                    content: "github".to_string(),
+                    is_error: false,
+                }],
+                created_at: Utc::now(),
+            },
+        );
+
+        assert_eq!(conversation.len(), 2);
+        assert!(matches!(
+            conversation[0].content[0],
+            ContentBlock::ToolRequest { .. }
+        ));
+        assert!(matches!(
+            conversation[1].content[0],
+            ContentBlock::ToolResponse { .. }
+        ));
+    }
+
+    #[test]
     fn payload_message_helpers_ignore_malformed_values() {
         let payload = serde_json::json!({
             "message": {
@@ -1403,7 +1594,7 @@ mod tests {
             )
         };
 
-        let finalized = finalize_pumped_session(session, "run-test", &current_user.id);
+        let finalized = finalize_pumped_session(session, "run-test", &current_user.id, true);
 
         assert_eq!(finalized.conversation.len(), 5);
         let placeholder = finalized
@@ -1415,6 +1606,44 @@ mod tests {
             ContentBlock::Text { text } => {
                 assert_eq!(text, "Run run-test completed without assistant message.")
             }
+            _ => panic!("expected text block"),
+        }
+    }
+
+    #[test]
+    fn finalize_pumped_session_does_not_add_placeholder_for_error_terminal() {
+        let current_user = Message::user("new question");
+        let session = Session {
+            conversation: vec![current_user.clone()],
+            ..Session::new(
+                "session",
+                PathBuf::from("E:/codes/project"),
+                SessionType::User,
+            )
+        };
+
+        let finalized = finalize_pumped_session(session, "run-test", &current_user.id, false);
+
+        assert_eq!(finalized.conversation.len(), 1);
+    }
+
+    #[test]
+    fn compact_session_for_reply_removes_legacy_no_reply_placeholders() {
+        let mut session = Session::new(
+            "session",
+            PathBuf::from("E:/codes/project"),
+            SessionType::User,
+        );
+        session.conversation.push(Message::assistant(
+            "Run run-old completed without assistant message.",
+        ));
+        session.conversation.push(Message::assistant("real reply"));
+
+        compact_session_for_reply(&mut session, None);
+
+        assert_eq!(session.conversation.len(), 1);
+        match &session.conversation[0].content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "real reply"),
             _ => panic!("expected text block"),
         }
     }

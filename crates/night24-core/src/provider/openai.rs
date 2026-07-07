@@ -12,7 +12,10 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::model::{ContentBlock, Message, Role};
-use crate::provider::{MessageStream, ModelConfig, Provider, ProviderError, ProviderUsage};
+use crate::provider::{
+    retry_error_suffix, retryable_status, sleep_before_retry, MessageStream, ModelConfig, Provider,
+    ProviderError, ProviderUsage, MAX_REQUEST_RETRIES, PROVIDER_USER_AGENT,
+};
 
 #[derive(Debug, Clone)]
 pub struct OpenAIProvider {
@@ -31,7 +34,7 @@ impl OpenAIProvider {
     }
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.base_url = base_url.into();
+        self.base_url = normalize_openai_base_url(&base_url.into());
         self
     }
 
@@ -102,23 +105,58 @@ impl Provider for OpenAIProvider {
                 stream: Some(true),
             };
 
-            let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-            let response = client
-                .post(url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await?;
+            let url = format!(
+                "{}/chat/completions",
+                normalize_openai_base_url(&self.base_url)
+            );
+            let request_retries = model_config.request_retries.min(MAX_REQUEST_RETRIES);
+            let mut retries_done = 0;
+            let response = loop {
+                let result = client
+                    .post(url.clone())
+                    .header("User-Agent", PROVIDER_USER_AGENT)
+                    .header("Authorization", format!("Bearer {}", self.api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .await;
 
-            if !response.status().is_success() {
-                let status = response.status();
-                let text = response.text().await?;
-                return Err(ProviderError::Message(format!(
-                    "OpenAI API error {}: {}",
-                    status, text
-                )));
-            }
+                match result {
+                    Ok(response) if response.status().is_success() => break response,
+                    Ok(response) => {
+                        let status = response.status();
+                        let text = response.text().await?;
+                        if retryable_status(status) && retries_done < request_retries {
+                            retries_done += 1;
+                            sleep_before_retry(retries_done).await;
+                            continue;
+                        }
+                        let total_attempts = retries_done + 1;
+                        return Err(ProviderError::Message(format!(
+                            "OpenAI API error {}{}: {}",
+                            status,
+                            retry_error_suffix(total_attempts),
+                            text
+                        )));
+                    }
+                    Err(err) => {
+                        if retries_done < request_retries {
+                            retries_done += 1;
+                            sleep_before_retry(retries_done).await;
+                            continue;
+                        }
+                        let total_attempts = retries_done + 1;
+                        if total_attempts > 1 {
+                            return Err(ProviderError::Message(format!(
+                                "network error{}: {}",
+                                retry_error_suffix(total_attempts),
+                                err
+                            )));
+                        }
+                        return Err(ProviderError::Network(err));
+                    }
+                }
+            };
 
             let stream = response.bytes_stream();
             let usage = Arc::new(Mutex::new(ProviderUsage::default()));
@@ -454,6 +492,43 @@ fn openai_messages_from_goose(msg: &Message) -> Vec<OpenAiMessage> {
     messages
 }
 
+fn normalize_openai_base_url(value: &str) -> String {
+    let mut base = extract_url_from_markdown(value)
+        .unwrap_or(value)
+        .trim()
+        .trim_matches(['"', '\'', '`', '<', '>'])
+        .trim()
+        .to_string();
+
+    loop {
+        base = base.trim_end_matches(['/', '\\']).to_string();
+        let lower = base.to_ascii_lowercase();
+        let suffix = [
+            "/chat/completions",
+            "\\chat\\completions",
+            "/responses",
+            "\\responses",
+        ]
+        .into_iter()
+        .find(|suffix| lower.ends_with(suffix));
+        if let Some(suffix) = suffix {
+            let new_len = base.len().saturating_sub(suffix.len());
+            base.truncate(new_len);
+            continue;
+        }
+        break;
+    }
+
+    base.trim_end_matches(['/', '\\']).to_string()
+}
+
+fn extract_url_from_markdown(value: &str) -> Option<&str> {
+    let start = value.find("](")? + 2;
+    let rest = &value[start..];
+    let end = rest.find(')')?;
+    Some(&rest[..end])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,5 +567,21 @@ mod tests {
         assert_eq!(value["role"], "assistant");
         assert_eq!(value["tool_calls"][0]["id"], "call-1");
         assert!(value.get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn normalizes_base_url_endpoint_suffixes() {
+        assert_eq!(
+            normalize_openai_base_url(" https://api.fflink.top/v1/responses\\ "),
+            "https://api.fflink.top/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://api.fflink.top/v1/chat/completions"),
+            "https://api.fflink.top/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("[x](https://api.fflink.top/v1/responses\\)"),
+            "https://api.fflink.top/v1"
+        );
     }
 }

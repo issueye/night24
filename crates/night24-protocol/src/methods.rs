@@ -176,10 +176,10 @@ pub struct ReplyLimits {
 impl Default for ReplyLimits {
     fn default() -> Self {
         Self {
-            max_turns: 40,
-            turn_timeout_ms: 60_000,
-            tool_timeout_ms: 60_000,
-            total_timeout_ms: 600_000,
+            max_turns: 120,
+            turn_timeout_ms: 180_000,
+            tool_timeout_ms: 180_000,
+            total_timeout_ms: 1_800_000,
         }
     }
 }
@@ -196,6 +196,8 @@ pub struct ReplyOptions {
     pub network_proxy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_threshold_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_retries: Option<u8>,
 }
 
 impl Default for ReplyOptions {
@@ -206,6 +208,7 @@ impl Default for ReplyOptions {
             permission_mode: None,
             network_proxy: None,
             context_threshold_tokens: None,
+            request_retries: None,
         }
     }
 }

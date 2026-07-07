@@ -282,15 +282,11 @@
 }
 
 .ui-select-menu {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
-  z-index: 40;
+  position: fixed;
+  z-index: 180;
   display: grid;
-  width: max-content;
-  min-width: 100%;
-  max-width: 320px;
-  max-height: 260px;
+  min-width: 118px;
+  max-width: min(420px, calc(100vw - 16px));
   padding: 5px;
   overflow: auto;
   background: var(--overlay-bg);
@@ -304,6 +300,7 @@
   grid-template-columns: minmax(0, 1fr) 16px;
   align-items: center;
   gap: var(--ui-gap);
+  min-width: 0;
   min-height: var(--ui-row-height);
   padding: 0 var(--ui-field-padding-x);
   color: var(--muted);
@@ -311,6 +308,17 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
+}
+
+.ui-select-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-option svg {
+  justify-self: end;
 }
 
 .ui-select-option:hover,

@@ -40,6 +40,18 @@ pub fn builtin_tools() -> Vec<Tool> {
                         "type": "string",
                         "description": "Relative path to the file to write."
                     },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Alias for path. Prefer path when possible."
+                    },
+                    "filepath": {
+                        "type": "string",
+                        "description": "Alias for path. Prefer path when possible."
+                    },
+                    "target_path": {
+                        "type": "string",
+                        "description": "Alias for path. Prefer path when possible."
+                    },
                     "content": {
                         "type": "string",
                         "description": "Content to write into the file."
@@ -298,6 +310,86 @@ pub fn builtin_tools() -> Vec<Tool> {
                     }
                 },
                 "required": ["query"]
+            }),
+        },
+        Tool {
+            name: "developer__task_list_create".to_string(),
+            description: "Create or replace the current run task list. Use this before starting complex multi-step work instead of writing a task list manually.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "description": "Ordered tasks. Each item may be a string or an object with title and optional status.",
+                        "items": {
+                            "oneOf": [
+                                { "type": "string" },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": { "type": "string" },
+                                        "status": {
+                                            "type": "string",
+                                            "enum": ["pending", "in_progress", "completed"]
+                                        }
+                                    },
+                                    "required": ["title"]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": ["tasks"]
+            }),
+        },
+        Tool {
+            name: "developer__task_list_update".to_string(),
+            description: "Update one task in the current run task list by 1-based index or task id. Use this after completing each task.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "description": "1-based task index."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Task id, such as task-1."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional replacement title."
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed"],
+                        "description": "New task status."
+                    }
+                },
+                "required": ["status"]
+            }),
+        },
+        Tool {
+            name: "developer__task_list_status".to_string(),
+            description: "Return the current run task list as Markdown.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        Tool {
+            name: "developer__task_list_finish".to_string(),
+            description: "Mark the current task list complete and attach the final completion report.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "report": {
+                        "type": "string",
+                        "description": "Final completion report."
+                    }
+                },
+                "required": ["report"]
             }),
         },
         Tool {

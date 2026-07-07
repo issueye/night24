@@ -1,7 +1,7 @@
 .tool-call-list {
   display: grid;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 6px;
 }
 
 .tool-call-list:first-child {
@@ -11,20 +11,20 @@
 .tool-call-block {
   max-width: min(720px, 100%);
   overflow: hidden;
-  color: var(--text);
-  background: var(--code-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .tool-call-block summary {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 18px;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
   align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 6px 9px;
+  gap: 7px;
+  min-height: 26px;
+  padding: 0;
   cursor: pointer;
   list-style: none;
 }
@@ -35,12 +35,12 @@
 
 .tool-call-icon {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   place-items: center;
-  color: var(--blue);
-  background: var(--blue-soft);
-  border-radius: var(--radius-sm);
+  color: var(--subtle);
+  background: transparent;
+  border-radius: 0;
 }
 
 .tool-call-main {
@@ -57,13 +57,13 @@
 }
 
 .tool-call-main strong {
-  color: var(--text);
+  color: var(--muted);
   font-size: var(--fs-base);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .tool-call-main small {
-  margin-top: 2px;
+  margin-top: 0;
   color: var(--subtle);
   font-size: var(--fs-sm);
 }
@@ -78,7 +78,7 @@
 }
 
 .tool-call-detail {
-  padding: 0 9px 9px 41px;
+  padding: 4px 0 8px 23px;
 }
 
 .tool-call-detail > div {
@@ -96,6 +96,7 @@
   color: var(--mono-text);
   background: var(--surface);
   border-color: var(--line);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   line-height: 1.5;

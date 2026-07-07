@@ -1,4 +1,4 @@
-import { unwrapSsePayload } from './events.js';
+import { normalizeError, unwrapSsePayload } from './events.js';
 import { safeText } from './format.js';
 
 export function normalizeAgentEvent(eventName, payload) {
@@ -94,7 +94,7 @@ export function normalizeFinishEvent(eventPayload) {
 
 export function normalizeErrorEvent(eventPayload) {
   return {
-    detail: eventPayload?.message || eventPayload?.error || safeText(eventPayload),
+    detail: normalizeError(eventPayload?.message || eventPayload?.error || safeText(eventPayload)),
   };
 }
 

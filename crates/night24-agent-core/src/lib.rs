@@ -4,6 +4,7 @@ mod providers;
 mod rpc;
 mod skills;
 mod subagents;
+mod task_list;
 mod tools;
 mod types;
 
@@ -14,6 +15,7 @@ use rpc::{
     serialize_response,
 };
 use skills::SkillRegistry;
+use task_list::{is_task_list_tool, summarize_task_list_tool, TaskListState};
 #[cfg(test)]
 use tools::arguments_with_network_proxy;
 use tools::{
@@ -31,7 +33,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::StreamExt;
 use night24_core::model::{ContentBlock, Message, Role, Tool};
-use night24_core::provider::{ModelConfig, Provider};
+use night24_core::provider::{clamp_request_retries, ModelConfig, Provider};
 use night24_core::security::SecurityInspector;
 #[cfg(test)]
 use night24_protocol::ProviderConfig;
@@ -280,6 +282,7 @@ impl AgentCore {
             hooks: Arc::new(HookRunner::from_environment(&params.session.working_dir)),
             subagents: self.subagents.clone(),
             skills,
+            task_list: Arc::new(Mutex::new(TaskListState::default())),
         };
         let runs = self.runs.clone();
         let permissions = self.permissions.clone();
@@ -434,7 +437,7 @@ impl AgentCore {
             Duration::from_millis(params.limits.total_timeout_ms.max(1)),
             async {
                 let mut awaiting_tool_followup = false;
-                for _turn in 0..params.limits.max_turns.max(1) {
+                for turn in 0..params.limits.max_turns.max(1) {
                     if context.is_cancelled() {
                         anyhow::bail!("cancelled");
                     }
@@ -443,6 +446,7 @@ impl AgentCore {
                         model: model.clone(),
                         temperature: None,
                         max_tokens: None,
+                        request_retries: clamp_request_retries(params.options.request_retries),
                     };
                     let turn_result = tokio::time::timeout(
                         Duration::from_millis(params.limits.turn_timeout_ms.max(1)),
@@ -482,6 +486,9 @@ impl AgentCore {
                         &turn_messages,
                     )
                     .await;
+                    let should_continue_tasks = !has_tool_requests
+                        && (should_continue_task_workflow(&turn_messages)
+                            || context_has_open_task_list(context));
 
                     messages.extend(turn_messages.clone());
                     messages.extend(executed_messages.clone());
@@ -489,6 +496,11 @@ impl AgentCore {
                     final_messages.extend(executed_messages);
 
                     if !has_tool_requests {
+                        if should_continue_tasks {
+                            messages.push(task_workflow_continue_message(&params.run_id, turn));
+                            awaiting_tool_followup = false;
+                            continue;
+                        }
                         break;
                     }
                     awaiting_tool_followup = true;
@@ -539,10 +551,10 @@ impl AgentCore {
 
             if !blocks.is_empty() {
                 executed_messages.push(Message {
-                    id: message.id.clone(),
+                    id: format!("{}-tool-response-{}", message.id, executed_messages.len()),
                     role: Role::Tool,
                     content: blocks,
-                    created_at: message.created_at,
+                    created_at: Utc::now(),
                 });
             }
         }
@@ -560,6 +572,14 @@ impl AgentCore {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> ContentBlock {
+        if let Some(message) = recoverable_tool_argument_message(tool_name, arguments) {
+            return ContentBlock::ToolResponse {
+                id: tool_call_id.to_string(),
+                content: message,
+                is_error: false,
+            };
+        }
+
         let started = Instant::now();
         let result = if is_subagent_tool(tool_name) {
             Self::execute_subagent_tool_with_events(
@@ -577,6 +597,15 @@ impl AgentCore {
                 params,
                 context,
                 security,
+                tool_call_id,
+                tool_name,
+                arguments,
+            )
+            .await
+        } else if is_task_list_tool(tool_name) {
+            Self::execute_task_list_tool_with_events(
+                params,
+                context,
                 tool_call_id,
                 tool_name,
                 arguments,
@@ -738,6 +767,64 @@ impl AgentCore {
                 Err(err)
             }
         }
+    }
+
+    async fn execute_task_list_tool_with_events(
+        params: &ReplyParams,
+        context: &RunContext,
+        tool_call_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> anyhow::Result<String> {
+        let summary = summarize_task_list_tool(tool_name, arguments);
+        let lifecycle = ToolLifecycle::new(
+            context,
+            &params.session.working_dir,
+            tool_call_id,
+            tool_name,
+            arguments,
+        );
+        lifecycle.before(&summary).await;
+
+        let started = Instant::now();
+        let result = {
+            let mut task_list = context
+                .task_list
+                .lock()
+                .map_err(|_| anyhow::anyhow!("task list state lock poisoned"))?;
+            task_list.execute(tool_name, arguments)
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let markdown = match result {
+            Ok(markdown) => markdown,
+            Err(err) => {
+                let error = err.to_string();
+                lifecycle
+                    .failure(duration_ms, "task_list_tool_failed", &error)
+                    .await;
+                return Err(err);
+            }
+        };
+
+        context.send(AgentEventKind::Message {
+            message: Message {
+                id: format!("{}-{tool_call_id}-task-list", context.run_id),
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: markdown.clone(),
+                }],
+                created_at: Utc::now(),
+            },
+        });
+
+        lifecycle
+            .success(
+                duration_ms,
+                format!("{tool_name} completed"),
+                preview_text(&markdown),
+            )
+            .await;
+        Ok(markdown)
     }
 
     fn is_initialized(&self) -> bool {
@@ -913,8 +1000,206 @@ fn is_skill_tool(tool_name: &str) -> bool {
     tool_name == "developer__skill_load"
 }
 
+fn recoverable_tool_argument_message(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> Option<String> {
+    let requirements: &[(&str, &[&str], &str)] = match tool_name {
+        "developer__shell" => &[("command", &["command"], "the shell command to run")],
+        "developer__read_file" => &[("path", &["path", "file_path", "filepath"], "the relative file path to read")],
+        "developer__write_file" => &[
+            (
+                "path",
+                &["path", "file_path", "filepath", "target_path"],
+                "the relative target file path",
+            ),
+            ("content", &["content"], "the complete file content to write"),
+        ],
+        "developer__file_search" => &[("query", &["query"], "the text pattern to search for")],
+        "developer__http_request" | "developer__network_request" => {
+            &[("url", &["url"], "the HTTP or HTTPS URL")]
+        }
+        "developer__web_search" | "developer__network_search" => {
+            &[("query", &["query"], "the web search query")]
+        }
+        "developer__web_scraper" => &[("url", &["url"], "the page URL to scrape")],
+        "developer__calculator" => &[("expression", &["expression"], "the math expression")],
+        "developer__jq" => &[
+            ("data", &["data"], "the JSON input data"),
+            ("query", &["query"], "the jq-like query"),
+        ],
+        "developer__code_interpreter" => &[("code", &["code"], "the code snippet to execute")],
+        "developer__database_query" => &[("query", &["query"], "the read-only SQL query")],
+        _ => return None,
+    };
+
+    let missing = requirements
+        .iter()
+        .filter(|(_, keys, _)| first_string_arg(arguments, keys).is_none())
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return None;
+    }
+
+    let missing_names = missing
+        .iter()
+        .map(|(name, _, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let required_detail = requirements
+        .iter()
+        .map(|(name, _, description)| format!("{name}: {description}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+
+    Some(format!(
+        "工具参数不完整，未执行 {tool_name}。缺少字段: {missing_names}。请不要再次用空参数调用该工具。请先从当前上下文重新构造所需参数；如果上下文不足，先调用读取/搜索类工具获取内容，然后再用完整参数重试。Required arguments: {required_detail}."
+    ))
+}
+
+fn first_string_arg<'a>(arguments: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| {
+        arguments
+            .get(*key)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    })
+}
+
+
+const TASK_WORKFLOW_PROMPT: &str = r#"For complex tasks, use the Night24 task workflow:
+- First decompose the request before taking implementation action.
+- Create the task list by calling `developer__task_list_create`; do not write the initial task list manually.
+- Keep the task list current with `developer__task_list_update` after each meaningful step.
+- Work step by step according to that task list.
+- When the task is finished, call `developer__task_list_finish` with the final completion report.
+- In the completion report, summarize completed work, verification performed, and any remaining risks or follow-up notes.
+- Do not stop after only creating the task list; continue executing the first unfinished task in the same run.
+- For trivial one-step questions or direct answers, do not add this workflow unless it improves clarity."#;
+
+fn should_continue_task_workflow(messages: &[Message]) -> bool {
+    messages.iter().rev().any(message_has_open_task_list)
+}
+
+fn context_has_open_task_list(context: &RunContext) -> bool {
+    context
+        .task_list
+        .lock()
+        .map(|task_list| task_list.has_open_tasks())
+        .unwrap_or(false)
+}
+
+fn message_has_open_task_list(message: &Message) -> bool {
+    if message.role != Role::Assistant {
+        return false;
+    }
+    let text = text_content(message);
+    task_workflow_state(&text).is_some_and(|state| state.has_open_tasks && !state.has_report)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TaskWorkflowState {
+    has_open_tasks: bool,
+    has_report: bool,
+}
+
+fn task_workflow_state(text: &str) -> Option<TaskWorkflowState> {
+    let mut in_task_list = false;
+    let mut saw_task_list = false;
+    let mut state = TaskWorkflowState::default();
+
+    for line in text.lines() {
+        if let Some(heading) = markdown_heading(line) {
+            let normalized = heading.trim().trim_end_matches([':', '：']).trim();
+            if is_completion_report_heading(normalized) {
+                state.has_report = true;
+                in_task_list = false;
+                continue;
+            }
+
+            in_task_list = is_task_list_heading(normalized);
+            saw_task_list |= in_task_list;
+            continue;
+        }
+
+        if in_task_list && is_open_task_item(line) {
+            state.has_open_tasks = true;
+        }
+    }
+
+    saw_task_list.then_some(state)
+}
+
+fn is_task_list_heading(heading: &str) -> bool {
+    heading.eq_ignore_ascii_case("任务列表")
+        || heading.eq_ignore_ascii_case("任务清单")
+        || heading.eq_ignore_ascii_case("task list")
+        || heading.eq_ignore_ascii_case("tasks")
+        || heading.eq_ignore_ascii_case("plan")
+}
+
+fn is_completion_report_heading(heading: &str) -> bool {
+    heading.eq_ignore_ascii_case("完成报告")
+        || heading.eq_ignore_ascii_case("completion report")
+        || heading.eq_ignore_ascii_case("final report")
+}
+
+fn markdown_heading(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&hashes) {
+        return None;
+    }
+    let rest = trimmed.get(hashes..)?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.trim_end_matches('#').trim())
+    }
+}
+
+fn is_open_task_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let item = if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        rest
+    } else {
+        let Some((prefix, rest)) = trimmed.split_once(' ') else {
+            return false;
+        };
+        if !prefix
+            .trim_end_matches(['.', ')'])
+            .chars()
+            .all(|ch| ch.is_ascii_digit())
+        {
+            return false;
+        }
+        rest
+    };
+
+    item.starts_with("[ ]") || item.starts_with("[]")
+}
+
+fn task_workflow_continue_message(run_id: &str, turn: usize) -> Message {
+    Message {
+        id: format!("{run_id}-task-workflow-continue-{turn}"),
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "继续执行当前任务列表。不要只描述下一步；请调用合适的工具处理未完成项，并用 `developer__task_list_update` 更新进度。最终完成时调用 `developer__task_list_finish`。"
+                .to_string(),
+        }],
+        created_at: Utc::now(),
+    }
+}
+
 fn build_system_prompt(context: &RunContext, input_text: &str) -> String {
     let mut system = "You are Night24 Agent Core. When a task benefits from delegation, parallel analysis, background work, or isolated investigation, you may autonomously create and manage sub-agents using the developer__subagent_* tools. Use sync sub-agents when you need the result before continuing; use async sub-agents when work can continue while the child runs. Query the sub-agent pool before depending on asynchronous results.".to_string();
+    system.push_str("\n\n");
+    system.push_str(TASK_WORKFLOW_PROMPT);
     let skill_list = context.skills.available_for_prompt();
     if !skill_list.trim().is_empty() {
         system.push_str("\n\n");
@@ -1036,6 +1321,7 @@ async fn spawn_subagent(
         hooks: context.hooks.clone(),
         subagents: context.subagents.clone(),
         skills: context.skills.clone(),
+        task_list: Arc::new(Mutex::new(TaskListState::default())),
     };
 
     let pool = context.subagents.clone();

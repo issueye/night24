@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use night24_core::provider::{AnthropicProvider, EchoProvider, OpenAIProvider, Provider};
+use night24_core::provider::{
+    AnthropicProvider, EchoProvider, OpenAIProvider, OpenAIResponsesProvider, Provider,
+};
 use night24_core::OllamaProvider;
 use night24_protocol::ProviderConfig;
 
@@ -12,7 +14,10 @@ pub(super) fn effective_provider(
     if config.provider.trim().is_empty() {
         config.provider = default_provider.to_string();
     }
-    config.provider = config.provider.trim().to_ascii_lowercase();
+    config.provider = match config.provider.trim().to_ascii_lowercase().as_str() {
+        "openai" => "openai-chat".to_string(),
+        provider => provider.to_string(),
+    };
     config.model = config.model.trim().to_string();
     config.base_url = config
         .base_url
@@ -29,11 +34,20 @@ pub(super) fn effective_provider(
 pub(super) fn create_provider(config: &ProviderConfig) -> anyhow::Result<Arc<dyn Provider>> {
     match config.provider.as_str() {
         "echo" => Ok(Arc::new(EchoProvider)),
-        "openai" | "openai-responses" => {
+        "openai" | "openai-chat" => {
             let api_key = resolve_api_key(config, "OPENAI_API_KEY")?;
             let base_url = resolve_base_url(config, "OPENAI_BASE_URL", "https://api.openai.com/v1");
             Ok(Arc::new(
                 OpenAIProvider::new(api_key)
+                    .with_base_url(base_url)
+                    .with_model(effective_model(config)),
+            ))
+        }
+        "openai-responses" => {
+            let api_key = resolve_api_key(config, "OPENAI_API_KEY")?;
+            let base_url = resolve_base_url(config, "OPENAI_BASE_URL", "https://api.openai.com/v1");
+            Ok(Arc::new(
+                OpenAIResponsesProvider::new(api_key)
                     .with_base_url(base_url)
                     .with_model(effective_model(config)),
             ))
@@ -76,10 +90,19 @@ pub(super) fn effective_model(config: &ProviderConfig) -> String {
         return config.model.trim().to_string();
     }
     match config.provider.as_str() {
-        "openai" | "openai-responses" => std::env::var("OPENAI_MODEL")
+        "openai" | "openai-chat" => std::env::var("OPENAI_MODEL")
             .ok()
             .and_then(|value| non_empty(&value).map(str::to_string))
             .unwrap_or_else(|| "gpt-4o-mini".to_string()),
+        "openai-responses" => std::env::var("OPENAI_RESPONSES_MODEL")
+            .ok()
+            .and_then(|value| non_empty(&value).map(str::to_string))
+            .or_else(|| {
+                std::env::var("OPENAI_MODEL")
+                    .ok()
+                    .and_then(|value| non_empty(&value).map(str::to_string))
+            })
+            .unwrap_or_else(|| "gpt-4o".to_string()),
         "stepfun" => std::env::var("STEPFUN_MODEL")
             .ok()
             .and_then(|value| non_empty(&value).map(str::to_string))
