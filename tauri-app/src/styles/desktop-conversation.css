@@ -4,6 +4,7 @@
 
 .app-shell .center-panel {
   grid-template-rows: minmax(0, 1fr) auto auto;
+  padding-bottom: 10px;
   background: var(--surface);
   border: 0;
   border-radius: 0;
@@ -99,12 +100,12 @@
 .app-shell .composer {
   width: min(738px, calc(100% - 92px));
   min-height: 108px;
-  margin: 0 auto 16px;
+  margin: 0 auto 18px;
   padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 0 44px rgba(30, 30, 30, 0.1), 0 16px 36px rgba(30, 30, 30, 0.07);
 }
 
 .app-shell .composer textarea {

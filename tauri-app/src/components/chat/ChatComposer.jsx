@@ -50,15 +50,19 @@ export function ChatComposer({
           className="composer-model"
           disabled={isRunning}
           label="模型"
+          menuClassName="composer-select-menu"
           onChange={onProviderProfileChange}
           options={providerOptions}
+          title="选择本次对话使用的供应商和模型"
           value={providerProfileId}
         />
         <Select
           className="composer-mode"
           disabled={isRunning}
+          menuClassName="composer-select-menu"
           onChange={onAccessModeChange}
           options={accessOptions}
+          title="选择本次任务的访问权限模式"
           value={accessMode}
         />
         <Popover

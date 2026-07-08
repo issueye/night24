@@ -7,10 +7,12 @@ export function Select({
   className,
   disabled = false,
   label,
+  menuClassName,
   onChange,
   options = [],
   placeholder = 'Select',
   size = 'md',
+  title,
   value,
 }) {
   const [open, setOpen] = useState(false);
@@ -92,17 +94,19 @@ export function Select({
       {label && <span className="ui-select-label">{label}</span>}
       <button
         aria-expanded={open}
+        aria-label={title || label || placeholder}
         className="ui-select-trigger"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         ref={triggerRef}
+        title={title}
         type="button"
       >
         <span>{selected?.label || placeholder}</span>
         <ChevronDown size={13} />
       </button>
       {open && createPortal(
-        <span className="ui-select-menu" ref={menuRef} role="listbox" style={menuStyle || undefined}>
+        <span className={classNames('ui-select-menu', menuClassName)} ref={menuRef} role="listbox" style={menuStyle || undefined}>
           {options.map((item) => (
             <button
               aria-selected={item.value === value}

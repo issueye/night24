@@ -1,5 +1,5 @@
 import { ArrowDown, Bot } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { classNames } from '../../utils/format.js';
 import { buildConversationItems, ToolActivityRow } from '../ConversationActivity.jsx';
 import { MessageBubble } from '../MessageBubble.jsx';
@@ -20,6 +20,7 @@ export function ChatConversation({
   const scrollRef = useRef(null);
   const targetRefs = useRef(new Map());
   const highlightTimerRef = useRef(null);
+  const scrollFrameRef = useRef(0);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedTarget, setHighlightedTarget] = useState('');
 
@@ -32,6 +33,13 @@ export function ChatConversation({
 
   function scrollToBottom() {
     messageEndRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }
+
+  function scrollToBottomNow() {
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+    updateScrollButton();
   }
 
   function setTargetRef(id) {
@@ -53,11 +61,21 @@ export function ChatConversation({
     }, 1400);
   }
 
+  useLayoutEffect(() => {
+    window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollToBottomNow();
+    scrollFrameRef.current = window.requestAnimationFrame(scrollToBottomNow);
+    return () => window.cancelAnimationFrame(scrollFrameRef.current);
+  }, [conversationItems, pendingPermissions.length, showEmpty]);
+
   useEffect(() => {
     updateScrollButton();
   }, [conversationItems.length, pendingPermissions.length, showEmpty]);
 
-  useEffect(() => () => window.clearTimeout(highlightTimerRef.current), []);
+  useEffect(() => () => {
+    window.clearTimeout(highlightTimerRef.current);
+    window.cancelAnimationFrame(scrollFrameRef.current);
+  }, []);
 
   return (
     <>

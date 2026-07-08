@@ -46,11 +46,41 @@
 .composer-model,
 .composer-mode {
   margin-left: 2px;
+  font-size: var(--fs-sm);
 }
 
 .composer-model {
   min-width: 0;
   max-width: min(330px, 46%);
+}
+
+.composer-model .ui-select-label {
+  font-size: var(--fs-sm);
+}
+
+.composer-model .ui-select-trigger,
+.composer-mode .ui-select-trigger {
+  min-width: 92px;
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+
+.composer-model .ui-select-trigger {
+  max-width: 280px;
+}
+
+.composer-mode .ui-select-trigger {
+  max-width: 126px;
+}
+
+.composer-select-menu {
+  font-size: var(--fs-sm);
+}
+
+.composer-select-menu .ui-select-option {
+  min-height: 26px;
+  font-size: var(--fs-sm);
+  line-height: 1.2;
 }
 
 .composer-context {

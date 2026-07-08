@@ -109,7 +109,6 @@ export default function App() {
   const clearCurrentSessionRef = useRef(null);
   const runTerminalsRef = useRef(new Map());
   const runEventListenersRef = useRef(new Map());
-  const lastSubAgentCountRef = useRef(0);
   const loadSubAgentsRef = useRef(null);
   const { headers, apiJson } = useApiClient(apiBase, apiKey);
 
@@ -274,21 +273,19 @@ export default function App() {
 
   const handleSubAgentTool = useCallback(({ phase }) => {
     setSubAgentSpawning(true);
-    openContextTab();
     loadSubAgentsRef.current?.({ silent: true });
     if (phase === 'started') {
       [800, 1800, 3200].forEach((delayMs) => {
         window.setTimeout(() => loadSubAgentsRef.current?.({ silent: true }), delayMs);
       });
     }
-  }, [openContextTab]);
+  }, []);
 
   const handleSubAgentSession = useCallback(() => {
     setSubAgentSpawning(false);
-    openContextTab();
     loadSessions();
     loadSubAgentsRef.current?.({ silent: true });
-  }, [loadSessions, openContextTab]);
+  }, [loadSessions]);
 
   const { handleAgentEvent } = useAgentEvents({
     getSessionContext,
@@ -725,15 +722,10 @@ export default function App() {
     const count = Array.isArray(subAgentPool?.subagents)
       ? subAgentPool.subagents.length
       : Number(subAgentPool?.total) || 0;
-    const previousCount = lastSubAgentCountRef.current;
-    lastSubAgentCountRef.current = count;
     if (count > 0) {
       setSubAgentSpawning(false);
     }
-    if (count > previousCount && visibleSessionRunning) {
-      openContextTab();
-    }
-  }, [openContextTab, subAgentPool, visibleSessionRunning]);
+  }, [subAgentPool]);
 
   return (
     <div className={classNames('app-shell', `theme-${theme}`, `font-${fontSize}`)}>
