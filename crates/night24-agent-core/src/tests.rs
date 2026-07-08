@@ -776,6 +776,28 @@ async fn subagent_sync_spawn_streams_child_events_with_child_run_id() {
     }));
 }
 
+#[test]
+fn subagent_session_messages_from_events_dedupes_task_user_message() {
+    let event = agent_event_notification(AgentEvent::new(
+        "run-parent:subagent:child",
+        1,
+        AgentEventKind::Finish {
+            status: FinishStatus::Completed,
+            messages: vec![
+                Message::user("inspect   docs"),
+                Message::assistant("done"),
+            ],
+            usage: None,
+        },
+    ));
+
+    let messages = subagent_session_messages_from_events("inspect docs", &[event]);
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].role, Role::User);
+    assert_eq!(messages[1].role, Role::Assistant);
+}
+
 #[tokio::test]
 async fn subagent_async_spawn_is_visible_in_pool_status() {
     let mut core = initialized_core().await;

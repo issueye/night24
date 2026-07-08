@@ -476,6 +476,7 @@ async fn persist_child_session_run_event(
         session.conversation.push(Message::user(binding.task.clone()));
     }
     persist_core_event(&mut session.conversation, event);
+    dedupe_user_message_text(&mut session.conversation, &binding.task);
     session.updated_at = event_created_at(event).unwrap_or_else(Utc::now);
     state.session_manager.save(&session).await?;
     if is_terminal_core_event(event) {
@@ -490,6 +491,25 @@ fn subagent_payload_status_is_terminal(payload: &serde_json::Value) -> bool {
         payload.get("status").and_then(|value| value.as_str()),
         Some("completed" | "failed" | "cancelled")
     )
+}
+
+fn dedupe_user_message_text(conversation: &mut Vec<Message>, protected_text: &str) {
+    let protected = normalize_message_text(protected_text);
+    if protected.is_empty() {
+        return;
+    }
+    let mut seen_protected = false;
+    conversation.retain(|message| {
+        if message.role != Role::User || normalized_message_text(message) != protected {
+            return true;
+        }
+        if seen_protected {
+            false
+        } else {
+            seen_protected = true;
+            true
+        }
+    });
 }
 
 #[cfg(test)]
@@ -810,6 +830,27 @@ fn content_block_kind(block: &ContentBlock) -> &'static str {
         ContentBlock::ToolResponse { .. } => "tool_response",
         ContentBlock::Thinking { .. } => "thinking",
     }
+}
+
+fn normalized_message_text(message: &Message) -> String {
+    normalize_message_text(
+        &message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } | ContentBlock::Thinking { text } => {
+                    Some(text.as_str())
+                }
+                ContentBlock::ToolResponse { content, .. } => Some(content.as_str()),
+                ContentBlock::ToolRequest { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn normalize_message_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn apply_message_delta(
@@ -1868,6 +1909,21 @@ mod tests {
             ContentBlock::Text { text } => assert_eq!(text, "real reply"),
             _ => panic!("expected text block"),
         }
+    }
+
+    #[test]
+    fn dedupe_user_message_text_removes_duplicate_subagent_task() {
+        let mut conversation = vec![
+            Message::user("inspect docs"),
+            Message::user("inspect   docs"),
+            Message::assistant("done"),
+        ];
+
+        dedupe_user_message_text(&mut conversation, "inspect docs");
+
+        assert_eq!(conversation.len(), 2);
+        assert_eq!(conversation[0].role, Role::User);
+        assert_eq!(conversation[1].role, Role::Assistant);
     }
 
     #[test]

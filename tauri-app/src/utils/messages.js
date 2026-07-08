@@ -41,6 +41,23 @@ function hasCanonicalToolBlocks(messages) {
   ));
 }
 
+function userTextKey(message) {
+  if (String(message?.role || '').toLowerCase() !== 'user') return '';
+  const text = messageText(message).trim().replace(/\s+/g, ' ');
+  return text ? `user:${text}` : '';
+}
+
+function dedupeUserTextMessages(messages) {
+  const seen = new Set();
+  return messages.filter((message) => {
+    const key = userTextKey(message);
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function mergeVisibleMessagesById(items, incomingMessages, isVisibleMessage, options = {}) {
   const incomingVisible = incomingMessages.filter((message) => message?.role && isVisibleMessage(message));
   const shouldPruneSyntheticTools = options.pruneSyntheticToolActivity && hasCanonicalToolBlocks(incomingVisible);
@@ -66,5 +83,5 @@ export function mergeVisibleMessagesById(items, incomingMessages, isVisibleMessa
     }
   });
 
-  return next;
+  return options.dedupeUserText ? dedupeUserTextMessages(next) : next;
 }

@@ -139,6 +139,7 @@ export function useAgentEvents({
     } = normalizeAgentEvent(eventName, payload);
     const sessionId = eventContext.sessionId;
     const runId = eventContext.runId || normalizedRunId;
+    const dedupeUserText = Boolean(eventContext.dedupeUserText);
     if (!sessionId) return;
 
     const isCurrentSession = currentSessionIdRef.current === sessionId;
@@ -293,7 +294,7 @@ export function useAgentEvents({
           items,
           finishMessages,
           isVisibleChatMessage,
-          { pruneSyntheticToolActivity: true },
+          { pruneSyntheticToolActivity: true, dedupeUserText },
         ));
       }
       const finishStatus = finish.status;

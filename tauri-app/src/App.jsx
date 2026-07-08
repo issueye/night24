@@ -268,7 +268,7 @@ export default function App() {
     if (info.messages.length) {
       const visibleMessages = info.messages.filter(isVisibleChatMessage);
       if (visibleMessages.length) {
-        mergeSessionHistory(info.subagentId, visibleMessages);
+        mergeSessionHistory(info.subagentId, visibleMessages, { dedupeUserText: true });
       }
     } else if (info.task) {
       mergeSessionHistory(info.subagentId, [{
@@ -276,7 +276,7 @@ export default function App() {
         role: 'user',
         content: [{ type: 'text', text: info.task }],
         created_at: new Date().toISOString(),
-      }]);
+      }], { dedupeUserText: true });
     }
 
     if (info.childRunId && !isTerminalSubAgentStatus(info.status)) {
@@ -423,7 +423,11 @@ export default function App() {
     await readSseStream(response.body, (event) => {
       const targetSessionId = targetSessionForStreamEvent(event, sessionId);
       const eventRunId = rememberStreamEvent(event, targetSessionId, runId);
-      handleAgentEvent(event.eventName, event.payload, { sessionId: targetSessionId, runId: eventRunId });
+      handleAgentEvent(event.eventName, event.payload, {
+        sessionId: targetSessionId,
+        runId: eventRunId,
+        dedupeUserText: targetSessionId !== sessionId,
+      });
     });
   }
 
@@ -703,6 +707,7 @@ export default function App() {
           sessionId: targetSessionId,
           runId: rememberedRunId,
           parentSessionId: sessionId,
+          dedupeUserText: targetSessionId !== sessionId,
         });
 
         if (eventType === 'sub_agent_session') {

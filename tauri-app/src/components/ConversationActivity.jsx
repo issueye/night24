@@ -100,9 +100,10 @@ export function buildConversationItems(messages) {
 
   function flushToolGroup() {
     if (toolGroup.length > 0) {
+      const firstToolId = toolGroup.find((message) => message?.id)?.id;
       items.push({
         type: 'tool_group',
-        id: `tools-${toolGroup.map((message) => message.id).filter(Boolean).join('-') || items.length}`,
+        id: `tools-${firstToolId || items.length}`,
         messages: toolGroup,
       });
       toolGroup = [];

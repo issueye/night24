@@ -84,3 +84,21 @@ test('mergeVisibleMessagesById prunes synthetic tool activity when canonical his
   assert.equal(merged.some((message) => message.id === 'tool-request-call-1'), true);
   assert.equal(merged.some((message) => message.id === 'tool-response-call-1'), true);
 });
+
+test('mergeVisibleMessagesById can dedupe repeated user text with different ids', () => {
+  const localMessages = [
+    { id: 'task-local', role: 'user', content: [{ type: 'text', text: 'inspect project' }] },
+  ];
+  const historyMessages = [
+    { id: 'task-finish', role: 'user', content: [{ type: 'text', text: 'inspect   project' }] },
+    { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+  ];
+
+  const merged = mergeVisibleMessagesById(localMessages, historyMessages, isVisibleMessage, {
+    dedupeUserText: true,
+  });
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, 'task-local');
+  assert.equal(merged[1].id, 'assistant-1');
+});

@@ -1664,11 +1664,37 @@ fn subagent_session_messages_from_events(task: &str, events: &[String]) -> Vec<M
         messages.extend(
             finish_messages
                 .iter()
-                .filter_map(|message| serde_json::from_value::<Message>(message.clone()).ok()),
+                .filter_map(|message| serde_json::from_value::<Message>(message.clone()).ok())
+                .filter(|message| !is_duplicate_user_task_message(message, task)),
         );
         break;
     }
     messages
+}
+
+fn is_duplicate_user_task_message(message: &Message, task: &str) -> bool {
+    message.role == Role::User && normalized_message_text(message) == normalize_message_text(task)
+}
+
+fn normalized_message_text(message: &Message) -> String {
+    normalize_message_text(
+        &message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } | ContentBlock::Thinking { text } => {
+                    Some(text.as_str())
+                }
+                ContentBlock::ToolResponse { content, .. } => Some(content.as_str()),
+                ContentBlock::ToolRequest { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn normalize_message_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn subagent_result_from_events(events: &[String]) -> Result<String, String> {
