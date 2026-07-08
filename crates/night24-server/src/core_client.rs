@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -19,7 +19,15 @@ use night24_protocol::{
 };
 
 type PendingResponses = Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>;
-type EventSenders = Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>;
+type EventSenders = Arc<Mutex<EventRoutes>>;
+
+#[derive(Default)]
+struct EventRoutes {
+    senders: HashMap<String, mpsc::Sender<serde_json::Value>>,
+    child_to_parent: HashMap<String, String>,
+    parent_children: HashMap<String, HashSet<String>>,
+    parent_terminal: HashSet<String>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct CoreRuntimeStatus {
@@ -64,7 +72,7 @@ impl AgentCoreClient {
             stdin: Arc::new(Mutex::new(stdin)),
             child: Arc::new(Mutex::new(child)),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            event_senders: Arc::new(Mutex::new(HashMap::new())),
+            event_senders: Arc::new(Mutex::new(EventRoutes::default())),
             status: Arc::new(Mutex::new(CoreRuntimeStatus::unavailable("initializing"))),
             generation,
         };
@@ -261,6 +269,7 @@ impl AgentCoreClient {
         self.event_senders
             .lock()
             .map_err(|_| anyhow::anyhow!("agent-core events lock poisoned"))?
+            .senders
             .insert(run_id.clone(), tx);
 
         match self
@@ -272,6 +281,7 @@ impl AgentCoreClient {
                 self.event_senders
                     .lock()
                     .map_err(|_| anyhow::anyhow!("agent-core events lock poisoned"))?
+                    .senders
                     .remove(&run_id);
                 Err(err)
             }
@@ -532,20 +542,124 @@ fn route_agent_event(event_senders: &EventSenders, params: serde_json::Value) {
     };
 
     let is_terminal = is_terminal_agent_event(&params);
+    let route = event_senders.lock().ok().and_then(|mut routes| {
+        update_subagent_routes(&mut routes, &params);
+        let resolved_parent = routes
+            .child_to_parent
+            .get(&run_id)
+            .cloned()
+            .or_else(|| subagent_parent_run_id(&run_id).map(str::to_string));
+        let route = routes
+            .senders
+            .get(&run_id)
+            .cloned()
+            .map(|sender| (run_id.clone(), true, sender))
+            .or_else(|| {
+                resolved_parent.as_deref().and_then(|parent_run_id| {
+                    routes
+                        .senders
+                        .get(parent_run_id)
+                        .cloned()
+                        .map(|sender| (parent_run_id.to_string(), false, sender))
+                })
+            });
+        if is_terminal {
+            mark_terminal_route(&mut routes, &run_id, resolved_parent.as_deref());
+        }
+        route
+    });
 
-    let sender = event_senders
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(&run_id).cloned());
-    if let Some(sender) = sender {
+    if let Some((routed_run_id, exact_match, sender)) = route {
         if sender.blocking_send(params).is_err() {
-            remove_event_sender(event_senders, &run_id);
+            remove_event_sender(event_senders, &routed_run_id);
             return;
         }
+        if is_terminal && exact_match && route_is_ready_to_remove(event_senders, &routed_run_id) {
+            remove_event_sender(event_senders, &routed_run_id);
+        } else if !exact_match && route_parent_is_terminal_and_ready(event_senders, &routed_run_id) {
+            remove_event_sender(event_senders, &routed_run_id);
+        }
     }
-    if is_terminal {
-        remove_event_sender(event_senders, &run_id);
+}
+
+fn update_subagent_routes(routes: &mut EventRoutes, event: &serde_json::Value) {
+    if event.get("type").and_then(|kind| kind.as_str()) != Some("sub_agent_session") {
+        return;
     }
+    let Some(payload) = event.get("payload") else {
+        return;
+    };
+    let Some(child_run_id) = payload.get("child_run_id").and_then(|value| value.as_str()) else {
+        return;
+    };
+    let parent_run_id = payload
+        .get("parent_run_id")
+        .and_then(|value| value.as_str())
+        .or_else(|| agent_event_run_id(event));
+    let Some(parent_run_id) = parent_run_id else {
+        return;
+    };
+
+    if subagent_status_is_terminal(payload) {
+        unregister_child_route(routes, parent_run_id, child_run_id);
+    } else {
+        routes
+            .child_to_parent
+            .insert(child_run_id.to_string(), parent_run_id.to_string());
+        routes
+            .parent_children
+            .entry(parent_run_id.to_string())
+            .or_default()
+            .insert(child_run_id.to_string());
+    }
+}
+
+fn mark_terminal_route(routes: &mut EventRoutes, run_id: &str, parent_run_id: Option<&str>) {
+    if let Some(parent_run_id) = parent_run_id {
+        unregister_child_route(routes, parent_run_id, run_id);
+        return;
+    }
+    routes.parent_terminal.insert(run_id.to_string());
+}
+
+fn unregister_child_route(routes: &mut EventRoutes, parent_run_id: &str, child_run_id: &str) {
+    routes.child_to_parent.remove(child_run_id);
+    if let Some(children) = routes.parent_children.get_mut(parent_run_id) {
+        children.remove(child_run_id);
+        if children.is_empty() {
+            routes.parent_children.remove(parent_run_id);
+        }
+    }
+}
+
+fn route_is_ready_to_remove(event_senders: &EventSenders, run_id: &str) -> bool {
+    event_senders
+        .lock()
+        .map(|routes| parent_has_no_active_children(&routes, run_id))
+        .unwrap_or(true)
+}
+
+fn parent_has_no_active_children(routes: &EventRoutes, run_id: &str) -> bool {
+    routes
+        .parent_children
+        .get(run_id)
+        .is_none_or(HashSet::is_empty)
+}
+
+fn route_parent_is_terminal_and_ready(event_senders: &EventSenders, run_id: &str) -> bool {
+    event_senders
+        .lock()
+        .map(|routes| {
+            routes.parent_terminal.contains(run_id) && parent_has_no_active_children(&routes, run_id)
+        })
+        .unwrap_or(true)
+}
+
+fn subagent_status_is_terminal(payload: &serde_json::Value) -> bool {
+    matches!(
+        payload.get("status").and_then(|value| value.as_str()),
+        Some("completed" | "failed" | "cancelled")
+    )
 }
 
 fn route_json_rpc_response(pending: &PendingResponses, id: String, value: serde_json::Value) {
@@ -585,20 +699,27 @@ fn close_current_core_transport(
 }
 
 fn clear_event_senders(event_senders: &EventSenders) -> usize {
-    let Ok(mut senders) = event_senders.lock() else {
+    let Ok(mut routes) = event_senders.lock() else {
         return 0;
     };
-    let count = senders.len();
-    senders.clear();
+    let count = routes.senders.len();
+    routes.senders.clear();
+    routes.child_to_parent.clear();
+    routes.parent_children.clear();
+    routes.parent_terminal.clear();
     count
 }
 
 fn remove_event_sender(event_senders: &EventSenders, run_id: &str) -> bool {
-    event_senders
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.remove(run_id))
-        .is_some()
+    event_senders.lock().ok().is_some_and(|mut routes| {
+        routes.parent_terminal.remove(run_id);
+        if let Some(children) = routes.parent_children.remove(run_id) {
+            for child in children {
+                routes.child_to_parent.remove(&child);
+            }
+        }
+        routes.senders.remove(run_id).is_some()
+    })
 }
 
 fn store_core_status(
@@ -620,6 +741,10 @@ fn is_terminal_agent_event(event: &serde_json::Value) -> bool {
         event.get("type").and_then(|kind| kind.as_str()),
         Some("finish" | "error")
     )
+}
+
+fn subagent_parent_run_id(run_id: &str) -> Option<&str> {
+    run_id.split_once(":subagent:").map(|(parent, _)| parent)
 }
 
 fn set_core_status_if_current(
@@ -700,6 +825,34 @@ fn non_empty_path(value: impl AsRef<str>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_event_senders() -> EventSenders {
+        Arc::new(Mutex::new(EventRoutes::default()))
+    }
+
+    fn insert_event_sender(
+        event_senders: &EventSenders,
+        run_id: &str,
+        sender: mpsc::Sender<serde_json::Value>,
+    ) {
+        event_senders
+            .lock()
+            .unwrap()
+            .senders
+            .insert(run_id.to_string(), sender);
+    }
+
+    fn has_event_sender(event_senders: &EventSenders, run_id: &str) -> bool {
+        event_senders
+            .lock()
+            .unwrap()
+            .senders
+            .contains_key(run_id)
+    }
+
+    fn no_event_senders(event_senders: &EventSenders) -> bool {
+        event_senders.lock().unwrap().senders.is_empty()
+    }
 
     #[test]
     fn classifies_agent_event_notifications() {
@@ -849,45 +1002,39 @@ mod tests {
 
     #[test]
     fn route_agent_event_removes_sender_after_terminal_event() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let (tx, mut rx) = mpsc::channel(1);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), tx);
+        insert_event_sender(&event_senders, "run-1", tx);
 
         route_agent_event(
             &event_senders,
             serde_json::json!({ "run_id": "run-1", "type": "finish" }),
         );
 
-        assert!(event_senders.lock().unwrap().get("run-1").is_none());
+        assert!(!has_event_sender(&event_senders, "run-1"));
         let routed = rx.blocking_recv().unwrap();
         assert_eq!(routed["type"], "finish");
     }
 
     #[test]
     fn route_agent_event_keeps_sender_for_non_terminal_event() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let (tx, mut rx) = mpsc::channel(1);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), tx);
+        insert_event_sender(&event_senders, "run-1", tx);
 
         route_agent_event(
             &event_senders,
             serde_json::json!({ "run_id": "run-1", "type": "message" }),
         );
 
-        assert!(event_senders.lock().unwrap().get("run-1").is_some());
+        assert!(has_event_sender(&event_senders, "run-1"));
         let routed = rx.blocking_recv().unwrap();
         assert_eq!(routed["type"], "message");
     }
 
     #[test]
     fn route_agent_event_ignores_events_without_known_sender() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
 
         route_agent_event(
             &event_senders,
@@ -895,83 +1042,144 @@ mod tests {
         );
         route_agent_event(&event_senders, serde_json::json!({ "type": "finish" }));
 
-        assert!(event_senders.lock().unwrap().is_empty());
+        assert!(no_event_senders(&event_senders));
+    }
+
+    #[test]
+    fn route_agent_event_forwards_subagent_events_to_parent_sender() {
+        let event_senders = test_event_senders();
+        let (tx, mut rx) = mpsc::channel(2);
+        insert_event_sender(&event_senders, "run-parent", tx);
+
+        route_agent_event(
+            &event_senders,
+            serde_json::json!({
+                "run_id": "run-parent:subagent:child",
+                "type": "message"
+            }),
+        );
+
+        let routed = rx.blocking_recv().unwrap();
+        assert_eq!(routed["run_id"], "run-parent:subagent:child");
+        assert!(has_event_sender(&event_senders, "run-parent"));
+    }
+
+    #[test]
+    fn route_agent_event_keeps_parent_sender_after_subagent_terminal_event() {
+        let event_senders = test_event_senders();
+        let (tx, mut rx) = mpsc::channel(2);
+        insert_event_sender(&event_senders, "run-parent", tx);
+
+        route_agent_event(
+            &event_senders,
+            serde_json::json!({
+                "run_id": "run-parent:subagent:child",
+                "type": "finish"
+            }),
+        );
+
+        let routed = rx.blocking_recv().unwrap();
+        assert_eq!(routed["type"], "finish");
+        assert!(has_event_sender(&event_senders, "run-parent"));
+    }
+
+    #[test]
+    fn route_agent_event_keeps_parent_sender_until_active_subagent_finishes() {
+        let event_senders = test_event_senders();
+        let (tx, mut rx) = mpsc::channel(4);
+        insert_event_sender(&event_senders, "run-parent", tx);
+
+        route_agent_event(
+            &event_senders,
+            serde_json::json!({
+                "run_id": "run-parent",
+                "type": "sub_agent_session",
+                "payload": {
+                    "parent_run_id": "run-parent",
+                    "child_run_id": "run-parent:subagent:child",
+                    "status": "running"
+                }
+            }),
+        );
+        route_agent_event(
+            &event_senders,
+            serde_json::json!({
+                "run_id": "run-parent",
+                "type": "finish"
+            }),
+        );
+
+        assert!(has_event_sender(&event_senders, "run-parent"));
+
+        route_agent_event(
+            &event_senders,
+            serde_json::json!({
+                "run_id": "run-parent:subagent:child",
+                "type": "finish"
+            }),
+        );
+
+        assert_eq!(rx.blocking_recv().unwrap()["type"], "sub_agent_session");
+        assert_eq!(rx.blocking_recv().unwrap()["type"], "finish");
+        assert_eq!(rx.blocking_recv().unwrap()["run_id"], "run-parent:subagent:child");
+        assert!(!has_event_sender(&event_senders, "run-parent"));
     }
 
     #[test]
     fn route_agent_event_removes_terminal_sender_even_when_receiver_closed() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), tx);
+        insert_event_sender(&event_senders, "run-1", tx);
 
         route_agent_event(
             &event_senders,
             serde_json::json!({ "run_id": "run-1", "type": "error" }),
         );
 
-        assert!(event_senders.lock().unwrap().get("run-1").is_none());
+        assert!(!has_event_sender(&event_senders, "run-1"));
     }
 
     #[test]
     fn route_agent_event_removes_closed_sender_for_non_terminal_event() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), tx);
+        insert_event_sender(&event_senders, "run-1", tx);
 
         route_agent_event(
             &event_senders,
             serde_json::json!({ "run_id": "run-1", "type": "message" }),
         );
 
-        assert!(event_senders.lock().unwrap().get("run-1").is_none());
+        assert!(!has_event_sender(&event_senders, "run-1"));
     }
 
     #[test]
     fn clear_event_senders_removes_all_senders_and_reports_count() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let (tx1, _rx1) = mpsc::channel(1);
         let (tx2, _rx2) = mpsc::channel(1);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), tx1);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-2".to_string(), tx2);
+        insert_event_sender(&event_senders, "run-1", tx1);
+        insert_event_sender(&event_senders, "run-2", tx2);
 
         assert_eq!(clear_event_senders(&event_senders), 2);
-        assert!(event_senders.lock().unwrap().is_empty());
+        assert!(no_event_senders(&event_senders));
         assert_eq!(clear_event_senders(&event_senders), 0);
     }
 
     #[test]
     fn remove_event_sender_removes_only_matching_run() {
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let (tx1, _rx1) = mpsc::channel(1);
         let (tx2, _rx2) = mpsc::channel(1);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), tx1);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-2".to_string(), tx2);
+        insert_event_sender(&event_senders, "run-1", tx1);
+        insert_event_sender(&event_senders, "run-2", tx2);
 
         assert!(remove_event_sender(&event_senders, "run-1"));
         assert!(!remove_event_sender(&event_senders, "missing"));
-        let guard = event_senders.lock().unwrap();
-        assert!(!guard.contains_key("run-1"));
-        assert!(guard.contains_key("run-2"));
+        assert!(!has_event_sender(&event_senders, "run-1"));
+        assert!(has_event_sender(&event_senders, "run-2"));
     }
 
     #[test]
@@ -1058,9 +1266,18 @@ mod tests {
     }
 
     #[test]
+    fn subagent_parent_run_id_extracts_prefix() {
+        assert_eq!(
+            subagent_parent_run_id("run-parent:subagent:child"),
+            Some("run-parent")
+        );
+        assert_eq!(subagent_parent_run_id("run-parent"), None);
+    }
+
+    #[test]
     fn close_current_core_transport_rejects_pending_and_clears_events() {
         let pending = Arc::new(Mutex::new(HashMap::new()));
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let status = Arc::new(Mutex::new(CoreRuntimeStatus::available()));
         let generation = Arc::new(AtomicU64::new(7));
         let (pending_tx, pending_rx) = oneshot::channel();
@@ -1069,10 +1286,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert("rpc-1".to_string(), pending_tx);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), event_tx);
+        insert_event_sender(&event_senders, "run-1", event_tx);
 
         assert!(close_current_core_transport(
             &pending,
@@ -1084,7 +1298,7 @@ mod tests {
         ));
 
         assert!(pending.lock().unwrap().is_empty());
-        assert!(event_senders.lock().unwrap().is_empty());
+        assert!(no_event_senders(&event_senders));
         let response = pending_rx.blocking_recv().unwrap();
         assert_eq!(response["error"]["message"], "agent-core stdout closed");
         let status = status.lock().unwrap();
@@ -1095,7 +1309,7 @@ mod tests {
     #[test]
     fn close_current_core_transport_ignores_stale_generation() {
         let pending = Arc::new(Mutex::new(HashMap::new()));
-        let event_senders = Arc::new(Mutex::new(HashMap::new()));
+        let event_senders = test_event_senders();
         let status = Arc::new(Mutex::new(CoreRuntimeStatus::available()));
         let generation = Arc::new(AtomicU64::new(8));
         let (pending_tx, mut pending_rx) = oneshot::channel();
@@ -1104,10 +1318,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert("rpc-1".to_string(), pending_tx);
-        event_senders
-            .lock()
-            .unwrap()
-            .insert("run-1".to_string(), event_tx);
+        insert_event_sender(&event_senders, "run-1", event_tx);
 
         assert!(!close_current_core_transport(
             &pending,
@@ -1119,7 +1330,7 @@ mod tests {
         ));
 
         assert!(pending.lock().unwrap().contains_key("rpc-1"));
-        assert!(event_senders.lock().unwrap().contains_key("run-1"));
+        assert!(has_event_sender(&event_senders, "run-1"));
         assert!(pending_rx.try_recv().is_err());
         let status = status.lock().unwrap();
         assert!(status.available);

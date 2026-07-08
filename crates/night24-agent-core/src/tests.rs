@@ -703,8 +703,10 @@ async fn subagent_sync_spawn_returns_child_result() {
 }
 
 #[tokio::test]
-async fn subagent_sync_spawn_does_not_forward_child_events_to_parent_stream() {
-    let mut core = initialized_core().await;
+async fn subagent_sync_spawn_streams_child_events_with_child_run_id() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut core = AgentCore::with_output(tx);
+    initialize_core(&mut core).await;
     let request = json!({
         "jsonrpc": "2.0",
         "id": "rpc-reply",
@@ -733,17 +735,45 @@ async fn subagent_sync_spawn_does_not_forward_child_events_to_parent_stream() {
         }
     });
 
-    let output = core.handle_line(&request.to_string()).await;
-    let events = output
+    let accepted = core.handle_line(&request.to_string()).await;
+    let accepted: serde_json::Value = serde_json::from_str(&accepted[0]).unwrap();
+    assert_eq!(accepted["result"]["accepted"], true);
+
+    let events = collect_events_until_run_finish(&mut rx, "run-subagent-isolated").await;
+    let child_events = events
         .iter()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|value| value["method"] == "agent.event")
+        .filter(|event| {
+            event["params"]["run_id"]
+                .as_str()
+                .is_some_and(|run_id| run_id.starts_with("run-subagent-isolated:subagent:"))
+        })
         .collect::<Vec<_>>();
 
-    assert!(!events.is_empty());
-    for event in events {
-        assert_eq!(event["params"]["run_id"], "run-subagent-isolated");
-    }
+    assert!(
+        child_events
+            .iter()
+            .any(|event| event["params"]["type"] == "message"),
+        "child events: {}",
+        serde_json::to_string_pretty(&child_events).unwrap()
+    );
+    assert!(
+        child_events
+            .iter()
+            .any(|event| event["params"]["type"] == "finish"),
+        "child events: {}",
+        serde_json::to_string_pretty(&child_events).unwrap()
+    );
+    assert!(events.iter().any(|event| {
+        event["params"]["type"] == "sub_agent_session"
+            && event["params"]["payload"]["status"] == "running"
+            && event["params"]["payload"]["child_run_id"]
+                .as_str()
+                .is_some_and(|run_id| run_id.starts_with("run-subagent-isolated:subagent:"))
+    }));
+    assert!(events.iter().any(|event| {
+        event["params"]["type"] == "finish"
+            && event["params"]["run_id"] == "run-subagent-isolated"
+    }));
 }
 
 #[tokio::test]
@@ -2508,6 +2538,27 @@ async fn collect_events_until_finish(
         }
     }
     panic!("finish event was not emitted");
+}
+
+async fn collect_events_until_run_finish(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    run_id: &str,
+) -> Vec<serde_json::Value> {
+    let mut events = Vec::new();
+    for _ in 0..40 {
+        let raw = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for agent event")
+            .expect("agent event channel closed");
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let is_target_finish =
+            value["params"]["type"] == "finish" && value["params"]["run_id"] == run_id;
+        events.push(value);
+        if is_target_finish {
+            return events;
+        }
+    }
+    panic!("finish event for run {run_id} was not emitted");
 }
 
 fn agent_events(output: &[String]) -> Vec<serde_json::Value> {

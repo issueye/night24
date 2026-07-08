@@ -58,8 +58,9 @@ impl RunContext {
     pub(super) fn send(&self, kind: AgentEventKind) {
         let message = self.emit(kind);
         if let Some(output) = &self.output {
-            let _ = output.send(message);
-        } else if let Some(collected) = &self.collected {
+            let _ = output.send(message.clone());
+        }
+        if let Some(collected) = &self.collected {
             if let Ok(mut collected) = collected.lock() {
                 collected.push(message);
             }

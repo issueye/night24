@@ -1422,7 +1422,7 @@ async fn spawn_subagent(
         emit_tool_events: params.options.emit_tool_events,
         cancelled: handle.cancelled.clone(),
         seq: Arc::new(AtomicU64::new(1)),
-        output: None,
+        output: context.output.clone(),
         collected: Some(Arc::new(Mutex::new(Vec::new()))),
         permissions: context.permissions.clone(),
         hooks: context.hooks.clone(),
@@ -1532,7 +1532,9 @@ async fn run_subagent_once(
     task: String,
 ) {
     pool.mark_running(&subagent_id);
+    let child_output = child_context.output.clone();
     let events = Box::pin(reply_events(child_params, default_provider, child_context)).await;
+    forward_returned_terminal_event(&events, &child_output);
 
     match subagent_result_from_events(&events) {
         Ok(result) => {
@@ -1567,6 +1569,31 @@ async fn run_subagent_once(
             );
         }
     }
+}
+
+fn forward_returned_terminal_event(
+    events: &[String],
+    output: &Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) {
+    let Some(output) = output else {
+        return;
+    };
+    let Some(event) = events.last() else {
+        return;
+    };
+    if is_terminal_agent_event_json(event) {
+        let _ = output.send(event.clone());
+    }
+}
+
+fn is_terminal_agent_event_json(event: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(event) else {
+        return false;
+    };
+    matches!(
+        value["params"]["type"].as_str(),
+        Some("finish" | "error")
+    )
 }
 
 fn build_child_reply_params(

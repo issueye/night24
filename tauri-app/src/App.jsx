@@ -26,6 +26,12 @@ import { mergeVisibleMessagesById } from './utils/messages.js';
 import { buildReplyRequestBody } from './utils/reply.js';
 import { readSseStream } from './utils/sse.js';
 import {
+  isSubAgentRunId,
+  isTerminalSubAgentStatus,
+  resolveEventSessionId,
+  subAgentSessionInfo,
+} from './utils/subagentEvents.js';
+import {
   DEFAULT_SERVER,
   STORAGE_KEYS,
   apiUrl,
@@ -104,6 +110,7 @@ export default function App() {
   const clearCurrentSessionRef = useRef(null);
   const runTerminalsRef = useRef(new Map());
   const runEventListenersRef = useRef(new Map());
+  const childRunSessionRef = useRef(new Map());
   const loadSubAgentsRef = useRef(null);
   const { headers, apiJson } = useApiClient(apiBase, apiKey);
 
@@ -250,6 +257,82 @@ export default function App() {
     messageEndRef.current?.scrollIntoView({ block: 'end' });
   }, [currentContext.messages]);
 
+  const bindSubAgentSession = useCallback((payload, fallbackParentSessionId) => {
+    const info = subAgentSessionInfo(payload);
+    if (!info.subagentId) return info;
+
+    if (info.childRunId) {
+      childRunSessionRef.current.set(info.childRunId, info.subagentId);
+    }
+
+    if (info.messages.length) {
+      const visibleMessages = info.messages.filter(isVisibleChatMessage);
+      if (visibleMessages.length) {
+        mergeSessionHistory(info.subagentId, visibleMessages);
+      }
+    } else if (info.task) {
+      mergeSessionHistory(info.subagentId, [{
+        id: `${info.subagentId}-task`,
+        role: 'user',
+        content: [{ type: 'text', text: info.task }],
+        created_at: new Date().toISOString(),
+      }]);
+    }
+
+    if (info.childRunId && !isTerminalSubAgentStatus(info.status)) {
+      const activeChildRun = getSessionRun(info.subagentId);
+      if (!activeChildRun || activeChildRun.runId !== info.childRunId) {
+        const temporaryId = startPendingSessionRun(info.subagentId, {
+          controller: null,
+          status: 'running',
+          workspacePath: workspace?.root_path,
+        });
+        attachRunId(info.subagentId, temporaryId, info.childRunId);
+      }
+      setSessionRunCheckpoint(info.subagentId, info.childRunId, {
+        runId: info.childRunId,
+        status: 'running',
+      });
+    } else if (info.childRunId) {
+      finishRun(info.childRunId, info.status || 'finished');
+      clearSessionRunContext(info.subagentId, info.childRunId);
+    }
+
+    if (fallbackParentSessionId && info.childRunId) {
+      setSessionRunCheckpoint(fallbackParentSessionId, info.childRunId, {
+        runId: info.childRunId,
+        status: isTerminalSubAgentStatus(info.status) ? info.status : 'running',
+      });
+    }
+
+    return info;
+  }, [
+    attachRunId,
+    clearSessionRunContext,
+    finishRun,
+    getSessionRun,
+    setSessionRunCheckpoint,
+    startPendingSessionRun,
+    workspace?.root_path,
+  ]);
+
+  function eventRunIdFromSse(event) {
+    return typeof event?.payload?.run_id === 'string' ? event.payload.run_id : null;
+  }
+
+  function targetSessionForStreamEvent(event, fallbackSessionId) {
+    const eventType = event?.payload?.type || event?.eventName;
+    if (eventType === 'sub_agent_session') {
+      bindSubAgentSession(event.payload?.payload || event.payload, fallbackSessionId);
+      return fallbackSessionId;
+    }
+    return resolveEventSessionId({
+      eventRunId: eventRunIdFromSse(event),
+      fallbackSessionId,
+      childRunSessionByRunId: childRunSessionRef.current,
+    });
+  }
+
   const handleSubAgentTool = useCallback(({ phase }) => {
     setSubAgentSpawning(true);
     loadSubAgentsRef.current?.({ silent: true });
@@ -264,15 +347,15 @@ export default function App() {
     }
   }, [loadSessions]);
 
-  const handleSubAgentSession = useCallback(({ payload }) => {
+  const handleSubAgentSession = useCallback(({ payload, sessionId: parentSessionId }) => {
     setSubAgentSpawning(false);
-    const sessionId = payload?.session_id || payload?.id;
-    if (sessionId) {
-      openSessionTab(sessionId);
+    const info = bindSubAgentSession(payload, parentSessionId);
+    if (info?.subagentId) {
+      openSessionTab(info.subagentId);
     }
     loadSessions();
     loadSubAgentsRef.current?.({ silent: true });
-  }, [loadSessions]);
+  }, [bindSubAgentSession, loadSessions]);
 
   const { handleAgentEvent } = useAgentEvents({
     getSessionContext,
@@ -338,8 +421,9 @@ export default function App() {
       throw new Error(errorText || `HTTP ${response.status}`);
     }
     await readSseStream(response.body, (event) => {
-      const eventRunId = rememberStreamEvent(event, sessionId, runId);
-      handleAgentEvent(event.eventName, event.payload, { sessionId, runId: eventRunId });
+      const targetSessionId = targetSessionForStreamEvent(event, sessionId);
+      const eventRunId = rememberStreamEvent(event, targetSessionId, runId);
+      handleAgentEvent(event.eventName, event.payload, { sessionId: targetSessionId, runId: eventRunId });
     });
   }
 
@@ -599,17 +683,31 @@ export default function App() {
       }
 
       streamWasOpen = true;
-      let attachedRunId = runId;
+      let parentRunId = runId;
       await readSseStream(response.body, (event) => {
-        const eventRunId = rememberStreamEvent(event, sessionId, attachedRunId);
-        if (eventRunId && eventRunId !== attachedRunId) {
-          if (isPendingRunId(attachedRunId)) {
-            attachRunId(sessionId, attachedRunId, eventRunId);
+        const eventRunId = eventRunIdFromSse(event);
+        const eventType = event?.payload?.type || event?.eventName;
+        const targetSessionId = targetSessionForStreamEvent(event, sessionId);
+
+        if (eventRunId && !isSubAgentRunId(eventRunId) && eventRunId !== parentRunId) {
+          if (isPendingRunId(parentRunId)) {
+            attachRunId(sessionId, parentRunId, eventRunId);
           }
-          attachedRunId = eventRunId;
+          parentRunId = eventRunId;
           runId = eventRunId;
         }
-        handleAgentEvent(event.eventName, event.payload, { sessionId, runId: eventRunId });
+
+        const fallbackRunId = targetSessionId === sessionId ? parentRunId : eventRunId || parentRunId;
+        const rememberedRunId = rememberStreamEvent(event, targetSessionId, fallbackRunId);
+        handleAgentEvent(event.eventName, event.payload, {
+          sessionId: targetSessionId,
+          runId: rememberedRunId,
+          parentSessionId: sessionId,
+        });
+
+        if (eventType === 'sub_agent_session') {
+          loadSessions();
+        }
       });
       if (!runTerminalsRef.current.get(runId)) {
         const detail = '事件流已断开，未收到任务结束信号';

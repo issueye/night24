@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -232,10 +232,15 @@ async fn forward_run_events(
     tx: mpsc::Sender<serde_json::Value>,
     active_runs: Arc<Mutex<HashMap<String, ActiveRunProcess>>>,
 ) {
+    let mut active_child_runs = HashSet::new();
+    let mut parent_terminal_seen = false;
     while let Some(event) = core_events.recv().await {
-        let is_terminal = is_terminal_agent_event(&event);
+        update_active_child_runs(&mut active_child_runs, &run_id, &event);
+        if is_terminal_agent_event(&event) && event_belongs_to_run(&event, &run_id) {
+            parent_terminal_seen = true;
+        }
         let _ = tx.send(event).await;
-        if is_terminal {
+        if parent_terminal_seen && active_child_runs.is_empty() {
             break;
         }
     }
@@ -300,6 +305,59 @@ fn is_terminal_agent_event(event: &serde_json::Value) -> bool {
     )
 }
 
+fn event_belongs_to_run(event: &serde_json::Value, run_id: &str) -> bool {
+    event
+        .get("run_id")
+        .and_then(|value| value.as_str())
+        .is_none_or(|event_run_id| event_run_id == run_id)
+}
+
+fn update_active_child_runs(
+    active_child_runs: &mut HashSet<String>,
+    parent_run_id: &str,
+    event: &serde_json::Value,
+) {
+    if event.get("type").and_then(|kind| kind.as_str()) == Some("sub_agent_session") {
+        let Some(payload) = event.get("payload") else {
+            return;
+        };
+        let Some(child_run_id) = payload.get("child_run_id").and_then(|value| value.as_str())
+        else {
+            return;
+        };
+        if payload
+            .get("parent_run_id")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| value != parent_run_id)
+        {
+            return;
+        }
+        if subagent_status_is_terminal(payload) {
+            active_child_runs.remove(child_run_id);
+        } else {
+            active_child_runs.insert(child_run_id.to_string());
+        }
+        return;
+    }
+
+    let Some(event_run_id) = event.get("run_id").and_then(|value| value.as_str()) else {
+        return;
+    };
+    if event_run_id == parent_run_id {
+        return;
+    }
+    if is_terminal_agent_event(event) {
+        active_child_runs.remove(event_run_id);
+    }
+}
+
+fn subagent_status_is_terminal(payload: &serde_json::Value) -> bool {
+    matches!(
+        payload.get("status").and_then(|value| value.as_str()),
+        Some("completed" | "failed" | "cancelled")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +393,53 @@ mod tests {
         assert!(!is_terminal_agent_event(
             &serde_json::json!({ "type": "message" })
         ));
+    }
+
+    #[test]
+    fn event_belongs_to_run_rejects_subagent_child_run() {
+        assert!(event_belongs_to_run(
+            &serde_json::json!({ "run_id": "run-parent" }),
+            "run-parent"
+        ));
+        assert!(event_belongs_to_run(
+            &serde_json::json!({ "type": "message" }),
+            "run-parent"
+        ));
+        assert!(!event_belongs_to_run(
+            &serde_json::json!({ "run_id": "run-parent:subagent:child" }),
+            "run-parent"
+        ));
+    }
+
+    #[test]
+    fn update_active_child_runs_tracks_running_and_terminal_children() {
+        let mut active = HashSet::new();
+        update_active_child_runs(
+            &mut active,
+            "run-parent",
+            &serde_json::json!({
+                "type": "sub_agent_session",
+                "run_id": "run-parent",
+                "payload": {
+                    "parent_run_id": "run-parent",
+                    "child_run_id": "run-parent:subagent:child",
+                    "status": "running"
+                }
+            }),
+        );
+
+        assert!(active.contains("run-parent:subagent:child"));
+
+        update_active_child_runs(
+            &mut active,
+            "run-parent",
+            &serde_json::json!({
+                "type": "finish",
+                "run_id": "run-parent:subagent:child"
+            }),
+        );
+
+        assert!(active.is_empty());
     }
 
     #[tokio::test]
