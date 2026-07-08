@@ -37,7 +37,8 @@
 }
 
 .app-shell .conversation-area {
-  width: min(940px, calc(100% - 52px));
+  /* width: min(940px, calc(100% - 52px)); */
+  width: 100%;
   margin: 0 auto;
   background: transparent;
 }
@@ -100,7 +101,7 @@
 .app-shell .composer {
   width: min(738px, calc(100% - 92px));
   min-height: 108px;
-  margin: 0 auto 18px;
+  margin: 6px auto 0px;
   padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);

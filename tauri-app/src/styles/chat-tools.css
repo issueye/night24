@@ -20,7 +20,7 @@
 
 .tool-call-block summary {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 1fr) auto 16px;
   align-items: center;
   gap: 7px;
   min-height: 26px;
@@ -41,6 +41,20 @@
   color: var(--subtle);
   background: transparent;
   border-radius: 0;
+}
+
+.tool-call-block-running .tool-call-icon svg {
+  animation: spin 900ms linear infinite;
+}
+
+.tool-call-block-success .tool-call-icon,
+.tool-call-status.success {
+  color: var(--green);
+}
+
+.tool-call-block-error .tool-call-icon,
+.tool-call-status.error {
+  color: var(--red);
 }
 
 .tool-call-main {
@@ -68,6 +82,24 @@
   font-size: var(--fs-sm);
 }
 
+.tool-call-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  color: var(--subtle);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tool-call-status.running {
+  color: var(--blue);
+}
+
 .tool-call-chevron {
   color: var(--subtle);
   transition: transform var(--transition);
@@ -78,14 +110,20 @@
 }
 
 .tool-call-detail {
+  display: grid;
+  gap: 8px;
   padding: 4px 0 8px 23px;
 }
 
-.tool-call-detail > div {
+.tool-call-detail section {
+  display: grid;
+  gap: 6px;
+}
+
+.tool-call-detail section > div {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-bottom: 6px;
   color: var(--subtle);
   font-size: var(--fs-sm);
 }

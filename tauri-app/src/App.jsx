@@ -4,7 +4,6 @@ import { SettingsStrip } from './components/SettingsStrip.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { ChatPanel } from './components/ChatPanel.jsx';
 import { ChatTabs } from './components/ChatTabs.jsx';
-import { ContextPanel } from './components/ContextPanel.jsx';
 import { TimelinePanel } from './components/TimelinePanel.jsx';
 import { EmptyChatLauncher } from './components/chat/EmptyChatLauncher.jsx';
 import { useApiClient } from './hooks/useApiClient.js';
@@ -40,11 +39,6 @@ const STREAM_RECOVERY_ATTEMPTS = 40;
 const STREAM_RECOVERY_DELAY_MS = 1500;
 const TERMINAL_RUN_EVENTS = new Set(['finish', 'error']);
 const LIVE_CHECKPOINT_STATUSES = new Set(['running', 'reconnecting', 'detached', 'cancelling']);
-
-function isSubAgentSession(session) {
-  const type = String(session?.session_type || '').toLowerCase().replace(/[_\s-]/g, '');
-  return type === 'subagent';
-}
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -178,12 +172,9 @@ export default function App() {
   const {
     workspace,
     recentWorkspaces,
-    contextOpen,
     workspaceLoading,
-    setContextOpen,
     loadWorkspace,
     openWorkspace,
-    openContextTab,
   } = useWorkspaceState({
     apiJson,
     addTimeline: addCurrentTimeline,
@@ -220,19 +211,6 @@ export default function App() {
   const currentContext = sessionContexts[currentContextId] || getSessionContext(currentContextId);
   const currentSessionRun = currentSessionId ? getSessionRun(currentSessionId) : null;
   const visibleSessionRunning = Boolean(currentSessionRun);
-  const currentSession = useMemo(
-    () => sessions.find((item) => item.id === currentSessionId) || null,
-    [currentSessionId, sessions],
-  );
-  const currentSubAgentSessions = useMemo(() => {
-    if (!currentSessionId) return [];
-    const parentId = isSubAgentSession(currentSession) && currentSession?.parent_id
-      ? currentSession.parent_id
-      : currentSessionId;
-    return sessions
-      .filter((item) => isSubAgentSession(item) && item.parent_id === parentId)
-      .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-  }, [currentSession, currentSessionId, sessions]);
   const openSessions = useMemo(
     () => openSessionIds
       .map((id) => sessions.find((item) => item.id === id))
@@ -275,15 +253,23 @@ export default function App() {
   const handleSubAgentTool = useCallback(({ phase }) => {
     setSubAgentSpawning(true);
     loadSubAgentsRef.current?.({ silent: true });
+    loadSessions();
     if (phase === 'started') {
       [800, 1800, 3200].forEach((delayMs) => {
-        window.setTimeout(() => loadSubAgentsRef.current?.({ silent: true }), delayMs);
+        window.setTimeout(() => {
+          loadSubAgentsRef.current?.({ silent: true });
+          loadSessions();
+        }, delayMs);
       });
     }
-  }, []);
+  }, [loadSessions]);
 
-  const handleSubAgentSession = useCallback(() => {
+  const handleSubAgentSession = useCallback(({ payload }) => {
     setSubAgentSpawning(false);
+    const sessionId = payload?.session_id || payload?.id;
+    if (sessionId) {
+      openSessionTab(sessionId);
+    }
     loadSessions();
     loadSubAgentsRef.current?.({ silent: true });
   }, [loadSessions]);
@@ -298,15 +284,14 @@ export default function App() {
     currentSessionIdRef,
     markRunEvent,
     finishRun,
-    openContextTab,
     onSubAgentTool: handleSubAgentTool,
     onSubAgentSession: handleSubAgentSession,
     showError,
     markRunTerminal,
   });
 
-  function mergeSessionHistory(sessionId, visibleMessages, { replace = false } = {}) {
-    if (replace) {
+  function mergeSessionHistory(sessionId, visibleMessages, options = {}) {
+    if (options.replace) {
       setSessionMessages(sessionId, visibleMessages);
       return;
     }
@@ -314,6 +299,7 @@ export default function App() {
       items,
       visibleMessages,
       isVisibleChatMessage,
+      { pruneSyntheticToolActivity: Boolean(options.pruneSyntheticToolActivity) },
     ));
   }
 
@@ -468,6 +454,7 @@ export default function App() {
       try {
         const visibleMessages = await refreshSessionHistory(sessionId);
         if (visibleMessages.length >= baselineVisibleCount + 2) {
+          mergeSessionHistory(sessionId, visibleMessages, { pruneSyntheticToolActivity: true });
           markRunTerminal(sessionId, runId, 'recovered');
           finishRun(runId, 'synced');
           clearSessionRunContext(sessionId, runId);
@@ -491,7 +478,7 @@ export default function App() {
     openSessionTab(id);
     const visibleMessages = await selectSession(id);
     if (!visibleMessages) return;
-    mergeSessionHistory(id, visibleMessages, { replace: true });
+    mergeSessionHistory(id, visibleMessages);
 
     const activeRun = getSessionRun(id);
     if (activeRun?.runId && !isPendingRunId(activeRun.runId)) {
@@ -707,14 +694,11 @@ export default function App() {
   }, [apiJson, notify, providerDraft]);
   const {
     subAgentPool,
-    subAgentLoading,
-    subAgentError,
     loadSubAgents,
   } = useSubAgents({
     apiJson,
-    active: contextOpen,
     notify,
-    running: visibleSessionRunning,
+    running: visibleSessionRunning || subAgentSpawning,
     parentSessionId: currentSessionId,
   });
   loadSubAgentsRef.current = loadSubAgents;
@@ -799,6 +783,7 @@ export default function App() {
           sessionActionId={sessionActionId}
           runsById={runRegistry.runsById}
           activeRunBySession={runRegistry.activeRunBySession}
+          subAgentPool={subAgentPool}
           currentSessionId={currentSessionId}
           settingsOpen={settingsOpen}
           onOpenWorkspace={openWorkspace}
@@ -817,11 +802,9 @@ export default function App() {
             activeSessionId={currentSessionId}
             runningSessionIds={runningSessionIds}
             serverDetail={serverStatus.detail}
-            agentsActive={contextOpen}
             onSelectSession={handleSelectSession}
             onCloseSession={closeSessionTab}
             onNewSession={createSession}
-            onToggleAgents={() => setContextOpen((value) => !value)}
           />
 
           {currentSessionId ? (
@@ -849,6 +832,7 @@ export default function App() {
               <EmptyChatLauncher
                 taskText={currentContext.draftText}
                 canSend={canSend}
+                contextUsage={contextUsage}
                 workspace={workspace}
                 workspaceLoading={workspaceLoading}
                 providerProfiles={providerProfiles}
@@ -864,18 +848,6 @@ export default function App() {
           )}
         </div>
 
-        <ContextPanel
-          open={contextOpen}
-          subAgentPool={subAgentPool}
-          subAgentSessions={currentSubAgentSessions}
-          currentSessionId={currentSessionId}
-          subAgentLoading={subAgentLoading}
-          subAgentError={subAgentError}
-          subAgentSpawning={subAgentSpawning}
-          onClose={() => setContextOpen(false)}
-          onRefreshSubAgents={() => loadSubAgents({ notifySuccess: true })}
-          onSelectSession={handleSelectSession}
-        />
       </main>
 
       <TimelinePanel

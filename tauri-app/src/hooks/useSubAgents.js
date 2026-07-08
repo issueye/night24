@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isLiveSubAgentStatus } from '../components/subagents/status.js';
 import { normalizeError } from '../utils/events.js';
 
-export function useSubAgents({ apiJson, active, notify, running, parentSessionId }) {
+export function useSubAgents({ apiJson, notify, running, parentSessionId }) {
   const [pool, setPool] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -67,10 +67,10 @@ export function useSubAgents({ apiJson, active, notify, running, parentSessionId
     requestRef.current.id += 1;
     requestRef.current.request = null;
     setPool(null);
-    if (active || running) {
+    if (running) {
       loadSubAgents();
     }
-  }, [active, loadSubAgents, parentSessionId, running]);
+  }, [loadSubAgents, parentSessionId, running]);
 
   const hasLiveSubAgents = useMemo(() => {
     const agents = Array.isArray(pool?.subagents) ? pool.subagents : [];
@@ -78,21 +78,18 @@ export function useSubAgents({ apiJson, active, notify, running, parentSessionId
   }, [pool]);
 
   useEffect(() => {
-    if (active) {
-      loadSubAgents();
-    } else if (running) {
+    if (running) {
       loadSubAgents({ silent: true });
     }
-  }, [active, loadSubAgents, running]);
+  }, [loadSubAgents, running]);
 
   useEffect(() => {
-    if (!active && !running) return undefined;
     if (!running && !hasLiveSubAgents) return undefined;
     const timer = window.setInterval(() => {
       loadSubAgents({ silent: true });
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [active, hasLiveSubAgents, loadSubAgents, running]);
+  }, [hasLiveSubAgents, loadSubAgents, running]);
 
   return {
     subAgentPool: pool,

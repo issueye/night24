@@ -1,4 +1,4 @@
-import { messageText } from './format.js';
+import { messageText, messageToolBlocks } from './format.js';
 
 function updateFirstTextBlock(content, updateText) {
   let updated = false;
@@ -30,8 +30,23 @@ export function withMessageText(message, text) {
   return { ...message, content: nextContent };
 }
 
-export function mergeVisibleMessagesById(items, incomingMessages, isVisibleMessage) {
-  const next = [...items];
+function isSyntheticToolActivityMessage(message) {
+  if (String(message?.id || '').startsWith('tool-activity-')) return true;
+  return messageToolBlocks(message).some((block) => block?.type === 'tool_activity');
+}
+
+function hasCanonicalToolBlocks(messages) {
+  return messages.some((message) => (
+    messageToolBlocks(message).some((block) => block?.type === 'tool_request' || block?.type === 'tool_response')
+  ));
+}
+
+export function mergeVisibleMessagesById(items, incomingMessages, isVisibleMessage, options = {}) {
+  const incomingVisible = incomingMessages.filter((message) => message?.role && isVisibleMessage(message));
+  const shouldPruneSyntheticTools = options.pruneSyntheticToolActivity && hasCanonicalToolBlocks(incomingVisible);
+  const next = shouldPruneSyntheticTools
+    ? items.filter((message) => !isSyntheticToolActivityMessage(message))
+    : [...items];
   const indexById = new Map();
   next.forEach((item, index) => {
     if (item?.id && !indexById.has(item.id)) {
@@ -39,8 +54,7 @@ export function mergeVisibleMessagesById(items, incomingMessages, isVisibleMessa
     }
   });
 
-  incomingMessages.forEach((message) => {
-    if (!message?.role || !isVisibleMessage(message)) return;
+  incomingVisible.forEach((message) => {
     if (message.id && indexById.has(message.id)) {
       next[indexById.get(message.id)] = message;
       return;

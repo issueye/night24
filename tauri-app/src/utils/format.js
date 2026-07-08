@@ -20,7 +20,7 @@ export function messageText(message) {
       .map((block) => {
         if (block?.type === 'text') return block.text || '';
         if (block?.type === 'thinking') return block.text || '';
-        if (block?.type === 'tool_request' || block?.type === 'tool_response') return '';
+        if (block?.type === 'tool_request' || block?.type === 'tool_response' || block?.type === 'tool_activity') return '';
         return safeText(block);
       })
       .filter(Boolean)
@@ -31,7 +31,11 @@ export function messageText(message) {
 
 export function messageToolBlocks(message) {
   if (!message || !Array.isArray(message.content)) return [];
-  return message.content.filter((block) => block?.type === 'tool_request' || block?.type === 'tool_response');
+  return message.content.filter((block) => (
+    block?.type === 'tool_request' ||
+    block?.type === 'tool_response' ||
+    block?.type === 'tool_activity'
+  ));
 }
 
 export function isVisibleChatMessage(message) {

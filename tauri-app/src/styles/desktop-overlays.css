@@ -27,7 +27,7 @@
   grid-template-rows: 42px 38px minmax(0, 1fr);
   background: var(--overlay-bg);
   border-color: var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   box-shadow: var(--shadow-md);
 }
 

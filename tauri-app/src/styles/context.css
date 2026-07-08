@@ -14,7 +14,7 @@
   overflow: hidden;
   background: var(--overlay-bg);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xs);
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(10px);
 }

@@ -214,6 +214,10 @@
   border-radius: var(--radius-sm);
 }
 
+.parent-session-row {
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+}
+
 .project-session-row::before {
   content: "";
   position: absolute;
@@ -240,6 +244,7 @@
 }
 
 .subagent-session-row {
+  grid-template-columns: minmax(0, 1fr) 24px;
   min-height: 28px;
   color: var(--subtle);
 }
@@ -269,6 +274,25 @@
   color: inherit;
 }
 
+.session-children-toggle,
+.session-children-spacer {
+  width: 20px;
+  height: 24px;
+  align-self: center;
+  justify-self: center;
+}
+
+.session-children-toggle {
+  color: var(--subtle);
+  background: transparent;
+  border-color: transparent;
+}
+
+.session-children-toggle:hover {
+  color: var(--text);
+  background: var(--surface-tint);
+}
+
 .project-session-main small,
 .session-running-icon,
 .session-delete {
@@ -281,6 +305,18 @@
 
 .session-running-icon {
   animation: spin 900ms linear infinite;
+}
+
+.subagent-session-status.completed {
+  color: var(--green);
+}
+
+.subagent-session-status.failed {
+  color: var(--red);
+}
+
+.subagent-session-status.cancelled {
+  color: var(--amber);
 }
 
 .session-delete {

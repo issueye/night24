@@ -21,7 +21,6 @@ export function useWorkspaceState({
   const [workspace, setWorkspace] = useState(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState(() => readJsonSetting(STORAGE_KEYS.recentWorkspaces, []));
-  const [contextOpen, setContextOpen] = useState(false);
   const loadWorkspaceRequestRef = useRef(0);
   const openWorkspaceRequestRef = useRef(0);
 
@@ -115,18 +114,11 @@ export function useWorkspaceState({
     }
   }
 
-  function openContextTab() {
-    setContextOpen(true);
-  }
-
   return {
     workspace,
     workspaceLoading,
     recentWorkspaces,
-    contextOpen,
-    setContextOpen,
     loadWorkspace,
     openWorkspace,
-    openContextTab,
   };
 }

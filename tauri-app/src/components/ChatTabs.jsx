@@ -1,4 +1,4 @@
-import { Bot, Circle, Loader2, MessageSquarePlus, X } from 'lucide-react';
+import { Circle, Loader2, MessageSquarePlus, X } from 'lucide-react';
 import { classNames } from '../utils/format.js';
 import { IconButton, Tab, Tabs } from './ui/index.js';
 
@@ -15,11 +15,9 @@ export function ChatTabs({
   activeSessionId,
   runningSessionIds,
   serverDetail,
-  agentsActive,
   onSelectSession,
   onCloseSession,
   onNewSession,
-  onToggleAgents,
 }) {
   return (
     <Tabs
@@ -33,14 +31,6 @@ export function ChatTabs({
             <Circle size={8} fill="currentColor" />
             <span>{serverDetail}</span>
           </div>
-          <IconButton
-            className={classNames('icon-button compact', agentsActive && 'active')}
-            label="子代理浮窗"
-            onClick={onToggleAgents}
-            size="sm"
-          >
-            <Bot size={14} />
-          </IconButton>
         </div>
       )}
     >

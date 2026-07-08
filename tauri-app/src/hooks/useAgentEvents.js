@@ -27,7 +27,6 @@ export function useAgentEvents({
   currentSessionIdRef,
   markRunEvent,
   finishRun,
-  openContextTab,
   onSubAgentTool,
   onSubAgentSession,
   showError,
@@ -72,6 +71,62 @@ export function useAgentEvents({
     };
     window.setTimeout(step, 16);
   }, [addOrReplaceSessionMessage, setSessionMessages]);
+
+  const upsertToolActivityMessage = useCallback((sessionId, eventPayload, update) => {
+    if (!sessionId) return;
+    const toolCallId =
+      eventPayload?.tool_call_id ||
+      eventPayload?.call_id ||
+      eventPayload?.id ||
+      `${eventPayload?.tool_name || 'tool'}-${Date.now()}`;
+    const toolName = eventPayload?.tool_name || eventPayload?.name || '工具';
+    const messageId = `tool-activity-${toolCallId}`;
+
+    setSessionMessages(sessionId, (items) => {
+      let found = false;
+      const next = items.map((item) => {
+        if (item.id !== messageId) return item;
+        found = true;
+        const content = Array.isArray(item.content) ? item.content : [];
+        const existing = content.find((block) => block?.type === 'tool_activity') || {};
+        const activity = {
+          ...existing,
+          type: 'tool_activity',
+          id: toolCallId,
+          tool_call_id: toolCallId,
+          name: existing.name || toolName,
+          tool_name: existing.tool_name || toolName,
+          ...update(existing),
+        };
+        return {
+          ...item,
+          content: [activity],
+          tone: activity.is_error ? 'error' : item.tone,
+          updated_at: new Date().toISOString(),
+        };
+      });
+
+      if (found) return next;
+      const activity = {
+        type: 'tool_activity',
+        id: toolCallId,
+        tool_call_id: toolCallId,
+        name: toolName,
+        tool_name: toolName,
+        ...update({}),
+      };
+      return [
+        ...next,
+        {
+          id: messageId,
+          role: 'tool',
+          content: [activity],
+          tone: activity.is_error ? 'error' : undefined,
+          created_at: new Date().toISOString(),
+        },
+      ];
+    });
+  }, [setSessionMessages]);
 
   const handleAgentEvent = useCallback((eventName, payload, eventContext = {}) => {
     const {
@@ -166,6 +221,11 @@ export function useAgentEvents({
     if (eventType === 'tool_started') {
       const timeline = normalizeToolStartedEvent(eventPayload);
       addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
+      upsertToolActivityMessage(sessionId, eventPayload, () => ({
+        status: 'running',
+        arguments: eventPayload?.arguments ?? eventPayload?.params ?? eventPayload?.input ?? {},
+        summary: eventPayload?.summary,
+      }));
       if (eventPayload?.tool_name === 'developer__subagent_spawn') {
         onSubAgentTool?.({ phase: 'started', payload: eventPayload, runId, sessionId });
       }
@@ -175,6 +235,13 @@ export function useAgentEvents({
     if (eventType === 'tool_finished') {
       const timeline = normalizeToolFinishedEvent(eventPayload);
       addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
+      upsertToolActivityMessage(sessionId, eventPayload, (existing) => ({
+        status: eventPayload?.is_error ? 'failed' : 'completed',
+        arguments: existing.arguments ?? eventPayload?.arguments ?? eventPayload?.params ?? eventPayload?.input ?? {},
+        content: eventPayload?.content ?? eventPayload?.result ?? eventPayload?.output ?? eventPayload?.result_preview ?? timeline.detail,
+        is_error: Boolean(eventPayload?.is_error),
+        summary: eventPayload?.summary,
+      }));
       if (eventPayload?.tool_name === 'developer__subagent_spawn') {
         onSubAgentTool?.({ phase: 'finished', payload: eventPayload, runId, sessionId });
       }
@@ -184,23 +251,12 @@ export function useAgentEvents({
     if (eventType === 'tool_failed') {
       const tool = normalizeToolFailedEvent(eventPayload);
       addSessionTimeline(sessionId, eventType, tool.title, tool.detail, tool.tone);
-      setSessionMessages(sessionId, (items) => [
-        ...items,
-        {
-          id: `tool-error-${eventPayload?.tool_call_id || Date.now()}-${Math.random().toString(16).slice(2)}`,
-          role: 'tool',
-          content: [{
-            type: 'tool_response',
-            id: eventPayload?.tool_call_id || `${runId || 'run'}-tool-error`,
-            name: tool.toolName,
-            tool_name: tool.toolName,
-            content: tool.detail,
-            is_error: true,
-          }],
-          tone: 'error',
-          created_at: envelope?.created_at || new Date().toISOString(),
-        },
-      ]);
+      upsertToolActivityMessage(sessionId, eventPayload, (existing) => ({
+        status: 'failed',
+        arguments: existing.arguments ?? eventPayload?.arguments ?? eventPayload?.params ?? eventPayload?.input ?? {},
+        content: tool.detail,
+        is_error: true,
+      }));
       return;
     }
 
@@ -212,9 +268,6 @@ export function useAgentEvents({
 
     if (eventType === 'diff_ready') {
       const timeline = normalizeDiffReadyEvent(eventPayload);
-      if (isCurrentSession) {
-        openContextTab('diff');
-      }
       addSessionTimeline(sessionId, eventType, timeline.title, timeline.detail, timeline.tone);
       return;
     }
@@ -236,7 +289,12 @@ export function useAgentEvents({
       const finish = normalizeFinishEvent(eventPayload);
       const finishMessages = finish.messages;
       if (finishMessages.length) {
-        setSessionMessages(sessionId, (items) => mergeVisibleMessagesById(items, finishMessages, isVisibleChatMessage));
+        setSessionMessages(sessionId, (items) => mergeVisibleMessagesById(
+          items,
+          finishMessages,
+          isVisibleChatMessage,
+          { pruneSyntheticToolActivity: true },
+        ));
       }
       const finishStatus = finish.status;
       if (runId) {
@@ -274,11 +332,11 @@ export function useAgentEvents({
     markRunTerminal,
     onSubAgentSession,
     onSubAgentTool,
-    openContextTab,
     setSessionMessages,
     setSessionPermissions,
     setSessionRunCheckpoint,
     showError,
+    upsertToolActivityMessage,
   ]);
 
   return { handleAgentEvent };

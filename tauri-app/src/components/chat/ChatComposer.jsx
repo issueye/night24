@@ -1,8 +1,10 @@
 import { Play, Square } from 'lucide-react';
 import { providerDisplayName } from '../../utils/settings.js';
+import { classNames } from '../../utils/format.js';
 import { Button, ChatInput, IconButton, Popover, ProgressRing, Select } from '../ui/index.js';
 
 export function ChatComposer({
+  className,
   taskText,
   isRunning,
   canSend,
@@ -35,7 +37,7 @@ export function ChatComposer({
   ];
 
   return (
-    <div className="composer">
+    <div className={classNames('composer', className)}>
       <ChatInput
         value={taskText}
         onChange={onTaskTextChange}

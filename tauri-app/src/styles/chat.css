@@ -329,7 +329,7 @@
 
 .conversation-bottom-activity > .run-status-row {
   max-width: none;
-  padding: 0 2px 0 40px;
+  padding: 0 2px 0 2px;
   cursor: default;
 }
 

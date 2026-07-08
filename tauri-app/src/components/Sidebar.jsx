@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { classNames, formatRelativeShort } from '../utils/format.js';
 import { sameWorkspacePath } from '../utils/settings.js';
+import { subAgentStatusMeta } from './subagents/status.js';
 import { Button, IconButton } from './ui/index.js';
 
 function isSubAgentSession(session) {
@@ -27,6 +28,7 @@ export function Sidebar({
   sessionActionId,
   runsById,
   activeRunBySession,
+  subAgentPool,
   currentSessionId,
   settingsOpen,
   onOpenWorkspace,
@@ -37,6 +39,7 @@ export function Sidebar({
 }) {
   const [projectOrder, setProjectOrder] = useState([]);
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
+  const [expandedSessions, setExpandedSessions] = useState(() => new Set());
 
   const projectByPath = useMemo(() => {
     const byPath = new Map();
@@ -104,11 +107,51 @@ export function Sidebar({
     return grouped;
   }, [sessions]);
 
+  const subAgentStatusBySession = useMemo(() => {
+    const bySession = new Map();
+    const agents = Array.isArray(subAgentPool?.subagents) ? subAgentPool.subagents : [];
+    for (const agent of agents) {
+      const id = agent?.session_id || agent?.id || agent?.subagent_id;
+      if (id) bySession.set(id, agent);
+    }
+    return bySession;
+  }, [subAgentPool]);
+
+  useEffect(() => {
+    setExpandedSessions((items) => {
+      let changed = false;
+      const next = new Set(items);
+      for (const [parentId, children] of subAgentSessionsByParent.entries()) {
+        const hasActiveChild = children.some((child) => child.id === currentSessionId);
+        const hasRunningChild = children.some((child) => {
+          const runId = activeRunBySession?.[child.id];
+          const status = subAgentStatusBySession.get(child.id)?.status;
+          return Boolean(runId) || status === 'queued' || status === 'running';
+        });
+        if ((hasActiveChild || hasRunningChild) && !next.has(parentId)) {
+          next.add(parentId);
+          changed = true;
+        }
+      }
+      return changed ? next : items;
+    });
+  }, [activeRunBySession, currentSessionId, subAgentSessionsByParent, subAgentStatusBySession]);
+
   function toggleProject(path) {
     setExpandedProjects((items) => {
       const next = new Set(items);
       if (next.has(path)) next.delete(path);
       else next.add(path);
+      return next;
+    });
+  }
+
+  function toggleSessionChildren(sessionId, event) {
+    event.stopPropagation();
+    setExpandedSessions((items) => {
+      const next = new Set(items);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
       return next;
     });
   }
@@ -177,15 +220,30 @@ export function Sidebar({
                         const runState = runId ? runsById?.[runId] : null;
                         const isSessionRunning = Boolean(runState);
                         const childSessions = subAgentSessionsByParent.get(session.id) || [];
+                        const hasChildSessions = childSessions.length > 0;
+                        const childrenExpanded = expandedSessions.has(session.id);
                         return (
                           <div className="project-session-branch" key={session.id}>
                             <div
                               className={classNames(
                                 'project-session-row',
+                                'parent-session-row',
                                 session.id === currentSessionId && 'active',
                                 isSessionRunning && 'running',
                               )}
                             >
+                              {hasChildSessions ? (
+                                <IconButton
+                                  className="session-children-toggle"
+                                  label={childrenExpanded ? '收起子代理会话' : '展开子代理会话'}
+                                  onClick={(event) => toggleSessionChildren(session.id, event)}
+                                  size="sm"
+                                >
+                                  {childrenExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                </IconButton>
+                              ) : (
+                                <span className="session-children-spacer" />
+                              )}
                               <Button
                                 disabled={sessionActionId === session.id}
                                 className="project-session-main"
@@ -210,12 +268,15 @@ export function Sidebar({
                                 <Trash2 size={13} />
                               </IconButton>
                             </div>
-                            {childSessions.length > 0 && (
+                            {hasChildSessions && childrenExpanded && (
                               <div className="subagent-session-list">
                                 {childSessions.map((child) => {
                                   const childRunId = activeRunBySession?.[child.id];
                                   const childRunState = childRunId ? runsById?.[childRunId] : null;
-                                  const isChildRunning = Boolean(childRunState);
+                                  const poolAgent = subAgentStatusBySession.get(child.id);
+                                  const childStatus = childRunState ? 'running' : poolAgent?.status;
+                                  const childStatusMeta = subAgentStatusMeta(childStatus);
+                                  const isChildRunning = Boolean(childRunState) || childStatus === 'queued' || childStatus === 'running';
                                   return (
                                     <div
                                       className={classNames(
@@ -237,6 +298,8 @@ export function Sidebar({
                                         <span className="session-title">{child.name || child.id}</span>
                                         {isChildRunning ? (
                                           <Loader2 className="session-running-icon" size={13} />
+                                        ) : childStatus ? (
+                                          <small className={classNames('subagent-session-status', childStatusMeta.tone)}>{childStatusMeta.label}</small>
                                         ) : (
                                           <small>{formatRelativeShort(child.updated_at)}</small>
                                         )}

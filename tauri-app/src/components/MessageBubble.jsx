@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { messageText, messageToolBlocks, classNames } from '../utils/format.js';
+import { mergeToolBlocks } from './ConversationActivity.jsx';
 import { AiToolCall, Avatar, IconButton, Markdown } from './ui/index.js';
 
 function compactMessagePreview(text, toolBlocks) {
@@ -17,7 +18,7 @@ function compactMessagePreview(text, toolBlocks) {
 export function MessageBubble({ message }) {
   const role = String(message.role || 'assistant').toLowerCase();
   const text = messageText(message);
-  const toolBlocks = messageToolBlocks(message);
+  const toolBlocks = mergeToolBlocks(messageToolBlocks(message));
   const canCollapse = role !== 'user';
   const [collapsed, setCollapsed] = useState(false);
   const preview = useMemo(() => compactMessagePreview(text, toolBlocks), [text, toolBlocks]);
