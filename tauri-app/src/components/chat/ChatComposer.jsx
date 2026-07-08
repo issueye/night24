@@ -49,7 +49,6 @@ export function ChatComposer({
         <Select
           className="composer-model"
           disabled={isRunning}
-          label="模型"
           menuClassName="composer-select-menu"
           onChange={onProviderProfileChange}
           options={providerOptions}

@@ -7,7 +7,7 @@
   gap: 10px;
   min-height: 100%;
   padding: 26px 0 32px;
-  border-right: 1px solid var(--line);
+  /* border-right: 1px solid var(--line); */
 }
 
 .timeline-rail {

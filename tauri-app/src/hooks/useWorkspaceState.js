@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 import { normalizeError } from '../utils/events.js';
 import {
   STORAGE_KEYS,

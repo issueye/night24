@@ -42,6 +42,7 @@
 .chat-tab-shell {
   display: flex;
   align-items: center;
+  margin: 4px 2px;
   max-width: 200px;
   min-width: 0;
   border-radius: var(--radius-sm);
@@ -163,14 +164,3 @@
   max-width: 220px;
 }
 
-/* 空状态占位 */
-.center-panel.chat-empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.chat-empty-hint {
-  color: var(--text-muted);
-  font-size: var(--fs-base);
-}

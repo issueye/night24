@@ -2,7 +2,8 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 
 const DESKTOP_USER_AGENT: &str = "red_panda Desktop/0.1.0";
 
@@ -140,13 +141,21 @@ async fn get_session_history(
 }
 
 #[tauri::command]
-fn select_directory() -> Result<Option<String>, String> {
-    let folder = tauri::api::dialog::blocking::FileDialogBuilder::new().pick_folder();
-    Ok(folder.map(|path| path.to_string_lossy().to_string()))
+async fn select_directory(app: AppHandle) -> Result<Option<String>, String> {
+    app.dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|path| {
+            path.into_path()
+                .map(|path| path.to_string_lossy().to_string())
+                .map_err(|error| error.to_string())
+        })
+        .transpose()
 }
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             base_url: "http://localhost:17787".to_string(),
             client: Client::builder()

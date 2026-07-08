@@ -6,6 +6,7 @@ import { ChatPanel } from './components/ChatPanel.jsx';
 import { ChatTabs } from './components/ChatTabs.jsx';
 import { ContextPanel } from './components/ContextPanel.jsx';
 import { TimelinePanel } from './components/TimelinePanel.jsx';
+import { EmptyChatLauncher } from './components/chat/EmptyChatLauncher.jsx';
 import { useApiClient } from './hooks/useApiClient.js';
 import { useProviderSettings } from './hooks/useProviderSettings.js';
 import { useRunControls } from './hooks/useRunControls.js';
@@ -845,7 +846,20 @@ export default function App() {
             />
           ) : (
             <div className="center-panel chat-empty-state">
-              <div className="chat-empty-hint">选择左侧会话或点击「新建会话」开始对话</div>
+              <EmptyChatLauncher
+                taskText={currentContext.draftText}
+                canSend={canSend}
+                workspace={workspace}
+                workspaceLoading={workspaceLoading}
+                providerProfiles={providerProfiles}
+                providerProfileId={providerProfileId}
+                accessMode={accessMode}
+                onTaskTextChange={(value) => setSessionDraft(currentContextId, value)}
+                onProviderProfileChange={selectProviderProfile}
+                onAccessModeChange={setAccessMode}
+                onOpenWorkspace={() => openWorkspace()}
+                onSendTask={sendTask}
+              />
             </div>
           )}
         </div>
